@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from simdev.gates.base import GateResult
@@ -10,6 +11,30 @@ from simdev.run.status import StageStatus, should_skip, write_status
 from simdev.stages.common import load_spec, require_stage
 
 STAGE = "mesh"
+
+
+def restore_zero_dir(run_dir: Path, n_ranks: int) -> None:
+    """Re-seed processor*/0 from the rendered fields, after snappy.
+
+    decomposePar has to run before snappyHexMesh, so the fields it writes
+    describe the *background* mesh. They carry no patchField for the surfaces
+    snappy is about to create, and their processor-boundary entries name a
+    decomposition snappy then rebalances away. simpleFoam reads them and
+    aborts with "Cannot find patchField entry for body".
+
+    OpenFOAM's own parallel tutorials fix this with `restore0Dir -processor`
+    after meshing. Same idea without the shell dependency: every rendered
+    field is uniform, so each processor can take the case-level file verbatim
+    and let OpenFOAM match patches by name and synthesise the
+    processor-boundary entries from the mesh it actually has.
+    """
+    source = run_dir / "0"
+    for rank in range(n_ranks):
+        target = run_dir / f"processor{rank}" / "0"
+        target.mkdir(parents=True, exist_ok=True)
+        for field in sorted(source.iterdir()):
+            if field.is_file():
+                shutil.copy2(field, target / field.name)
 
 
 def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> GateResult:
@@ -32,6 +57,8 @@ def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> Ga
     snappy = runner.run_parallel(
         ["snappyHexMesh", "-overwrite"], spec.solve.n_ranks, name="snappyHexMesh"
     )
+    restore_zero_dir(run_dir, spec.solve.n_ranks)
+
     check = runner.run_parallel(["checkMesh"], spec.solve.n_ranks, name="checkMesh")
 
     layers = parse_layer_summary(snappy.log_path.read_text(encoding="utf-8"))

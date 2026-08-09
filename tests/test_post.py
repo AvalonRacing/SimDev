@@ -110,3 +110,25 @@ def test_post_status_is_recorded(run_dir: Path) -> None:
     _mark_solve(run_dir, "ok")
     post(run_dir)
     assert read_status(run_dir, "post").state == "ok"
+
+
+def test_post_writes_the_residual_plot(run_dir: Path) -> None:
+    """postProcessing subdirectories carry the function object's *name*.
+
+    controlDict registers the solverInfo function object as 'residuals', so
+    the data lands in postProcessing/residuals/<time>/solverInfo.dat. Globbing
+    the type instead found nothing, and the tolerant FileNotFoundError guard
+    turned that into a silently missing plot.
+    """
+    out = run_dir / "postProcessing" / "residuals" / "0"
+    out.mkdir(parents=True, exist_ok=True)
+    out.joinpath("solverInfo.dat").write_text(
+        "# Time\tUx_initial\tp_initial\n"
+        "1\t1.0e-02\t2.0e-02\n"
+        "2\t1.0e-03\t2.0e-03\n"
+        "3\t1.0e-04\t2.0e-04\n",
+        encoding="utf-8",
+    )
+    _mark_solve(run_dir, "ok")
+    post(run_dir)
+    assert (run_dir / "results" / "residuals.png").exists()

@@ -143,3 +143,16 @@ def test_field_files_exist_for_every_field(tmp_path: Path) -> None:
     out = _render(tmp_path)
     for field in ("U", "p", "k", "omega", "nut"):
         assert (out / "0" / field).exists()
+
+
+def test_fields_include_constraint_types_for_parallel_runs(tmp_path: Path) -> None:
+    """procBoundary* patches exist only in the decomposed mesh.
+
+    No case-level field file can enumerate them, so without the constraint
+    types include every parallel simpleFoam aborts with "Cannot find
+    patchField entry for procBoundary0to1".
+    """
+    case = _render(tmp_path)
+    for field in ("U", "p", "k", "omega", "nut"):
+        text = (case / "0" / field).read_text()
+        assert '#includeEtc "caseDicts/setConstraintTypes"' in text, field

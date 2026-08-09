@@ -8,6 +8,13 @@ internalField   {{ internal_field }};
 
 boundaryField
 {
+    // Default types for OpenFOAM's constraint patches. Required for parallel
+    // runs: decomposePar splits the domain along procBoundary* patches that
+    // exist only in the decomposed mesh, so no case-level field file can
+    // name them, and simpleFoam aborts with "Cannot find patchField entry
+    // for procBoundary0to1" without this. Explicit entries below override it.
+    #includeEtc "caseDicts/setConstraintTypes"
+
 {% for bc in bcs %}
     {{ bc.patch }}
     {

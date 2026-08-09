@@ -45,7 +45,11 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
     results_dir = run_dir / "results"
     plot_force_history(forces, results_dir / "forces.png", convergence.window)
     try:
-        residuals = read_force_coeffs(find_latest(run_dir, "solverInfo/*/solverInfo.dat"))
+        # postProcessing/ subdirectories are named after the *function object*
+        # (controlDict calls it 'residuals'), not after its type - the file
+        # inside is what is named solverInfo.dat. Globbing the type silently
+        # found nothing and the residual plot was never written.
+        residuals = read_force_coeffs(find_latest(run_dir, "residuals/*/solverInfo.dat"))
         plot_residuals(residuals, results_dir / "residuals.png")
     except FileNotFoundError:
         pass

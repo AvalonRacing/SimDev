@@ -202,3 +202,22 @@ def test_solve_records_non_converged_without_raising(run_dir: Path) -> None:
     assert status.state == "gate_failed"
     # Means are still reported so the run is recorded, not lost.
     assert "Cd" in result.means
+
+
+def test_mesh_reseeds_processor_zero_dirs_after_snappy(run_dir: Path) -> None:
+    """decomposePar runs before snappy, so processor*/0 predates the surfaces.
+
+    Left alone, those fields have no patchField for the patches snappy
+    creates and simpleFoam aborts reading them. The stage must overwrite
+    them from the rendered 0/ once the mesh exists.
+    """
+    (run_dir / "0").mkdir(parents=True, exist_ok=True)
+    (run_dir / "0" / "p").write_text("rendered p with body entry", encoding="utf-8")
+
+    stale = run_dir / "processor0" / "0"
+    stale.mkdir(parents=True, exist_ok=True)
+    (stale / "p").write_text("decomposed before snappy, no body", encoding="utf-8")
+
+    mesh(run_dir, runner=RecordingRunner(run_dir, _mesh_logs()))
+
+    assert (stale / "p").read_text(encoding="utf-8") == "rendered p with body entry"
