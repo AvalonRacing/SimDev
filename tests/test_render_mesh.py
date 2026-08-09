@@ -11,6 +11,7 @@ from simdev.render.context import (
     WALL_FUNCTIONS,
     build_context,
     inlet_turbulence,
+    layer_patches,
     location_in_mesh,
     refinement_boxes,
 )
@@ -201,3 +202,37 @@ def test_no_regions_renders_an_empty_block(tmp_path: Path) -> None:
     text = (_render(tmp_path) / "system" / "snappyHexMeshDict").read_text()
     assert "searchableBox" not in text
     assert "refinementRegions" in text
+
+
+def test_patch_layer_override_only_ever_reduces(tmp_path: Path) -> None:
+    """A per-patch n_layers caps the stack; it cannot exceed what fits."""
+    case = deep_merge(BASE, {})
+    case["geometry"]["patches"] = [
+        {"name": "body", "role": "body", "n_layers": 2},
+        {"name": "ground", "role": "ground", "n_layers": 999},
+        {"name": "symmetry", "role": "symmetry"},
+        {"name": "inlet", "role": "inlet"},
+        {"name": "outlet", "role": "outlet"},
+        {"name": "farfield", "role": "farfield"},
+    ]
+    spec = resolve(case, profile="dev")
+    domain = BoxDomainBuilder().build(spec, BOUNDS)
+    by_name = {p["name"]: p["n_layers"] for p in layer_patches(spec, domain)}
+
+    body = next(p for p in spec.geometry.patches if p.name == "body")
+    assert by_name["body"] == 2
+    assert by_name["ground"] == spec.n_layers_in_cell(spec.mesh.base_cell_size)
+    assert by_name["ground"] < 999
+    assert by_name["body"] < spec.n_layers_for(body)
+
+
+def test_every_wall_patch_gets_layers(tmp_path: Path) -> None:
+    """Layers follow is_wall, not refinement level.
+
+    The ground is a blockMesh patch with a wall function on it; skipping it
+    left its first cell 60 mm off the floor and y+ around 2000.
+    """
+    text = (_render(tmp_path) / "system" / "snappyHexMeshDict").read_text()
+    layers_block = text.split("layers\n    {")[1].split("}\n\n")[0]
+    assert "ground" in layers_block
+    assert "body" in layers_block

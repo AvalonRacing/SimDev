@@ -56,7 +56,7 @@ def test_parse_layer_summary_reads_every_patch() -> None:
 def test_parse_layer_summary_captures_a_collapsed_stack() -> None:
     layers = parse_layer_summary(_log("snappy_layers.log"))
     assert layers["stilts"].layers == pytest.approx(4.2)
-    assert layers["ground"].layers == pytest.approx(0.0)
+    assert layers["ground"].layers == pytest.approx(6.9)
 
 
 def test_parse_layer_summary_reads_the_v2412_six_column_table() -> None:

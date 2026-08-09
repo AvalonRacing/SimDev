@@ -7,7 +7,7 @@ patch      faces    layers   overall thickness
 -----      -----    ------   ---------  ---
 body       18345    17.9     0.000358   99.4
 stilts     2400     4.2      0.000084   23.3
-ground     22000    0        0          0
+ground     22000    6.9      0.000341   94.7
 
 Finished meshing in = 812.4 s.
 

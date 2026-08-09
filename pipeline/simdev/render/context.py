@@ -81,6 +81,49 @@ def refinement_boxes(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
     return boxes
 
 
+def ground_cell_size(spec: CaseSpec, domain: DomainBox) -> float:
+    """Background cell size at the ground plane.
+
+    The ground is a blockMesh patch, so it never appears in refinementSurfaces
+    and snappy never surface-refines it. Its cell is the background cell,
+    divided down only where a refinement region reaches the floor - which the
+    wake box does, since it starts at z_min. Sizing the ground's prism stack
+    against the coarser unrefined cell would ask for more layers than fit
+    under the wake.
+    """
+    level = 0
+    for region, box in zip(
+        spec.domain.refinement_regions, refinement_boxes(spec, domain)
+    ):
+        if box["min"][2] <= domain.z_min + 1e-12:
+            level = max(level, region.level)
+    return spec.mesh.base_cell_size / 2**level
+
+
+def layer_patches(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
+    """Every wall patch and the layers it can carry.
+
+    Layers follow is_wall, not refinement == 'high'. A wall patch gets a wall
+    function, and a wall function assumes its first cell centre sits in the
+    log layer - so a wall without layers is a wall whose turbulence model is
+    being evaluated somewhere it is not valid. The ground is the case in
+    point: it is a blockMesh patch, so it was skipped by the STL-driven layer
+    logic and ran with its first cell 60 mm off the floor.
+    """
+    patches: list[dict[str, Any]] = []
+    for patch in spec.geometry.patches:
+        if not traits(patch.role).is_wall:
+            continue
+        if traits(patch.role).refinement == "high":
+            n_layers = spec.n_layers_for(patch)
+        else:
+            n_layers = spec.n_layers_in_cell(ground_cell_size(spec, domain))
+        if patch.n_layers is not None:
+            n_layers = min(n_layers, patch.n_layers)
+        patches.append({"name": patch.name, "n_layers": n_layers})
+    return patches
+
+
 @dataclass(frozen=True)
 class Bc:
     patch: str
@@ -201,6 +244,7 @@ def build_context(
         "geometry_files": {n: Path(p).name for n, p in geometry_files.items()},
         "refined_patches": refined_patches,
         "refinement_boxes": refinement_boxes(spec, domain),
+        "layer_patches": layer_patches(spec, domain),
         "wall_patches": wall_patches,
         "force_patches": [
             p.name

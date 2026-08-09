@@ -7,10 +7,30 @@ from simdev.gates.base import GateResult
 from simdev.gates.mesh_quality import check_mesh_quality
 from simdev.run.parsers import parse_check_mesh, parse_layer_summary
 from simdev.run.runner import Runner, StageError
-from simdev.run.status import StageStatus, should_skip, write_status
+from simdev.geometry.roles import traits
+from simdev.run.status import StageStatus, read_status, should_skip, write_status
 from simdev.stages.common import load_spec, require_stage
 
 STAGE = "mesh"
+
+
+def _requested_layers(run_dir: Path, spec) -> dict[str, int]:
+    """What prepare actually asked snappy for, per patch.
+
+    Read back from the prepare record rather than recomputed: the ground's
+    layer count depends on the domain and its refinement regions, which this
+    stage does not build. Falls back to the patch-only calculation for run
+    directories prepared before this was recorded.
+    """
+    status = read_status(run_dir, "prepare")
+    recorded = (status.detail.get("requested_layers") if status else None) or {}
+    if recorded:
+        return {name: int(n) for name, n in recorded.items()}
+    return {
+        p.name: spec.n_layers_for(p)
+        for p in spec.geometry.patches
+        if traits(p.role).refinement == "high"
+    }
 
 
 def restore_zero_dir(run_dir: Path, n_ranks: int) -> None:
@@ -63,7 +83,7 @@ def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> Ga
 
     layers = parse_layer_summary(snappy.log_path.read_text(encoding="utf-8"))
     quality = parse_check_mesh(check.log_path.read_text(encoding="utf-8"))
-    gate = check_mesh_quality(quality, layers, spec)
+    gate = check_mesh_quality(quality, layers, spec, _requested_layers(run_dir, spec))
 
     write_status(
         run_dir,

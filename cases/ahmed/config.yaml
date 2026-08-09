@@ -86,7 +86,31 @@ geometry:
     # budget shrinks with the cell, so fewer layers are requested there and
     # snappy actually delivers them.
     - {name: stilts, role: body, refinement_min: 4, refinement_max: 5}
-    - {name: ground, role: ground}
+    # No prism layers on the floor, deliberately, and against instinct.
+    #
+    # The floor is a no-slip wall carrying a wall function, so it "should"
+    # have layers - without them its first cell centre sits 60 mm off the
+    # ground and the measured y+ is about 2000, far outside the 30-300 the
+    # wall function assumes. But snappy solves layer displacement for all
+    # layered surfaces together, and in the 50 mm ground clearance that
+    # coupling costs the body more than the floor gains. Measured on the dev
+    # profile:
+    #
+    #     ground layers   body coverage   ground coverage
+    #     off             4.22 / 5 (85%)  -
+    #     2               3.47 / 5 (69%)  0.63 / 2 (32%)
+    #     5               3.47 / 5 (69%)  2.71 / 5 (54%)
+    #
+    # Layering the floor degrades the surface the forces are integrated on
+    # and still fails to resolve the floor. Forces come from the body, so the
+    # body wins. The y+ gate records the floor's number as a warning rather
+    # than hiding it, so this stays a measured decision instead of an
+    # accident - see docs/validation-ahmed.md.
+    #
+    # This is specific to a stationary floor with a tight clearance. A moving
+    # ground has a far thinner boundary layer, and the RC car may well want
+    # layers here; the capability is in place, only this case declines it.
+    - {name: ground, role: ground, n_layers: 0}
     - {name: symmetry, role: symmetry}
     - {name: inlet, role: inlet}
     - {name: outlet, role: outlet}

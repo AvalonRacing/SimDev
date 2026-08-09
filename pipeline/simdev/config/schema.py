@@ -142,6 +142,9 @@ class PatchSpec(BaseModel):
     role: PatchRole
     refinement_min: int | None = None
     refinement_max: int | None = None
+    # Caps the prism stack on this patch. Still clamped by what fits the
+    # cell, so this only ever asks for fewer layers, never more.
+    n_layers: int | None = None
 
 
 class AhmedParams(BaseModel):
@@ -204,6 +207,10 @@ class CaseSpec(BaseModel):
 
     def layer_budget_for(self, patch: PatchSpec) -> float:
         return self.mesh.max_layer_cell_ratio * self.surface_cell_size_for(patch)
+
+    def n_layers_in_cell(self, cell_size: float) -> int:
+        """Layers that fit in a cell of the given size, never more than asked."""
+        return self._layers_within(self.mesh.max_layer_cell_ratio * cell_size)
 
     def n_layers_for(self, patch: PatchSpec) -> int:
         """Layers that fit against *this patch's* cell size.

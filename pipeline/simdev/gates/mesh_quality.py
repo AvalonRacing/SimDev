@@ -10,7 +10,14 @@ def check_mesh_quality(
     result: CheckMeshResult,
     layers: dict[str, LayerInfo],
     spec: CaseSpec,
+    requested_layers: dict[str, int] | None = None,
 ) -> GateResult:
+    """requested_layers is what snappy was actually asked for, per patch.
+
+    Passed in rather than recomputed because it depends on the domain (the
+    ground's cell size falls wherever a refinement region reaches the floor),
+    and the gate has no domain.
+    """
     reasons: list[str] = []
 
     if result.has_negative_volumes:
@@ -31,14 +38,21 @@ def check_mesh_quality(
     for check in result.failed_checks:
         reasons.append(f"checkMesh reported: {check}")
 
-    # Layer coverage, only on patches that asked for layers. The denominator
-    # is per patch and is what was actually asked of snappy (n_layers_for),
-    # not the raw request - otherwise a patch whose stack was clamped to fit
-    # its own cell reports a coverage shortfall it never had.
+    # Layer coverage on every wall patch, since every wall carries a wall
+    # function that assumes its first cell sits in the log layer. The
+    # denominator is per patch and is what was actually asked of snappy, not
+    # the raw request - otherwise a patch whose stack was clamped to fit its
+    # own cell reports a coverage shortfall it never had.
     for patch in spec.geometry.patches:
-        if traits(patch.role).refinement != "high":
+        if not traits(patch.role).is_wall:
             continue
-        requested = spec.n_layers_for(patch)
+        requested = (
+            requested_layers.get(patch.name, 0)
+            if requested_layers is not None
+            else spec.n_layers_for(patch)
+        )
+        if requested == 0:
+            continue
         info = layers.get(patch.name)
         if info is None:
             # Never 'continue'. A patch that asked for layers and has no row

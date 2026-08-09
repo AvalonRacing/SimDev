@@ -80,7 +80,7 @@ def _good_layers_log(n_layers: int) -> str:
         "                             [m]       [%]\n"
         "-----      -----    ------   ---------  ---\n"
         f"body       18345    {float(n_layers)}     0.000358   99.4\n"
-        "ground     22000    0        0          0\n"
+        f"ground     22000    {float(n_layers)}     0.000358   99.4\n"
         "\n"
     )
 

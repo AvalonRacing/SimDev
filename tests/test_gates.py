@@ -44,11 +44,17 @@ def _good_mesh() -> CheckMeshResult:
     )
 
 
-def _layers(body_layers: float) -> dict[str, LayerInfo]:
+def _layers(body_layers: float, ground_layers: float | None = None) -> dict[str, LayerInfo]:
+    ground = body_layers if ground_layers is None else ground_layers
     return {
         "body": LayerInfo("body", 18000, body_layers, 3.5e-4),
-        "ground": LayerInfo("ground", 22000, 0.0, 0.0),
+        "ground": LayerInfo("ground", 22000, ground, 3.5e-4),
     }
+
+
+def _requested(spec, n: int) -> dict[str, int]:
+    """Layers asked of snappy on every wall patch."""
+    return {"body": n, "ground": n}
 
 
 def _forces(n: int, drift: float = 0.0) -> pd.DataFrame:
@@ -64,7 +70,10 @@ def _forces(n: int, drift: float = 0.0) -> pd.DataFrame:
 
 def test_mesh_gate_passes_a_good_mesh() -> None:
     spec = _spec()
-    result = check_mesh_quality(_good_mesh(), _layers(spec.mesh.n_layers), spec)
+    n = spec.mesh.n_layers
+    result = check_mesh_quality(
+        _good_mesh(), _layers(n), spec, _requested(spec, n)
+    )
     assert result.passed is True
     assert result.reasons == []
 
@@ -72,7 +81,8 @@ def test_mesh_gate_passes_a_good_mesh() -> None:
 def test_mesh_gate_fails_on_negative_volumes() -> None:
     spec = _spec()
     bad = CheckMeshResult(1000, 60.0, 3.0, True, [])
-    result = check_mesh_quality(bad, _layers(spec.mesh.n_layers), spec)
+    n = spec.mesh.n_layers
+    result = check_mesh_quality(bad, _layers(n), spec, _requested(spec, n))
     assert result.passed is False
     assert any("negative" in r for r in result.reasons)
 
@@ -80,7 +90,8 @@ def test_mesh_gate_fails_on_negative_volumes() -> None:
 def test_mesh_gate_fails_on_excessive_non_orthogonality() -> None:
     spec = _spec()
     bad = CheckMeshResult(1000, 85.0, 3.0, False, [])
-    result = check_mesh_quality(bad, _layers(spec.mesh.n_layers), spec)
+    n = spec.mesh.n_layers
+    result = check_mesh_quality(bad, _layers(n), spec, _requested(spec, n))
     assert result.passed is False
     assert any("orthogonal" in r for r in result.reasons)
 
@@ -88,7 +99,9 @@ def test_mesh_gate_fails_on_excessive_non_orthogonality() -> None:
 def test_mesh_gate_fails_on_collapsed_layers() -> None:
     spec = _spec()
     # Requested n_layers, achieved a small fraction of them.
-    result = check_mesh_quality(_good_mesh(), _layers(1.0), spec)
+    result = check_mesh_quality(
+        _good_mesh(), _layers(1.0), spec, _requested(spec, spec.mesh.n_layers)
+    )
     assert result.passed is False
     assert any("layer" in r for r in result.reasons)
 
@@ -101,15 +114,36 @@ def test_mesh_gate_fails_when_the_layer_table_is_missing() -> None:
     no reasons while the stilts carried 25% of their layers.
     """
     spec = _spec()
-    result = check_mesh_quality(_good_mesh(), {}, spec)
+    result = check_mesh_quality(
+        _good_mesh(), {}, spec, _requested(spec, spec.mesh.n_layers)
+    )
     assert result.passed is False
     assert any("no layer data" in r for r in result.reasons)
 
 
-def test_mesh_gate_ignores_patches_that_requested_no_layers() -> None:
+def test_mesh_gate_judges_the_ground_too() -> None:
+    """The ground is a wall, so it carries a wall function and needs layers.
+
+    It used to be skipped because layers followed refinement == "high" and
+    the ground is a blockMesh patch, which is how it ended up running with
+    its first cell 60 mm off the floor and y+ around 2000.
+    """
     spec = _spec()
-    result = check_mesh_quality(_good_mesh(), _layers(spec.mesh.n_layers), spec)
-    assert "ground" not in " ".join(result.reasons)
+    n = spec.mesh.n_layers
+    result = check_mesh_quality(
+        _good_mesh(), _layers(n, ground_layers=0.0), spec, _requested(spec, n)
+    )
+    assert result.passed is False
+    assert any("ground" in r for r in result.reasons)
+
+
+def test_mesh_gate_skips_patches_that_asked_for_no_layers() -> None:
+    spec = _spec()
+    n = spec.mesh.n_layers
+    result = check_mesh_quality(
+        _good_mesh(), _layers(n, ground_layers=0.0), spec, {"body": n, "ground": 0}
+    )
+    assert result.passed is True
 
 
 def test_convergence_detects_a_plateau() -> None:

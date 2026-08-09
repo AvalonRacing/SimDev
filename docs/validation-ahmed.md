@@ -93,7 +93,39 @@ If it fails, diagnose in this order **before** touching the turbulence model:
    documented at the point of implementation and is the known geometric
    deviation from the reference body.
 
-## 3. What this validation would and would not establish
+## 3. Known limitation: the tunnel floor is not wall-resolved
+
+The floor carries a no-slip wall function, and its measured y⁺ is **≈ 1700**,
+far outside the 30–300 that wall function assumes. This is a deliberate
+choice, not an oversight, and the y⁺ gate records it as a warning on every
+run so it cannot quietly become one.
+
+Prism layers on the floor were tried and made things worse. snappyHexMesh
+solves layer displacement for all layered surfaces together, and in the 50 mm
+ground clearance that coupling constrains the body's own stack:
+
+| Floor layers | Body coverage | Floor coverage |
+|---|---|---|
+| off | **4.22 / 5 (85%)** | — |
+| 2 | 3.47 / 5 (69%) | 0.63 / 2 (32%) |
+| 5 | 3.47 / 5 (69%) | 2.71 / 5 (54%) |
+
+Layering the floor degrades the surface the forces are integrated on *and*
+still fails to resolve the floor. Since the reported coefficients come from
+the body, the body wins.
+
+What this costs: the floor boundary layer is unresolved, and at 40 m/s over
+roughly five body lengths of upstream floor it is order 70 mm thick — thicker
+than the 50 mm ground clearance, so the model sits inside it. That is
+physically what the stationary-floor experiment had too, which is why the
+comparison is still meaningful, but it means **the underbody flow is the least
+trustworthy part of this case**. If the study misses the target Cd, this
+belongs on the suspect list alongside slant resolution.
+
+Recording the experiment's own floor boundary layer thickness (§1, item 4) is
+what would let this be judged properly rather than argued about.
+
+## 4. What this validation would and would not establish
 
 Once run and passing, this establishes correctness of the pipeline's plumbing,
 numerics, domain construction, force integration and gates at the Ahmed
@@ -106,10 +138,10 @@ the RC car work will be tempted to lean on it:
 > require separate justification and, ideally, comparison against track or
 > tunnel data for the actual vehicle.
 
-## 4. What *is* established today
+## 5. What *is* established today
 
 Independent of the Ahmed runs, the following are covered by the unit suite
-(172 tests, no OpenFOAM required):
+(209 tests, no OpenFOAM required):
 
 - `a_ref` is halved for a half model and only there; the halving lives in one
   property and no other code divides by two.

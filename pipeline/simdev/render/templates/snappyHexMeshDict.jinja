@@ -90,7 +90,7 @@ addLayersControls
 
     layers
     {
-{% for patch in refined_patches %}
+{% for patch in layer_patches %}
         {{ patch.name }}
         {
             nSurfaceLayers {{ patch.n_layers }};

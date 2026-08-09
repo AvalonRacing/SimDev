@@ -12,24 +12,38 @@ def check_y_plus(df: pd.DataFrame, spec: CaseSpec) -> GateResult:
     force_patches = {
         p.name for p in spec.geometry.patches if traits(p.role).in_forces
     }
+    wall_patches = {p.name for p in spec.geometry.patches if traits(p.role).is_wall}
     lo, hi = spec.post.yplus_min, spec.post.yplus_max
     reasons: list[str] = []
+    warnings: list[str] = []
     detail: dict[str, float | str] = {}
 
     latest = df[df["Time"] == df["Time"].max()]
 
     for _, row in latest.iterrows():
         patch = str(row["patch"])
-        if patch not in force_patches:
+        if patch not in wall_patches:
             continue
         average = float(row["average"])
         detail[f"{patch}_avg_yplus"] = average
-        if not (lo <= average <= hi):
-            reasons.append(
-                f"average y+ on '{patch}' is {average:.1f}, outside the "
-                f"[{lo}, {hi}] band assumed by wall treatment "
-                f"'{spec.physics.wall_treatment.value}'; the wall model is "
-                "not valid there"
-            )
+        if lo <= average <= hi:
+            continue
 
-    return GateResult(passed=not reasons, reasons=reasons, detail=detail)
+        message = (
+            f"average y+ on '{patch}' is {average:.1f}, outside the "
+            f"[{lo}, {hi}] band assumed by wall treatment "
+            f"'{spec.physics.wall_treatment.value}'; the wall model is "
+            "not valid there"
+        )
+        # Only force-bearing surfaces fail the gate - they are where the
+        # reported numbers come from. Other walls still carry a wall function
+        # and are still worth knowing about, so they are recorded rather than
+        # dropped: an unresolved floor shapes the flow the body sits in.
+        if patch in force_patches:
+            reasons.append(message)
+        else:
+            warnings.append(message)
+
+    return GateResult(
+        passed=not reasons, reasons=reasons + warnings, detail=detail
+    )

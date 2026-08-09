@@ -14,6 +14,7 @@ from simdev.domain.base import DomainBox
 from simdev.domain.box import BoxDomainBuilder, check_blockage
 from simdev.geometry.ahmed import write_ahmed_stl
 from simdev.geometry.stl import check_geometry, projected_frontal_area, read_stl_info
+from simdev.render.context import layer_patches
 from simdev.render.render import render_case
 from simdev.run.status import StageStatus, should_skip, write_status
 
@@ -126,6 +127,12 @@ def prepare(
                 "layer_stack_thickness": spec.layer_stack_thickness(
                     spec.n_layers_effective
                 ),
+                # What snappy was actually asked for, per wall patch. The mesh
+                # gate needs this to judge coverage, and it cannot recompute
+                # the ground's share without the domain.
+                "requested_layers": {
+                    p["name"]: p["n_layers"] for p in layer_patches(spec, domain)
+                },
             },
         ),
     )
