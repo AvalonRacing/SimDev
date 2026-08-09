@@ -47,6 +47,13 @@ env/
 *.egg-info/
 .ipynb_checkpoints/
 
+# ---- Exemptions: pipeline source and test fixtures ----
+# The rules above target run output. These paths are source code and must
+# stay tracked: 'run/' would otherwise swallow the simdev.run package, and
+# '*.log' the captured OpenFOAM logs the parser tests are built on.
+!pipeline/simdev/run/
+!tests/fixtures/logs/*.log
+
 # ---- General / OS / editor ----
 .DS_Store
 Thumbs.db

@@ -1,0 +1,22 @@
+Mesh stats
+    points:           1234567
+    faces:            3456789
+    internal faces:   3344556
+    cells:            1122334
+    faces per cell:   6.05
+    boundary patches: 5
+
+Checking geometry...
+    Overall domain bounding box (-5.22 0 0) (11.484 3.132 3.132)
+    Mesh has 3 solution directions (1 1 1)
+    Max aspect ratio = 980.5 OK.
+    Min volume = -1.1e-14. Max volume = 5.6e-05.  Total volume = 123.4.
+ ***Zero or negative cell volume detected.  Minimum negative volume: -1.1e-14, Number of negative volume cells: 5
+    Mesh non-orthogonality Max: 82.51 average: 15.44
+ ***Number of severely non-orthogonal (> 70 degrees) faces: 1234.
+    Max skewness = 6.78 FAILED
+ ***Error in face pyramids: 12 faces are incorrectly oriented.
+
+Failed 3 mesh checks.
+
+End

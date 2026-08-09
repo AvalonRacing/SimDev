@@ -1,0 +1,25 @@
+Mesh stats
+    points:           1234567
+    faces:            3456789
+    internal faces:   3344556
+    cells:            1122334
+    faces per cell:   6.05
+    boundary patches: 5
+
+Checking geometry...
+    Overall domain bounding box (-5.22 0 0) (11.484 3.132 3.132)
+    Mesh has 3 solution directions (1 1 1)
+    Boundary openness (1.2e-16 -3.4e-17 5.6e-17) OK.
+    Max cell openness = 2.5e-16 OK.
+    Max aspect ratio = 12.34 OK.
+    Minimum face area = 1.2e-06. Maximum face area = 3.4e-03.  Face area magnitudes OK.
+    Min volume = 1.1e-09. Max volume = 5.6e-05.  Total volume = 123.4.  Cell volumes OK.
+    Mesh non-orthogonality Max: 64.23 average: 8.12
+    Non-orthogonality check OK.
+    Face pyramids OK.
+    Max skewness = 3.21 OK.
+    Coupled point location match (average 0) OK.
+
+Mesh OK.
+
+End
