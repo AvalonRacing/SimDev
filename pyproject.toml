@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simdev"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "jinja2>=3.1",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+    "trimesh>=4.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+simdev = "simdev.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "pipeline"}
+
+[tool.setuptools.packages.find]
+where = ["pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "openfoam: requires a working OpenFOAM installation",
+]
