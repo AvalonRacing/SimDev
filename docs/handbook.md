@@ -150,6 +150,13 @@ Residuals alone lie. So:
 - A run that hits `max_iterations` without plateauing **terminates and is
   recorded as `converged=False`, with its means still populated.** It never
   hangs, never silently passes, and never vanishes.
+- `residualControl` in `fvSolution` is set from `solve.residual_tol`, which
+  defaults to **1e-6 — a safety net, not the stopping criterion.** This is the
+  subtle half of the argument above: `simpleFoam` *stops* when
+  `residualControl` is met, so leaving it at the 1e-4 where a steady aero case
+  "looks converged" hands the stopping decision straight back to residuals.
+  It also makes the remedy in §8 a lie, because raising `max_iterations`
+  cannot help a run that is being stopped by something else.
 
 That last property matters more than it looks: a non-converged run still
 produced information, and throwing it away is how people end up re-running the

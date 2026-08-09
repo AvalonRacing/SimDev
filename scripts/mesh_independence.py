@@ -13,11 +13,33 @@ from simdev.cli import main as cli_main
 from simdev.config.resolve import deep_merge
 from simdev.report.results import aggregate
 
+# A grid study wants one thing changed at a constant ratio. These levels hold
+# the refinement depth fixed and vary only base_cell_size, giving surface
+# cells of 22.0, 15.75 and 11.25 mm - a constant 1.40 ratio, close to the
+# conventional sqrt(2) and the point at which Richardson extrapolation means
+# something.
+#
+# The previous ladder shrank the base *and* raised the levels, compounding to
+# 5 -> 1.56 -> 0.47 mm: a 3.2x jump per step, and fine enough that a 1 mm
+# first layer no longer fit in the cell at all.
+#
+# n_layers is pinned across all three. It is a request that gets clamped to
+# what fits, so leaving it free would give 6, 5 and 4 layers as the cells
+# shrink - changing the near-wall treatment between levels and confounding
+# the very thing the study measures. 4 is what the finest level supports.
 LEVELS: dict[str, dict[str, Any]] = {
-    "coarse": {"base_cell_size": 0.08, "refinement": (3, 4)},
-    "medium": {"base_cell_size": 0.05, "refinement": (4, 5)},
-    "fine": {"base_cell_size": 0.03, "refinement": (5, 6)},
+    "coarse": {"base_cell_size": 0.176, "refinement": (2, 3), "n_layers": 4},
+    "medium": {"base_cell_size": 0.126, "refinement": (2, 3), "n_layers": 4},
+    "fine": {"base_cell_size": 0.090, "refinement": (2, 3), "n_layers": 4},
 }
+
+
+class LevelFailed(RuntimeError):
+    """A refinement level did not produce a result record.
+
+    Raised rather than skipped: the remaining levels would each run for
+    hours before aggregate() failed on the missing file anyway.
+    """
 
 
 def monotonic_convergence(values: list[float]) -> bool:
@@ -45,13 +67,14 @@ def within_tolerance(value: float, target: float, tolerance: float) -> bool:
 
 def _level_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     level_min, level_max = settings["refinement"]
-    return {
-        "mesh": {
-            "base_cell_size": settings["base_cell_size"],
-            "surface_refinement_min": level_min,
-            "surface_refinement_max": level_max,
-        }
+    mesh: dict[str, Any] = {
+        "base_cell_size": settings["base_cell_size"],
+        "surface_refinement_min": level_min,
+        "surface_refinement_max": level_max,
     }
+    if "n_layers" in settings:
+        mesh["n_layers"] = settings["n_layers"]
+    return {"mesh": mesh}
 
 
 def run_levels(
@@ -82,7 +105,7 @@ def run_levels(
         )
 
         run_dir = level_dir / "run"
-        cli_main(
+        code = cli_main(
             [
                 "run",
                 str(level_case),
@@ -92,6 +115,16 @@ def run_levels(
                 "production",
             ]
         )
+        # Exit code 2 is a stage or validation failure: no result record was
+        # written, so aggregate() would die on the missing file after the
+        # remaining levels had each burned their own hours. 1 means the run
+        # completed but a gate flagged it - non-converged or out-of-band y+ -
+        # which still produces a record worth carrying into the table.
+        if code >= 2:
+            raise LevelFailed(
+                f"level '{name}' failed before producing a result "
+                f"(exit {code}); see {run_dir / 'status'}"
+            )
         run_dirs.append(run_dir)
 
     return aggregate(run_dirs)

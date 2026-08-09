@@ -37,16 +37,36 @@ acceptance:
 
 Three refinement levels, defined in `scripts/mesh_independence.py`:
 
-| Level | `base_cell_size` | Surface refinement | Cells | Cd | Cl |
-|---|---|---|---|---|---|
-| coarse | 0.08 | (3, 4) | *not run* | *not run* | *not run* |
-| medium | 0.05 | (4, 5) | *not run* | *not run* | *not run* |
-| fine | 0.03 | (5, 6) | *not run* | *not run* | *not run* |
+| Level | `base_cell_size` | Surface refinement | Surface cell | Layers | Cells | Cd | Cl |
+|---|---|---|---|---|---|---|---|
+| coarse | 0.176 | (2, 3) | 22.00 mm | 4 | *not run* | *not run* | *not run* |
+| medium | 0.126 | (2, 3) | 15.75 mm | 4 | *not run* | *not run* | *not run* |
+| fine | 0.090 | (2, 3) | 11.25 mm | 4 | *not run* | *not run* | *not run* |
 
-**Verdict: not run.** This machine has no WSL distribution installed, so there
-is no OpenFOAM to run against. Each level writes its own case YAML under the
-output root, so the exact configuration behind every number is recoverable
-once the runs happen.
+Only `base_cell_size` varies, at a constant 1.40 refinement ratio — close to
+the conventional √2, and a precondition for Richardson extrapolation meaning
+anything. The refinement depth and the layer count are pinned: letting
+`n_layers` follow the cell size would give 6, 5 and 4 layers as the mesh
+refines, changing the near-wall treatment between levels and confounding the
+quantity being measured.
+
+**11.25 mm is as fine as this study can go**, and that is a consequence of the
+`high_y_plus` choice rather than an arbitrary limit. Wall functions at 40 m/s
+require a 1 mm first layer for y⁺ ≈ 50; four layers at expansion 1.2 stack to
+5.37 mm; and that stack has to fit inside half the surface cell. Refining
+further does not produce a better mesh — it produces one where the layers stop
+fitting, which `validate()` now rejects outright. If the study later needs
+finer surface resolution than this, the wall treatment has to change with it
+(`spalding` is y⁺-insensitive and decouples the two).
+
+**Verdict: not run.** The machinery is exercised end-to-end on the `dev`
+profile, so this is now a matter of core-hours and a pinned target rather than
+of unproven plumbing. Each level writes its own case YAML under the output
+root, so the exact configuration behind every number is recoverable.
+
+A level that fails before writing a result record now aborts the study
+immediately rather than letting the remaining levels run for hours and then
+crashing in `aggregate()`.
 
 To run it, once §1 is pinned and the environment from `docs/environment-setup.md`
 is in place:
