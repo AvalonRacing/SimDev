@@ -20,6 +20,14 @@ class DomainBox:
     ground: str
     farfield: str
     symmetry: str | None
+    # Bounding box of the geometry the domain was built around. Refinement
+    # regions are anchored to the model, not the tunnel, so they need this.
+    geom_min: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    geom_max: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    @property
+    def geom_length(self) -> float:
+        return self.geom_max[0] - self.geom_min[0]
 
     @property
     def size(self) -> tuple[float, float, float]:

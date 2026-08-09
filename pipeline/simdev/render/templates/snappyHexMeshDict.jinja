@@ -15,6 +15,14 @@ geometry
         file            "{{ patch.file }}";
     }
 {% endfor %}
+{% for box in refinement_boxes %}
+    {{ box.name }}
+    {
+        type            searchableBox;
+        min             ({{ box.min[0] }} {{ box.min[1] }} {{ box.min[2] }});
+        max             ({{ box.max[0] }} {{ box.max[1] }} {{ box.max[2] }});
+    }
+{% endfor %}
 }
 
 castellatedMeshControls
@@ -46,7 +54,17 @@ castellatedMeshControls
 {% endfor %}
     }
 
-    refinementRegions {}
+    refinementRegions
+    {
+{% for box in refinement_boxes %}
+        {{ box.name }}
+        {
+            mode            inside;
+            // For 'inside' the distance is ignored; only the level applies.
+            levels          ((1.0 {{ box.level }}));
+        }
+{% endfor %}
+    }
 
     locationInMesh ({{ location_in_mesh[0] }} {{ location_in_mesh[1] }} {{ location_in_mesh[2] }});
 }

@@ -57,6 +57,8 @@ class BoxDomainBuilder:
             ground=_only(spec, PatchRole.GROUND),
             farfield=_only(spec, PatchRole.FARFIELD),
             symmetry=symmetry,
+            geom_min=(lo[0], lo[1], lo[2]),
+            geom_max=(hi[0], hi[1], hi[2]),
         )
 
 

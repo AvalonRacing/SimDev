@@ -35,6 +35,31 @@ domain:
   height_lengths: 3.0
   max_blockage: 0.01
 
+  # At 35 degrees the drag is the slant separation and the counter-rotating
+  # C-pillar vortices, and both live in the volume rather than against the
+  # wall. Surface refinement alone leaves them at the background cell size,
+  # which is how a grid study converges smoothly onto the wrong Cd.
+  #
+  # Levels are relative to base_cell_size, so these follow the resolution
+  # profile rather than fighting it. Offsets are body lengths off the
+  # geometry bounding box.
+  refinement_regions:
+    # Broad envelope: the whole body plus three body lengths of wake.
+    - name: wake
+      level: 2
+      x_start: -0.2
+      x_end: 3.0
+      half_width: 0.5
+      height: 0.6
+    # The slant itself and the near-wake recirculation, where the separation
+    # is decided. Starts upstream of the slant break at x ~ 0.82.
+    - name: nearWake
+      level: 3
+      x_start: 0.6
+      x_end: 1.0
+      half_width: 0.3
+      height: 0.45
+
 forces:
   a_ref_full: 0.112032   # width 0.389 x height 0.288, stilts excluded
   l_ref: 1.044

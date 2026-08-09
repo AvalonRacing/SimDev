@@ -12,6 +12,7 @@ from simdev.render.context import (
     build_context,
     inlet_turbulence,
     location_in_mesh,
+    refinement_boxes,
 )
 from simdev.render.render import render_mesh_dicts
 
@@ -141,3 +142,62 @@ def test_surface_feature_dict_uses_the_esi_per_surface_format(tmp_path: Path) ->
     assert "extractionMethod    extractFromSurface;" in text
     assert "includedAngle       150;" in text
     assert "surfaces\n(" not in text
+
+
+def _spec_with_wake(**region):
+    base = {
+        "name": "wake",
+        "level": 2,
+        "x_start": -0.2,
+        "x_end": 3.0,
+        "half_width": 0.5,
+        "height": 0.6,
+    }
+    base.update(region)
+    return _spec({"domain": {"refinement_regions": [base]}})
+
+
+def test_refinement_region_is_declared_as_a_searchable_box(tmp_path: Path) -> None:
+    """snappy needs the box in geometry{} as well as refinementRegions{}.
+
+    Referencing a region that was never declared is a FOAM FATAL IO ERROR,
+    not a warning.
+    """
+    text = (_render(tmp_path, _spec_with_wake()) / "system" / "snappyHexMeshDict").read_text()
+    assert "type            searchableBox;" in text
+    assert "mode            inside;" in text
+    assert "levels          ((1.0 2));" in text
+
+
+def test_refinement_region_is_anchored_to_the_geometry(tmp_path: Path) -> None:
+    """Offsets are body lengths off the model's bounding box, not the domain."""
+    spec = _spec_with_wake()
+    domain = BoxDomainBuilder().build(spec, BOUNDS)
+    boxes = refinement_boxes(spec, domain)
+    length = domain.geom_length
+
+    assert len(boxes) == 1
+    assert boxes[0]["min"][0] == pytest.approx(domain.geom_min[0] - 0.2 * length)
+    assert boxes[0]["max"][0] == pytest.approx(domain.geom_max[0] + 3.0 * length)
+
+
+def test_refinement_region_is_clipped_to_the_domain(tmp_path: Path) -> None:
+    """A region running past the domain still refines every cell it crosses.
+
+    Left unclipped that silently multiplies the cell count, so an oversized
+    request is trimmed rather than honoured.
+    """
+    spec = _spec_with_wake(x_end=500.0, half_width=500.0, height=500.0)
+    domain = BoxDomainBuilder().build(spec, BOUNDS)
+    box = refinement_boxes(spec, domain)[0]
+
+    assert box["max"][0] <= domain.x_max
+    assert box["max"][1] <= domain.y_max
+    assert box["max"][2] <= domain.z_max
+    assert box["min"][1] >= domain.y_min
+
+
+def test_no_regions_renders_an_empty_block(tmp_path: Path) -> None:
+    text = (_render(tmp_path) / "system" / "snappyHexMeshDict").read_text()
+    assert "searchableBox" not in text
+    assert "refinementRegions" in text

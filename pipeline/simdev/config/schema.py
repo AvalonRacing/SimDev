@@ -47,6 +47,29 @@ class PhysicsConfig(BaseModel):
     corner_radius: float | None = None
 
 
+class RefinementRegion(BaseModel):
+    """A box of extra volume refinement, sized in body lengths.
+
+    Offsets are multiples of the geometry's own length and are measured from
+    its bounding box, so a region tracks the model rather than the domain:
+    x_start = -0.2 begins a fifth of a body length ahead of the nose, and
+    x_end = 3.0 reaches three body lengths past the tail.
+
+    Surface refinement only thickens the mesh next to the wall. Wakes,
+    separations and vortices live in the volume, and without a region there
+    they are resolved at the background cell size no matter how fine the
+    surface is. That is the difference between a mesh that converges and one
+    that converges to the wrong number.
+    """
+
+    name: str
+    level: int = Field(ge=1)
+    x_start: float = 0.0
+    x_end: float
+    half_width: float = Field(gt=0.0)
+    height: float = Field(gt=0.0)
+
+
 class DomainConfig(BaseModel):
     kind: Literal["box", "annulus"] = "box"
     upstream_lengths: float = 5.0
@@ -54,6 +77,7 @@ class DomainConfig(BaseModel):
     half_width_lengths: float = 3.0
     height_lengths: float = 3.0
     max_blockage: float = 0.01
+    refinement_regions: list[RefinementRegion] = Field(default_factory=list)
 
 
 class MeshConfig(BaseModel):

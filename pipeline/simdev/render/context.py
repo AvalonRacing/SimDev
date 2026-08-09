@@ -46,6 +46,41 @@ def location_in_mesh(domain: DomainBox) -> tuple[float, float, float]:
     )
 
 
+def refinement_boxes(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
+    """Resolve each refinement region to an absolute, domain-clipped box.
+
+    Regions are declared in body lengths off the geometry bounding box; snappy
+    wants metres. Clipping matters because a region that pokes outside the
+    domain still refines every background cell it touches on the way out,
+    which is a silent way to double a cell count.
+    """
+    length = domain.geom_length
+    boxes: list[dict[str, Any]] = []
+
+    for region in spec.domain.refinement_regions:
+        half_width = region.half_width * length
+        box_min = (
+            max(domain.x_min, domain.geom_min[0] + region.x_start * length),
+            max(domain.y_min, -half_width),
+            domain.z_min,
+        )
+        box_max = (
+            min(domain.x_max, domain.geom_max[0] + region.x_end * length),
+            min(domain.y_max, half_width),
+            min(domain.z_max, domain.z_min + region.height * length),
+        )
+        boxes.append(
+            {
+                "name": region.name,
+                "level": region.level,
+                "min": box_min,
+                "max": box_max,
+            }
+        )
+
+    return boxes
+
+
 @dataclass(frozen=True)
 class Bc:
     patch: str
@@ -165,6 +200,7 @@ def build_context(
         "domain": domain,
         "geometry_files": {n: Path(p).name for n, p in geometry_files.items()},
         "refined_patches": refined_patches,
+        "refinement_boxes": refinement_boxes(spec, domain),
         "wall_patches": wall_patches,
         "force_patches": [
             p.name
