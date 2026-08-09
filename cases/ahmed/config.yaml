@@ -1,0 +1,62 @@
+# Ahmed body validation case.
+#
+# Reference: Ahmed, Ramm & Faltin, SAE 840300 (1984).
+# 35 degree slant, chosen over 25 degrees because the 25 degree case sits on
+# the separation/reattachment bifurcation where steady RANS fails for
+# turbulence-model reasons, not pipeline reasons.
+#
+# Fixed floor, matching the reference experiment's stationary tunnel wall.
+# This is why ground motion is a per-case field, not role behaviour.
+#
+# acceptance.target_cd is confirmed against the primary source in Task 18.
+name: ahmed
+
+flow:
+  u_inf: 40.0
+  nu: 1.5e-05
+  rho: 1.225
+  turbulence_intensity: 0.005
+  turbulence_length_scale: 0.01
+
+ground:
+  motion: static
+
+physics:
+  turbulence_model: kOmegaSST
+  wall_treatment: high_y_plus
+  mode: straight
+  yaw_deg: 0.0
+
+domain:
+  kind: box
+  upstream_lengths: 5.0
+  downstream_lengths: 10.0
+  half_width_lengths: 3.0
+  height_lengths: 3.0
+  max_blockage: 0.01
+
+forces:
+  a_ref_full: 0.112032   # width 0.389 x height 0.288, stilts excluded
+  l_ref: 1.044
+  c_of_r: [0.522, 0.0, 0.0]
+
+geometry:
+  kind: ahmed
+  ahmed:
+    length: 1.044
+    width: 0.389
+    height: 0.288
+    slant_angle_deg: 35.0
+    slant_length: 0.222
+    nose_radius: 0.100
+    ground_clearance: 0.050
+    stilt_diameter: 0.030
+    include_stilts: true
+  patches:
+    - {name: body, role: body}
+    - {name: stilts, role: body}
+    - {name: ground, role: ground}
+    - {name: symmetry, role: symmetry}
+    - {name: inlet, role: inlet}
+    - {name: outlet, role: outlet}
+    - {name: farfield, role: farfield}
