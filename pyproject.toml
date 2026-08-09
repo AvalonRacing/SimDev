@@ -31,6 +31,9 @@ package-dir = {"" = "pipeline"}
 [tool.setuptools.packages.find]
 where = ["pipeline"]
 
+[tool.setuptools.package-data]
+simdev = ["render/templates/*.jinja"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

@@ -1,0 +1,7 @@
+{% with foam_class="dictionary", foam_object="decomposeParDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+numberOfSubdomains {{ spec.solve.n_ranks }};
+
+method          scotch;

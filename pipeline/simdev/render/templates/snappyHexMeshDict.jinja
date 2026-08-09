@@ -1,0 +1,114 @@
+{% with foam_class="dictionary", foam_object="snappyHexMeshDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+castellatedMesh true;
+snap            true;
+addLayers       true;
+
+geometry
+{
+{% for patch in refined_patches %}
+    {{ patch.name }}
+    {
+        type            triSurfaceMesh;
+        file            "{{ patch.file }}";
+    }
+{% endfor %}
+}
+
+castellatedMeshControls
+{
+    maxLocalCells       2000000;
+    maxGlobalCells      50000000;
+    minRefinementCells  10;
+    nCellsBetweenLevels 3;
+    resolveFeatureAngle 30;
+    allowFreeStandingZoneFaces true;
+
+    features
+    (
+{% for patch in refined_patches %}
+        {
+            file    "{{ patch.name }}.eMesh";
+            level   {{ patch.level_max }};
+        }
+{% endfor %}
+    );
+
+    refinementSurfaces
+    {
+{% for patch in refined_patches %}
+        {{ patch.name }}
+        {
+            level   ({{ patch.level_min }} {{ patch.level_max }});
+        }
+{% endfor %}
+    }
+
+    refinementRegions {}
+
+    locationInMesh ({{ location_in_mesh[0] }} {{ location_in_mesh[1] }} {{ location_in_mesh[2] }});
+}
+
+snapControls
+{
+    nSmoothPatch    3;
+    tolerance       2.0;
+    nSolveIter      50;
+    nRelaxIter      5;
+    nFeatureSnapIter 10;
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;
+    multiRegionFeatureSnap false;
+}
+
+addLayersControls
+{
+    relativeSizes false;
+    expansionRatio {{ spec.mesh.expansion_ratio }};
+    firstLayerThickness {{ spec.mesh.first_layer_thickness }};
+    minThickness {{ spec.mesh.first_layer_thickness / 4 }};
+
+    layers
+    {
+{% for patch in refined_patches %}
+        {{ patch.name }}
+        {
+            nSurfaceLayers {{ patch.n_layers }};
+        }
+{% endfor %}
+    }
+
+    nGrow               0;
+    featureAngle        130;
+    nRelaxIter          5;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals      3;
+    nSmoothThickness    10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle  90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter          50;
+}
+
+meshQualityControls
+{
+    maxNonOrtho         {{ spec.mesh.max_non_ortho }};
+    maxBoundarySkewness 20;
+    maxInternalSkewness {{ spec.mesh.max_skewness }};
+    maxConcave          80;
+    minVol              1e-13;
+    minTetQuality       1e-15;
+    minArea             -1;
+    minTwist            0.02;
+    minDeterminant      0.001;
+    minFaceWeight       0.02;
+    minVolRatio         0.01;
+    minTriangleTwist    -1;
+    nSmoothScale        4;
+    errorReduction      0.75;
+}
+
+mergeTolerance 1e-6;

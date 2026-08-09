@@ -1,0 +1,63 @@
+{% with foam_class="dictionary", foam_object="blockMeshDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+scale   1;
+
+vertices
+(
+    ({{ domain.x_min }} {{ domain.y_min }} {{ domain.z_min }})
+    ({{ domain.x_max }} {{ domain.y_min }} {{ domain.z_min }})
+    ({{ domain.x_max }} {{ domain.y_max }} {{ domain.z_min }})
+    ({{ domain.x_min }} {{ domain.y_max }} {{ domain.z_min }})
+    ({{ domain.x_min }} {{ domain.y_min }} {{ domain.z_max }})
+    ({{ domain.x_max }} {{ domain.y_min }} {{ domain.z_max }})
+    ({{ domain.x_max }} {{ domain.y_max }} {{ domain.z_max }})
+    ({{ domain.x_min }} {{ domain.y_max }} {{ domain.z_max }})
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) ({{ domain.n_cells[0] }} {{ domain.n_cells[1] }} {{ domain.n_cells[2] }}) simpleGrading (1 1 1)
+);
+
+edges ();
+
+boundary
+(
+    {{ domain.inlet }}
+    {
+        type            patch;
+        faces           ((0 4 7 3));
+    }
+    {{ domain.outlet }}
+    {
+        type            patch;
+        faces           ((1 2 6 5));
+    }
+    {{ domain.ground }}
+    {
+        type            wall;
+        faces           ((0 3 2 1));
+    }
+{% if symmetry_patch %}
+    {{ symmetry_patch }}
+    {
+        type            symmetry;
+        faces           ((0 1 5 4));
+    }
+    {{ domain.farfield }}
+    {
+        type            patch;
+        faces           ((3 7 6 2) (4 5 6 7));
+    }
+{% else %}
+    {{ domain.farfield }}
+    {
+        type            patch;
+        faces           ((0 1 5 4) (3 7 6 2) (4 5 6 7));
+    }
+{% endif %}
+);
+
+mergePatchPairs ();
