@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -49,3 +50,61 @@ def render_mesh_dicts(
     out_dir: Path,
 ) -> None:
     _render_set(MESH_DICTS, build_context(spec, domain, geometry_files), out_dir)
+
+
+SOLVER_DICTS: dict[str, str] = {
+    "controlDict.jinja": "system/controlDict",
+    "fvSchemes.jinja": "system/fvSchemes",
+    "fvSolution.jinja": "system/fvSolution",
+    "transportProperties.jinja": "constant/transportProperties",
+    "turbulenceProperties.jinja": "constant/turbulenceProperties",
+}
+
+FIELDS = ("U", "p", "k", "omega", "nut")
+
+
+def render_solver_dicts(
+    spec: CaseSpec,
+    domain: DomainBox,
+    geometry_files: dict[str, Path],
+    out_dir: Path,
+) -> None:
+    context = build_context(spec, domain, geometry_files)
+    _render_set(SOLVER_DICTS, context, out_dir)
+
+    environment = env()
+    template = environment.get_template("field.jinja")
+    for field in FIELDS:
+        foam_class, dimensions, internal = context["field_meta"][field]
+        target = Path(out_dir) / "0" / field
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            template.render(
+                field=field,
+                foam_class=foam_class,
+                dimensions=dimensions,
+                internal_field=internal,
+                bcs=context["bcs"][field],
+            ),
+            encoding="utf-8",
+        )
+
+
+def render_case(
+    spec: CaseSpec,
+    domain: DomainBox,
+    geometry_files: dict[str, Path],
+    out_dir: Path,
+) -> None:
+    """Render a complete, self-contained case plus its provenance record."""
+    out = Path(out_dir)
+    render_mesh_dicts(spec, domain, geometry_files, out)
+    render_solver_dicts(spec, domain, geometry_files, out)
+    (out / "caseSpec.json").write_text(
+        json.dumps(
+            {"spec": spec.model_dump(mode="json"), "hash": spec.spec_hash()},
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )

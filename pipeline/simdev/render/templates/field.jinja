@@ -1,0 +1,19 @@
+{% with foam_class=foam_class, foam_object=field %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+dimensions      {{ dimensions }};
+
+internalField   {{ internal_field }};
+
+boundaryField
+{
+{% for bc in bcs %}
+    {{ bc.patch }}
+    {
+{% for key, value in bc.entries.items() %}
+        {{ key }}{{ ' ' * (16 - key|length) }}{{ value }};
+{% endfor %}
+    }
+{% endfor %}
+}

@@ -1,0 +1,12 @@
+{% with foam_class="dictionary", foam_object="turbulenceProperties" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+simulationType  RAS;
+
+RAS
+{
+    RASModel        {{ spec.physics.turbulence_model }};
+    turbulence      on;
+    printCoeffs     on;
+}

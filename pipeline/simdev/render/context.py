@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from simdev.config.schema import CaseSpec, WallTreatment
+from simdev.config.schema import CaseSpec, GroundMotion, WallTreatment
 from simdev.domain.base import DomainBox
 from simdev.geometry.roles import PatchRole, traits
 
@@ -43,6 +44,94 @@ def location_in_mesh(domain: DomainBox) -> tuple[float, float, float]:
         domain.y_min + 0.25 * (domain.y_max - domain.y_min),
         domain.z_min + 0.50 * (domain.z_max - domain.z_min),
     )
+
+
+@dataclass(frozen=True)
+class Bc:
+    patch: str
+    entries: dict[str, str]
+
+
+def _vec(x: float, y: float, z: float) -> str:
+    return f"uniform ({x} {y} {z})"
+
+
+def build_bcs(
+    spec: CaseSpec,
+    k: float,
+    omega: float,
+    nut: float,
+    wall_fns: dict[str, str],
+) -> dict[str, list[Bc]]:
+    """Boundary conditions per field per patch. All branching happens here."""
+    u = spec.flow.u_inf
+    freestream = _vec(u, 0.0, 0.0)
+    moving_ground = spec.ground.motion is GroundMotion.MOVING
+
+    fields = ("U", "p", "k", "omega", "nut")
+    bcs: dict[str, list[Bc]] = {f: [] for f in fields}
+
+    for patch in spec.geometry.patches:
+        role = patch.role
+        name = patch.name
+
+        if role is PatchRole.INLET:
+            entries = {
+                "U": {"type": "fixedValue", "value": freestream},
+                "p": {"type": "zeroGradient"},
+                "k": {"type": "fixedValue", "value": f"uniform {k}"},
+                "omega": {"type": "fixedValue", "value": f"uniform {omega}"},
+                "nut": {"type": "calculated", "value": f"uniform {nut}"},
+            }
+        elif role is PatchRole.OUTLET:
+            entries = {
+                "U": {
+                    "type": "inletOutlet",
+                    "inletValue": _vec(0.0, 0.0, 0.0),
+                    "value": freestream,
+                },
+                "p": {"type": "fixedValue", "value": "uniform 0"},
+                "k": {
+                    "type": "inletOutlet",
+                    "inletValue": f"uniform {k}",
+                    "value": f"uniform {k}",
+                },
+                "omega": {
+                    "type": "inletOutlet",
+                    "inletValue": f"uniform {omega}",
+                    "value": f"uniform {omega}",
+                },
+                "nut": {"type": "calculated", "value": f"uniform {nut}"},
+            }
+        elif role is PatchRole.SYMMETRY:
+            entries = {f: {"type": "symmetry"} for f in fields}
+        elif role is PatchRole.FARFIELD:
+            entries = {f: {"type": "slip"} for f in fields}
+        elif role is PatchRole.GROUND:
+            if moving_ground:
+                u_entry = {"type": "fixedValue", "value": freestream}
+            else:
+                u_entry = {"type": "noSlip"}
+            entries = {
+                "U": u_entry,
+                "p": {"type": "zeroGradient"},
+                "k": {"type": wall_fns["k"], "value": f"uniform {k}"},
+                "omega": {"type": wall_fns["omega"], "value": f"uniform {omega}"},
+                "nut": {"type": wall_fns["nut"], "value": "uniform 0"},
+            }
+        else:  # BODY, TYRE
+            entries = {
+                "U": {"type": "noSlip"},
+                "p": {"type": "zeroGradient"},
+                "k": {"type": wall_fns["k"], "value": f"uniform {k}"},
+                "omega": {"type": wall_fns["omega"], "value": f"uniform {omega}"},
+                "nut": {"type": wall_fns["nut"], "value": "uniform 0"},
+            }
+
+        for field in fields:
+            bcs[field].append(Bc(patch=name, entries=entries[field]))
+
+    return bcs
 
 
 def build_context(
@@ -85,4 +174,12 @@ def build_context(
         "location_in_mesh": location_in_mesh(domain),
         "ground_is_moving": spec.ground.motion.value == "moving",
         "symmetry_patch": domain.symmetry,
+        "bcs": build_bcs(spec, k, omega, k / omega, wall_fns),
+        "field_meta": {
+            "U": ("volVectorField", "[0 1 -1 0 0 0 0]", f"uniform ({spec.flow.u_inf} 0 0)"),
+            "p": ("volScalarField", "[0 2 -2 0 0 0 0]", "uniform 0"),
+            "k": ("volScalarField", "[0 2 -2 0 0 0 0]", f"uniform {k}"),
+            "omega": ("volScalarField", "[0 0 -1 0 0 0 0]", f"uniform {omega}"),
+            "nut": ("volScalarField", "[0 2 -1 0 0 0 0]", f"uniform {k / omega}"),
+        },
     }

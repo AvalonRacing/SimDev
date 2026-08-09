@@ -1,0 +1,7 @@
+{% with foam_class="dictionary", foam_object="transportProperties" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+transportModel  Newtonian;
+
+nu              {{ spec.flow.nu }};

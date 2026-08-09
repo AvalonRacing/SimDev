@@ -1,0 +1,61 @@
+{% with foam_class="dictionary", foam_object="controlDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+application     simpleFoam;
+startFrom       startTime;
+startTime       0;
+stopAt          endTime;
+endTime         {{ spec.solve.max_iterations }};
+deltaT          1;
+writeControl    runTime;
+writeInterval   {{ spec.solve.max_iterations }};
+purgeWrite      2;
+writeFormat     binary;
+writePrecision  8;
+writeCompression off;
+timeFormat      general;
+timePrecision   6;
+runTimeModifiable false;
+
+functions
+{
+    forceCoeffs
+    {
+        type            forceCoeffs;
+        libs            ("libforces.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        log             true;
+
+        patches         ({% for p in force_patches %}{{ p }} {% endfor %});
+
+        rho             rhoInf;
+        rhoInf          {{ spec.flow.rho }};
+        magUInf         {{ spec.flow.u_inf }};
+        lRef            {{ spec.forces.l_ref }};
+        Aref            {{ a_ref }};
+
+        liftDir         (0 0 1);
+        dragDir         (1 0 0);
+        pitchAxis       (0 1 0);
+        CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
+    }
+
+    yPlus
+    {
+        type            yPlus;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+        log             true;
+    }
+
+    residuals
+    {
+        type            solverInfo;
+        libs            ("libutilityFunctionObjects.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        fields          (U p k omega);
+    }
+}
