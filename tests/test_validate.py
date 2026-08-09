@@ -33,7 +33,84 @@ def _spec(overrides: dict | None = None, **kw: object):
 
 
 def test_valid_case_passes() -> None:
-    assert validate(_spec()) == []
+    """The dev profile's 15 mm surface cell holds 5 of the 7 requested layers.
+
+    That clamp is reported as a warning, not an error: the case is buildable
+    and correct, it just cannot carry the full high_y_plus stack at this
+    resolution. Anything beyond that single warning is a regression.
+    """
+    warnings = validate(_spec())
+    assert len(warnings) == 1
+    assert "only 5 fit" in warnings[0]
+
+
+def test_stack_that_cannot_fit_one_layer_is_rejected() -> None:
+    """0.469 mm surface cells against a 1 mm first layer.
+
+    This is the production profile paired with high_y_plus, and it is the
+    combination that silently produced layerless meshes: snappy runs, drops
+    the layers, and the failure only surfaces as a coverage number long after
+    the cause has scrolled past.
+    """
+    with pytest.raises(ValidationError) as exc:
+        validate(_spec({"mesh": {"base_cell_size": 0.03, "surface_refinement_max": 6}}))
+    assert "not one layer fits" in str(exc.value)
+
+
+def test_too_few_layers_warns_and_names_the_patch() -> None:
+    """A thin stack is a warning, not a rejection.
+
+    A small appendage legitimately carries fewer layers than the main body -
+    refining it shrinks its layer budget - and whether the wall treatment
+    survives there is something the y+ gate measures after the run rather
+    than something a flat-plate correlation can settle before it.
+    """
+    warnings = validate(
+        _spec({"mesh": {"base_cell_size": 0.06, "surface_refinement_max": 4}})
+    )
+    assert any("barely represents a boundary layer" in w for w in warnings)
+    assert any("'body'" in w for w in warnings)
+
+
+def test_per_patch_refinement_overrides_the_case_wide_level() -> None:
+    spec = _spec(
+        {
+            "geometry": {
+                "patches": [
+                    {"name": "body", "role": "body"},
+                    {"name": "stilts", "role": "body", "refinement_max": 5},
+                    {"name": "ground", "role": "ground"},
+                    {"name": "symmetry", "role": "symmetry"},
+                    {"name": "inlet", "role": "inlet"},
+                    {"name": "outlet", "role": "outlet"},
+                    {"name": "farfield", "role": "farfield"},
+                ]
+            }
+        }
+    )
+    body = next(p for p in spec.geometry.patches if p.name == "body")
+    stilts = next(p for p in spec.geometry.patches if p.name == "stilts")
+
+    assert spec.patch_refinement(body)[1] == spec.mesh.surface_refinement_max
+    assert spec.patch_refinement(stilts)[1] == 5
+    # Finer cells mean a smaller layer budget, so fewer layers fit.
+    assert spec.surface_cell_size_for(stilts) < spec.surface_cell_size_for(body)
+    assert spec.n_layers_for(stilts) < spec.n_layers_for(body)
+
+
+def test_layer_count_is_never_raised_above_the_request() -> None:
+    """A cell with room to spare still gets exactly what was asked for."""
+    spec = _spec({"mesh": {"base_cell_size": 1.0, "surface_refinement_max": 1}})
+    assert spec.n_layers_effective == spec.mesh.n_layers
+
+
+def test_effective_stack_always_fits_the_budget() -> None:
+    for base, level in ((0.12, 3), (0.2, 3), (0.5, 4), (1.0, 2)):
+        spec = _spec(
+            {"mesh": {"base_cell_size": base, "surface_refinement_max": level}}
+        )
+        stack = spec.layer_stack_thickness(spec.n_layers_effective)
+        assert stack <= spec.layer_budget, (base, level, stack, spec.layer_budget)
 
 
 def test_half_model_without_symmetry_patch_is_rejected() -> None:

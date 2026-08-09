@@ -125,5 +125,19 @@ def test_decompose_par_matches_rank_count(tmp_path: Path) -> None:
 
 
 def test_surface_features_lists_every_geometry_file(tmp_path: Path) -> None:
-    text = (_render(tmp_path) / "system" / "surfaceFeaturesDict").read_text()
+    text = (_render(tmp_path) / "system" / "surfaceFeatureExtractDict").read_text()
     assert "body.stl" in text
+
+
+def test_surface_feature_dict_uses_the_esi_per_surface_format(tmp_path: Path) -> None:
+    """ESI v2412 keys each surface to its own sub-dictionary.
+
+    The flat `surfaces ( "body.stl" );` list is the OpenFOAM Foundation
+    format. Rendering it against an ESI build produces a dictionary that
+    surfaceFeatureExtract reads without error and acts on incorrectly, so
+    assert the structure rather than merely the filename.
+    """
+    text = (_render(tmp_path) / "system" / "surfaceFeatureExtractDict").read_text()
+    assert "extractionMethod    extractFromSurface;" in text
+    assert "includedAngle       150;" in text
+    assert "surfaces\n(" not in text

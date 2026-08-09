@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from simdev.config.schema import CaseSpec, GroundMotion, Mode
-from simdev.geometry.roles import PatchRole, force_roles
+from simdev.geometry.roles import PatchRole, force_roles, traits
 
 MAX_PHYSICAL_CORES = 40
 Y_PLUS_ERROR_FACTOR = 5.0
+
+# Below this the prism stack cannot represent a boundary layer at all: the
+# wall function is being applied across what is effectively one cell.
+MIN_USEFUL_LAYERS = 3
 
 
 class ValidationError(Exception):
@@ -85,6 +89,55 @@ def validate(spec: CaseSpec) -> list[str]:
             f"estimated y+ {y_plus:.1f} is outside the [{lo}, {hi}] band; "
             "the post-run y+ gate will confirm"
         )
+
+    # --- prism stack vs the cell it is carved out of ----------------------
+    # estimate_y_plus above checks first_layer_thickness against the *physics*.
+    # This checks the whole stack against the *mesh*. Both must hold, and they
+    # come from different config layers: wall treatment sets the layer sizes,
+    # the resolution profile sets the cell size, and nothing else reconciles
+    # them. A case that fails here meshes for 40 minutes and then loses its
+    # layers, which the mesh gate reports as a coverage failure long after the
+    # cause has scrolled past.
+    requested = spec.mesh.n_layers
+    stack = spec.layer_stack_thickness(requested)
+
+    for patch in spec.geometry.patches:
+        if traits(patch.role).refinement != "high":
+            continue
+        cell = spec.surface_cell_size_for(patch)
+        budget = spec.layer_budget_for(patch)
+        fits = spec.n_layers_for(patch)
+        _min, level = spec.patch_refinement(patch)
+
+        if fits == 0:
+            errors.append(
+                f"on patch '{patch.name}': first_layer_thickness "
+                f"{spec.mesh.first_layer_thickness * 1e3:.3f} mm exceeds the "
+                f"{budget * 1e3:.3f} mm layer budget of a {cell * 1e3:.3f} mm "
+                f"surface cell (base_cell_size {spec.mesh.base_cell_size} / "
+                f"2^{level}): not one layer fits. This refinement implies a "
+                f"wall-resolved mesh, but wall treatment is "
+                f"'{spec.physics.wall_treatment.value}'. Coarsen the "
+                "refinement on this patch, or switch wall treatment"
+            )
+        elif fits < MIN_USEFUL_LAYERS:
+            # A warning, not an error: a small appendage legitimately supports
+            # fewer layers than the main body, and whether the wall treatment
+            # actually holds there is measured by the y+ gate after the run,
+            # not guessed from a flat-plate correlation before it.
+            warnings.append(
+                f"only {fits} prism layer(s) fit on patch '{patch.name}' "
+                f"({cell * 1e3:.3f} mm cell, {budget * 1e3:.3f} mm budget); "
+                f"fewer than {MIN_USEFUL_LAYERS} barely represents a boundary "
+                "layer, so check the y+ gate on this patch"
+            )
+        elif fits < requested:
+            warnings.append(
+                f"requested {requested} prism layers but only {fits} fit on "
+                f"patch '{patch.name}' ({cell * 1e3:.3f} mm cell); using "
+                f"{fits}. The full stack would be {stack * 1e3:.3f} mm against "
+                f"a {budget * 1e3:.3f} mm budget"
+            )
 
     # --- mesh ------------------------------------------------------------
     if spec.mesh.surface_refinement_min > spec.mesh.surface_refinement_max:

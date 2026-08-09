@@ -91,19 +91,35 @@ def test_mesh_runs_the_expected_command_sequence(run_dir: Path) -> None:
     executables = [c[0] if c[0] != "mpirun" else c[3] for c in runner.calls]
     assert executables == [
         "blockMesh",
-        "surfaceFeatures",
+        "surfaceFeatureExtract",
         "decomposePar",
         "snappyHexMesh",
         "checkMesh",
     ]
 
 
-def test_mesh_uses_surface_features_not_the_legacy_name(run_dir: Path) -> None:
+def test_mesh_uses_the_esi_feature_extraction_utility(run_dir: Path) -> None:
+    """ESI OpenFOAM (openfoam.com, which the templates target) ships
+    'surfaceFeatureExtract'. 'surfaceFeatures' is the OpenFOAM Foundation
+    utility and does not exist in v2412 — calling it aborts the mesh stage
+    on its second command."""
     runner = RecordingRunner(run_dir, _mesh_logs())
     mesh(run_dir, runner=runner)
     flat = [token for call in runner.calls for token in call]
-    assert "surfaceFeatures" in flat
-    assert "surfaceFeatureExtract" not in flat
+    assert "surfaceFeatureExtract" in flat
+    assert "surfaceFeatures" not in flat
+
+
+def test_mesh_decomposes_with_force_so_it_can_be_re_run(run_dir: Path) -> None:
+    """decomposePar aborts on an already-decomposed case.
+
+    Without -force the mesh stage only ever works on a virgin run directory,
+    which makes the pipeline's own --force flag unable to deliver a re-run.
+    """
+    runner = RecordingRunner(run_dir, _mesh_logs())
+    mesh(run_dir, runner=runner)
+    decompose = next(c for c in runner.calls if c[0] == "decomposePar")
+    assert "-force" in decompose
 
 
 def test_mesh_runs_snappy_in_parallel(run_dir: Path) -> None:

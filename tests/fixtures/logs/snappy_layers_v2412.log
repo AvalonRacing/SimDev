@@ -1,0 +1,16 @@
+Outer iteration : 0
+-------------------
+
+Adding in total 0 inter-processor patches to handle extrusion of non-manifold processor boundaries.
+Selecting externalDisplacementMeshMover displacementMedialAxis
+Mesh with layers : cells:117213  faces:364765  points:130672  unbalance:0.62869306
+
+patch  faces        layers        overall thickness
+                target   mesh     [m]       [%]
+-----  -----    -----    ----     ---       ---
+body   2485     5        4.28     0.00687   92.3
+stilts 39       5        1.23     0.00201   27.1
+
+
+Doing final balancing
+---------------------

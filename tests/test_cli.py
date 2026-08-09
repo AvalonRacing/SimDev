@@ -49,7 +49,7 @@ def test_doctor_reports_without_crashing(capsys: pytest.CaptureFixture[str]) -> 
     code = main(["doctor"])
     out = capsys.readouterr().out
     assert "simpleFoam" in out
-    assert "surfaceFeatures" in out
+    assert "surfaceFeatureExtract" in out
     assert code in (0, 1)
 
 

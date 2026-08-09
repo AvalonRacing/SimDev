@@ -93,6 +93,19 @@ def test_mesh_gate_fails_on_collapsed_layers() -> None:
     assert any("layer" in r for r in result.reasons)
 
 
+def test_mesh_gate_fails_when_the_layer_table_is_missing() -> None:
+    """An unparseable or absent layer table must not read as success.
+
+    This is how the gate behaved against a real v2412 log: the table did not
+    parse, every lookup returned None, and the stage reported state 'ok' with
+    no reasons while the stilts carried 25% of their layers.
+    """
+    spec = _spec()
+    result = check_mesh_quality(_good_mesh(), {}, spec)
+    assert result.passed is False
+    assert any("no layer data" in r for r in result.reasons)
+
+
 def test_mesh_gate_ignores_patches_that_requested_no_layers() -> None:
     spec = _spec()
     result = check_mesh_quality(_good_mesh(), _layers(spec.mesh.n_layers), spec)

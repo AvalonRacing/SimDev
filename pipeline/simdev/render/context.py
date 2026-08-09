@@ -147,9 +147,14 @@ def build_context(
         {
             "name": p.name,
             "file": Path(geometry_files[p.name]).name,
-            "level_min": spec.mesh.surface_refinement_min,
-            "level_max": spec.mesh.surface_refinement_max,
-            "n_layers": spec.mesh.n_layers if traits(p.role).refinement == "high" else 0,
+            "level_min": spec.patch_refinement(p)[0],
+            "level_max": spec.patch_refinement(p)[1],
+            # Per-patch, and never the raw request: asking snappy for more
+            # layers than fit its cell makes it truncate and drop them on
+            # exactly the small parts. See CaseSpec.n_layers_for().
+            "n_layers": (
+                spec.n_layers_for(p) if traits(p.role).refinement == "high" else 0
+            ),
         }
         for p in spec.geometry.patches
         if p.name in geometry_files

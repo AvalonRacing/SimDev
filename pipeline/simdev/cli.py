@@ -17,7 +17,7 @@ from simdev.stages.solve import solve
 
 REQUIRED_UTILITIES = (
     "blockMesh",
-    "surfaceFeatures",
+    "surfaceFeatureExtract",
     "snappyHexMesh",
     "checkMesh",
     "decomposePar",
@@ -60,11 +60,16 @@ def _doctor() -> int:
         if location is None:
             missing.append(utility)
 
-    if shutil.which("surfaceFeatureExtract") and not shutil.which("surfaceFeatures"):
+    # ESI builds (openfoam.com, vXXXX) ship 'surfaceFeatureExtract' and read
+    # 'surfaceFeatureExtractDict'. The Foundation builds (openfoam.org) ship
+    # 'surfaceFeatures' with a different, flat dictionary format. The templates
+    # target ESI, so finding only 'surfaceFeatures' means the wrong distribution.
+    if shutil.which("surfaceFeatures") and not shutil.which("surfaceFeatureExtract"):
         print(
-            "\nOnly the legacy 'surfaceFeatureExtract' is present. "
-            "This pipeline targets ESI OpenFOAM v2412, which provides "
-            "'surfaceFeatures'."
+            "\nOnly 'surfaceFeatures' is present, which is the OpenFOAM "
+            "Foundation utility. This pipeline targets ESI OpenFOAM v2412 "
+            "(openfoam.com), which provides 'surfaceFeatureExtract' and reads "
+            "a differently-structured surfaceFeatureExtractDict."
         )
 
     if missing:

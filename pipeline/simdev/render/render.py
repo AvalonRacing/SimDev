@@ -14,7 +14,7 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 MESH_DICTS: dict[str, str] = {
     "blockMeshDict.jinja": "system/blockMeshDict",
-    "surfaceFeaturesDict.jinja": "system/surfaceFeaturesDict",
+    "surfaceFeatureExtractDict.jinja": "system/surfaceFeatureExtractDict",
     "snappyHexMeshDict.jinja": "system/snappyHexMeshDict",
     "decomposeParDict.jinja": "system/decomposeParDict",
 }

@@ -229,7 +229,9 @@ overrides.
 
 ## 4. Anatomy of a run
 
-`simdev run cases/ahmed --run-dir ~/runs/ahmed-01 --profile dev`
+`simdev run cases/ahmed/config.yaml --run-dir ~/runs/ahmed-01 --profile dev`
+
+The case argument is the config **file**, not the case directory.
 
 **prepare** — resolve config → `CaseSpec` → validate (raises on inconsistency,
 returns warnings) → generate or copy geometry into `constant/triSurface/` →
@@ -240,7 +242,7 @@ every dictionary → write `caseSpec.json`.
 Runs without OpenFOAM installed. This is the stage that turns a config file into
 a complete, hand-runnable case.
 
-**mesh** — `blockMesh` → `surfaceFeatures` → `decomposePar` → `snappyHexMesh
+**mesh** — `blockMesh` → `surfaceFeatureExtract` → `decomposePar` → `snappyHexMesh
 -parallel -overwrite` → `checkMesh -parallel`. Parses the layer table and the
 quality report, then gates on non-orthogonality, skewness, negative volumes, and
 **layer coverage**.

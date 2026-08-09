@@ -54,7 +54,13 @@ geometry:
     include_stilts: true
   patches:
     - {name: body, role: body}
-    - {name: stilts, role: body}
+    # The stilts are 30 mm cylinders against a 1044 mm body. At the case-wide
+    # level they land two cells across, snappy cannot build a medial axis it
+    # trusts, and the layer stack collapses to a quarter of what was asked
+    # for. Two extra levels put ~8 cells across the diameter; the layer
+    # budget shrinks with the cell, so fewer layers are requested there and
+    # snappy actually delivers them.
+    - {name: stilts, role: body, refinement_min: 4, refinement_max: 5}
     - {name: ground, role: ground}
     - {name: symmetry, role: symmetry}
     - {name: inlet, role: inlet}

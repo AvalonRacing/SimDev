@@ -33,20 +33,42 @@ wsl --import Ubuntu D:\wsl\Ubuntu D:\wsl\ubuntu-backup.tar
 
 ```bash
 curl https://dl.openfoam.com/add-debian-repo.sh | sudo bash
-sudo apt-get install openfoam2412-default
+sudo apt-get install openfoam2412-default python3-venv python3-pip
 echo "source /usr/lib/openfoam/openfoam2412/etc/bashrc" >> ~/.bashrc
-source ~/.bashrc
 ```
 
 Verify:
 
 ```bash
 simpleFoam -help | head -3
-which surfaceFeatures snappyHexMesh checkMesh
+which surfaceFeatureExtract snappyHexMesh checkMesh
 ```
 
-`surfaceFeatures` must resolve. If only `surfaceFeatureExtract` exists you are on
-an older build — the templates target v2412.
+`surfaceFeatureExtract` must resolve. It is the ESI (openfoam.com) utility and
+reads `system/surfaceFeatureExtractDict`, which is what the templates render.
+If instead you find `surfaceFeatures`, you have an OpenFOAM Foundation build
+(openfoam.org) — a different distribution with an incompatible, flat dictionary
+format, not a newer or older version of the same thing.
+
+### Activating the environment
+
+The line appended to `~/.bashrc` above only takes effect in **interactive**
+shells: Ubuntu's stock `~/.bashrc` opens with
+
+```bash
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+```
+
+so a non-interactive `wsl bash -c '…'` returns before ever reaching it, and
+OpenFOAM is not on `PATH`. Anything that drives the pipeline programmatically
+must source the environment explicitly:
+
+```bash
+wsl -d Ubuntu-24.04 -- bash -lc 'source /usr/lib/openfoam/openfoam2412/etc/bashrc; simdev run …'
+```
 
 ## 4. Case location
 

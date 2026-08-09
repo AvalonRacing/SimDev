@@ -23,8 +23,12 @@ def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> Ga
     runner = runner or Runner(run_dir)
 
     runner.run(["blockMesh"], name="blockMesh")
-    runner.run(["surfaceFeatures"], name="surfaceFeatures")
-    runner.run(["decomposePar"], name="decomposePar")
+    runner.run(["surfaceFeatureExtract"], name="surfaceFeatureExtract")
+    # -force removes any existing processor* directories. Reaching this line
+    # means we have already decided to (re)mesh, and decomposePar aborts
+    # rather than overwrite - so without it the second run of any stage in an
+    # existing run directory fails, including one asked for with --force.
+    runner.run(["decomposePar", "-force"], name="decomposePar")
     snappy = runner.run_parallel(
         ["snappyHexMesh", "-overwrite"], spec.solve.n_ranks, name="snappyHexMesh"
     )

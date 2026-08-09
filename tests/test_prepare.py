@@ -131,5 +131,8 @@ def test_profile_change_invalidates_the_skip(case_file: Path, tmp_path: Path) ->
     marker.write_text("TOUCHED", encoding="utf-8")
 
     # A different profile is a different spec hash, so it must re-render.
-    prepare(case_file, run_dir, profile="production")
+    # The production profile's 0.469 mm surface cells are a wall-resolved
+    # density, so it only validates against a wall-resolved treatment - the
+    # high_y_plus stack this case carries by default does not fit in them.
+    prepare(case_file, run_dir, profile="production", wall_treatment="low_y_plus")
     assert marker.read_text(encoding="utf-8") != "TOUCHED"

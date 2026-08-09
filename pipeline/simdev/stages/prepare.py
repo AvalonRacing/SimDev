@@ -118,6 +118,14 @@ def prepare(
                 "frontal_area": frontal_area,
                 "background_cells": domain.cell_count,
                 "half_model": spec.half_model,
+                # Derived, so it is not in caseSpec.json: record it here or a
+                # clamped layer count is invisible after the fact.
+                "surface_cell_size": spec.surface_cell_size,
+                "n_layers_requested": spec.mesh.n_layers,
+                "n_layers_effective": spec.n_layers_effective,
+                "layer_stack_thickness": spec.layer_stack_thickness(
+                    spec.n_layers_effective
+                ),
             },
         ),
     )

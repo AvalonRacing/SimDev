@@ -1,0 +1,28 @@
+{% with foam_class="dictionary", foam_object="surfaceFeatureExtractDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+// One sub-dictionary per surface, keyed by STL filename. This is the ESI
+// v2412 format; the flat `surfaces (...)` list belongs to the OpenFOAM
+// Foundation's `surfaceFeatures` utility, which ESI builds do not ship.
+{% for name, filename in geometry_files.items() %}
+{{ filename }}
+{
+    extractionMethod    extractFromSurface;
+
+    // Mark an edge as a feature when the angle between its two adjacent
+    // face normals is sharper than this. 150 keeps the slant break
+    // (145 deg on a 35 deg slant) and every 90 deg corner, while leaving
+    // the nose fillet's smooth curvature unmarked.
+    includedAngle       150;
+
+    subsetFeatures
+    {
+        nonManifoldEdges    no;
+        openEdges           yes;
+    }
+
+    writeObj            no;
+}
+
+{% endfor %}
