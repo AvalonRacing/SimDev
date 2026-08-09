@@ -315,6 +315,41 @@ template loop over the result.
    and a test that a bad combination is *rejected*.
 4. Use it via `spec.<section>.<field>` — never re-read the YAML.
 
+### Tune the mesh near a surface or in the volume
+
+Four knobs, and the interaction between them is the part that bites.
+
+**Volume refinement** — `domain.refinement_regions`, a list of boxes declared
+in *body lengths off the geometry bounding box*, with levels relative to
+`base_cell_size`. Regions track the model, so they survive a change of domain
+or resolution profile. They are clipped to the domain, because a region that
+runs past the boundary still refines every background cell it crosses.
+
+Surface refinement only thickens the mesh against the wall. Wakes and
+separations live in the volume: adding a wake box to the Ahmed case moved Cd
+by 16% and Cl by 44%.
+
+**Per-patch surface refinement** — `refinement_min` / `refinement_max` on a
+patch, falling back to the case-wide levels. One level cannot suit surfaces of
+very different size; at the case-wide level the Ahmed stilts landed two cells
+across with 39 faces.
+
+**Per-patch layer cap** — `n_layers` on a patch. Applied *after* the
+fit calculation, so it can only ever ask for fewer.
+
+**The interaction to understand:** refining a patch **reduces** how many
+layers it can carry, because the prism stack has to fit inside the cell it is
+carved out of. `CaseSpec.n_layers_for()` reconciles this and nothing else
+should. Asking for more layers than fit does not buy near-wall resolution —
+snappy truncates and drops them on exactly the curved and thin regions where
+they mattered.
+
+Layers follow `is_wall`, not `refinement == "high"`: every wall carries a wall
+function, and a wall function assumes its first cell sits in the log layer. A
+wall without layers is a turbulence model being evaluated where it is not
+valid. See `docs/validation-ahmed.md` §3 for a case where the right answer was
+still to decline them.
+
 ### Add a patch role
 
 1. Add to `PatchRole` and `ROLE_TRAITS` in `geometry/roles.py`. Decide
@@ -470,6 +505,24 @@ is the whole reason the spec is a text file.
 | Transition model | `turbulence_model` is config-selected |
 | Full plane-cut image suite | `post` stage exists with a minimal set |
 | Parametric sweeps | Per-run records aggregate on read |
+| STEP/CAD geometry import | `geometry.kind: stl` in the schema — **never exercised**; design in progress, see below |
+| Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
+
+**Three things are in flight, not merely deferred.** Design notes live in
+`docs/superpowers/specs/2026-08-09-step-geometry-path-design.md`:
+
+- **CAD geometry path.** The RC car arrives as STEP. `geometry.kind: stl` has
+  no test and no run behind it. Measurements of the real CAD and two settled
+  decisions are in that document; one question (ride height / ground
+  placement) is open.
+- **A correctness bug this exposes:** `half_model` is derived from flow
+  symmetry alone (`straight AND yaw == 0`), which silently forces a symmetry
+  plane onto asymmetric geometry. The car's CAD is asymmetric by up to 24.5 mm.
+  The fix is to add `geometry.symmetric` to the derivation. Until then, do not
+  run an asymmetric case in straight-line mode.
+- **A profile for the car.** `base_cell_size` is absolute metres and
+  `production` is sized for the 1 m Ahmed body. It will not transfer to a
+  447 mm car.
 
 Each is a new module behind an interface the current code already defines. That
 was the point of building the slice first.
