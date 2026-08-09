@@ -1,0 +1,55 @@
+# =====================================================================
+# This repo is for developing the simulation pipeline (scripts + case
+# templates) only. Meshes, results, and run data must never be
+# committed. This file is the safety net for that rule.
+# =====================================================================
+
+# ---- Case run copies ----
+# Actual simulation runs happen in working copies made from cases/,
+# never in the templates themselves. Never track run output.
+runs/
+run/
+*_run/
+
+# ---- OpenFOAM generated/result artifacts ----
+# Numeric time-step directories (0.1, 10, 200, ...) but keep the "0/"
+# initial-conditions template.
+[0-9]*/
+!0/
+
+processor*/
+postProcessing/
+VTK/
+*.foam
+*.OpenFOAM
+log.*
+*.log
+
+# Generated mesh (blockMesh/snappyHexMesh output) - keep the dicts
+# that generate it (system/blockMeshDict etc.), never the mesh itself.
+constant/polyMesh/
+
+# Common heavy geometry/mesh/result file types
+*.stl
+*.obj
+*.msh
+*.vtk
+*.vtu
+*.foam
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- General / OS / editor ----
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

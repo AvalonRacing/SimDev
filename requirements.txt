@@ -1,0 +1,2 @@
+# Python dependencies for the simulation pipeline scripts.
+# Add packages here as pipeline/ grows (e.g. numpy, pandas, PyFoam).
