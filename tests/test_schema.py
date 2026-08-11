@@ -79,3 +79,70 @@ def test_spec_hash_is_stable_and_sensitive() -> None:
 
 def test_mode_enum_values() -> None:
     assert Mode.CORNERING.value == "cornering"
+
+
+# --- the refinement cap ---------------------------------------------------
+
+
+def _capped_spec(cap):
+    case = {
+        "name": "t",
+        "flow": {"u_inf": 15.0, "turbulence_length_scale": 0.02},
+        "ground": {"motion": "moving"},
+        "physics": {"wall_treatment": "high_y_plus"},
+        "domain": {},
+        "mesh": {
+            "base_cell_size": 0.05,
+            "surface_refinement_min": 1,
+            "surface_refinement_max": 2,
+            "n_layers": 3,
+            "first_layer_thickness": 1.0e-3,
+            "refinement_cap": cap,
+        },
+        "forces": {"a_ref_full": 0.02, "l_ref": 0.44},
+        "solve": {"max_iterations": 50, "n_ranks": 4},
+        "post": {"yplus_min": 30.0, "yplus_max": 300.0},
+        "geometry": {
+            "kind": "stl",
+            "source_dir": "cad",
+            "patches": [
+                {"name": "body", "role": "body"},
+                {"name": "wing", "role": "body",
+                 "refinement_min": 5, "refinement_max": 6},
+                {"name": "ground", "role": "ground"},
+            ],
+        },
+    }
+    return CaseSpec.model_validate(case)
+
+
+def _patch(spec, name):
+    return next(p for p in spec.geometry.patches if p.name == name)
+
+
+def test_without_a_cap_a_patch_keeps_its_own_levels() -> None:
+    spec = _capped_spec(None)
+    assert spec.patch_refinement(_patch(spec, "wing")) == (5, 6)
+
+
+def test_the_cap_overrides_per_patch_levels() -> None:
+    """The point of it: per-patch levels override the profile, so coarsening
+    the profile alone leaves the expensive patches expensive."""
+    spec = _capped_spec(2)
+    assert spec.patch_refinement(_patch(spec, "wing")) == (2, 2)
+
+
+def test_the_cap_never_raises_a_level() -> None:
+    spec = _capped_spec(4)
+    assert spec.patch_refinement(_patch(spec, "body")) == (1, 2)
+
+
+def test_the_cap_reaches_the_case_wide_surface_cell() -> None:
+    uncapped = _capped_spec(None).surface_cell_size
+    assert _capped_spec(1).surface_cell_size == pytest.approx(uncapped * 2)
+
+
+def test_the_smoke_profile_caps_refinement() -> None:
+    from simdev.config.profiles import RESOLUTION_PROFILES
+
+    assert RESOLUTION_PROFILES["car_smoke"]["mesh"]["refinement_cap"] == 2

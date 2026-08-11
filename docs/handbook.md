@@ -366,6 +366,15 @@ across with 39 faces.
 **Per-patch layer cap** — `n_layers` on a patch. Applied *after* the
 fit calculation, so it can only ever ask for fewer.
 
+**A case-wide refinement ceiling** — `mesh.refinement_cap`, applied in
+`patch_refinement()` and therefore to per-patch levels as well as case-wide
+ones. This is the only way to make a whole case cheap without editing the
+patch list: per-patch levels deliberately *override* the resolution profile,
+so coarsening `base_cell_size` alone leaves four patches pinned at level 5 and
+the mesh expensive anyway. The `car_smoke` profile uses it to answer "does the
+pipeline work as a system" in minutes. Do not read a coefficient off a capped
+run — the y+ gate will fail it, correctly.
+
 **The interaction to understand:** refining a patch **reduces** how many
 layers it can carry, because the prism stack has to fit inside the cell it is
 carved out of. `CaseSpec.n_layers_for()` reconciles this and nothing else

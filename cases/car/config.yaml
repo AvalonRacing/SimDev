@@ -137,7 +137,7 @@ geometry:
     - {name: Chassis, role: body}
     # A 42 mm chord on a 440 mm car: at the case-wide level the section stops
     # being an aerofoil.
-    - {name: Wing, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: Wing, role: body, refinement_min: 5, refinement_max: 5}
 
     # --- wheels --------------------------------------------------------
     # Three surfaces per corner sharing one wheel id. The id pairs them;
@@ -165,10 +165,10 @@ geometry:
     # Extra refinement for the same reason the Ahmed stilts get it: these are
     # 5 mm sections, and at the case-wide level snappy cannot build a medial
     # axis it trusts and the layers collapse.
-    - {name: SUS_FL, role: body, refinement_min: 5, refinement_max: 6}
-    - {name: SUS_FR, role: body, refinement_min: 5, refinement_max: 6}
-    - {name: SUS_RL, role: body, refinement_min: 5, refinement_max: 6}
-    - {name: SUS_RR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: SUS_FL, role: body, refinement_min: 5, refinement_max: 5}
+    - {name: SUS_FR, role: body, refinement_min: 5, refinement_max: 5}
+    - {name: SUS_RL, role: body, refinement_min: 5, refinement_max: 5}
+    - {name: SUS_RR, role: body, refinement_min: 5, refinement_max: 5}
 
     # --- domain boundaries ---------------------------------------------
     # No symmetry patch: asymmetric geometry, so the model is full.

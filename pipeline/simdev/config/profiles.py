@@ -79,6 +79,27 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
     # 0.79 mm. That does *not* fit inside half a 0.75 mm cell, and validate()
     # will say so patch by patch rather than letting snappy discover it forty
     # minutes into meshing - see docs/handbook.md section 6.
+    # Deliberately far too coarse to believe. This exists to answer "does the
+    # pipeline work as a system", not "what is the drag": it meshes, solves and
+    # posts in minutes so the plumbing can be exercised end to end.
+    #
+    # refinement_cap is the load-bearing setting. Per-patch levels override the
+    # profile - correct for production, since a 42 mm wing chord needs its own
+    # level whatever the profile says - so coarsening base_cell_size alone
+    # leaves the wing and suspension pinned at level 5 and the mesh expensive
+    # anyway. The cap overrides them in turn.
+    #
+    # Do not read a coefficient off this profile. The y+ gate will fail and it
+    # is right to.
+    "car_smoke": {
+        "mesh": {
+            "base_cell_size": 0.05,
+            "surface_refinement_min": 1,
+            "surface_refinement_max": 2,
+            "refinement_cap": 2,
+        },
+        "solve": {"max_iterations": 50, "n_ranks": 4, "plateau_window": 20},
+    },
     "car_dev": {
         "mesh": {
             "base_cell_size": 0.024,

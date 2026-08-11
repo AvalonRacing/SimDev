@@ -162,6 +162,17 @@ class MeshConfig(BaseModel):
     # rendered as snappy's own maxFaceThicknessRatio, so the pipeline's limit
     # and snappy's truncation threshold can never disagree.
     max_layer_cell_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
+    # A ceiling on every refinement level in the case, per-patch ones
+    # included. None means no ceiling.
+    #
+    # This exists because per-patch levels deliberately *override* the
+    # resolution profile, which is right for production - a 42 mm wing chord
+    # needs its own level whatever the profile says - but leaves no way to
+    # ask for a genuinely cheap mesh. Coarsening the profile alone does
+    # nothing when four patches are pinned to level 6. A cap is the one knob
+    # that makes a whole case cheap without editing the patch list, which is
+    # what a smoke test of the plumbing needs.
+    refinement_cap: int | None = Field(default=None, ge=0)
 
 
 class ForcesConfig(BaseModel):
@@ -333,15 +344,28 @@ class CaseSpec(BaseModel):
             return self.forces.a_ref_full / 2.0
         return self.forces.a_ref_full
 
+    def _capped(self, level: int) -> int:
+        cap = self.mesh.refinement_cap
+        return level if cap is None else min(level, cap)
+
     def patch_refinement(self, patch: PatchSpec) -> tuple[int, int]:
-        """This patch's (min, max) refinement levels, case-wide unless set."""
+        """This patch's (min, max) refinement levels, case-wide unless set.
+
+        The one place refinement is resolved, so the one place the cap is
+        applied. Anything reading raw config levels instead would let a
+        capped case still mesh a patch at level 6.
+        """
         return (
-            self.mesh.surface_refinement_min
-            if patch.refinement_min is None
-            else patch.refinement_min,
-            self.mesh.surface_refinement_max
-            if patch.refinement_max is None
-            else patch.refinement_max,
+            self._capped(
+                self.mesh.surface_refinement_min
+                if patch.refinement_min is None
+                else patch.refinement_min
+            ),
+            self._capped(
+                self.mesh.surface_refinement_max
+                if patch.refinement_max is None
+                else patch.refinement_max
+            ),
         )
 
     def surface_cell_size_for(self, patch: PatchSpec) -> float:
@@ -374,7 +398,9 @@ class CaseSpec(BaseModel):
         the prism stack has to fit inside. Patches carrying their own levels
         use surface_cell_size_for().
         """
-        return self.mesh.base_cell_size / 2**self.mesh.surface_refinement_max
+        return self.mesh.base_cell_size / 2 ** self._capped(
+            self.mesh.surface_refinement_max
+        )
 
     def layer_stack_thickness(self, n_layers: int) -> float:
         """Total height of a geometric prism stack of n layers."""
