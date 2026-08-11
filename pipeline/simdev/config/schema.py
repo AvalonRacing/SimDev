@@ -207,21 +207,67 @@ class AhmedParams(BaseModel):
     include_stilts: bool = True
 
 
+class GroundDatum(str, Enum):
+    """How the road plane is established relative to the geometry.
+
+    AS_IS trusts the CAD: z = 0 is already the road. TYRE_CONTACT moves the
+    whole car rigidly until its lowest tyre point rests on z = 0.
+
+    Rigidly, and from the tyres only, matters. The four tyres in the test
+    export reach z = -0.70, -1.05, -1.04 and -1.40 mm; that 0.7 mm spread is
+    suspension travel and rake, which is real and must survive. Snapping each
+    wheel to the road separately would flatten the car's attitude, and
+    snapping to the lowest point of *any* surface would hand ride height to
+    whatever splitter or sensor boss happens to hang lowest.
+    """
+
+    AS_IS = "as_is"
+    TYRE_CONTACT = "tyre_contact"
+
+
+class TessellationConfig(BaseModel):
+    """Surface mesh sizing for STEP import, in metres.
+
+    Not a file-format detail: too coarse and a curved surface becomes a
+    faceted one that separates in the wrong place, too fine and the surface
+    mesh outweighs the volume mesh built from it.
+
+    curvature_segments is elements per full circle and is the control that
+    matters most on this vehicle - it decides whether a 6 mm suspension link
+    is a hexagon or a cylinder, independently of the part's size.
+    """
+
+    max_edge: float = Field(default=0.004, gt=0.0)
+    min_edge: float = Field(default=0.0004, gt=0.0)
+    curvature_segments: int = Field(default=24, ge=6)
+
+
 class GeometryConfig(BaseModel):
     """Where the surfaces come from and how they are placed.
 
-    scale and translate are applied once, on import, before anything measures
-    the geometry. Everything downstream - bounding box, frontal area, domain,
-    wheel axes, ride height - therefore sees metres in the pipeline's own
-    frame, and no consumer has to remember that the CAD was authored in
-    millimetres.
+    The import transform is applied once, in a fixed order - scale, then
+    rotation about z, then translation, then the ground datum - before
+    anything measures the geometry. Everything downstream (bounding box,
+    frontal area, domain, wheel axes, ride height) therefore sees metres in
+    the pipeline's own frame, and no consumer has to remember that the CAD
+    was authored in millimetres and facing the other way.
     """
 
-    kind: Literal["ahmed", "stl"]
+    kind: Literal["ahmed", "stl", "step"]
     ahmed: AhmedParams | None = None
-    stl_dir: str | None = None
+    source_dir: str | None = None
     scale: float = Field(default=1.0, gt=0.0)
+    # Rotation about the vertical axis, applied after scaling.
+    #
+    # The pipeline frame has the freestream along +x, so the car's nose faces
+    # -x. CAD assemblies are routinely built nose-forward along +x, and 180
+    # here turns one into the other. It is a rotation and not a mirror on
+    # purpose: negating x would flip the car's chirality and quietly swap
+    # left for right on an asymmetric vehicle.
+    rotate_z_deg: float = 0.0
     translate: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ground_datum: GroundDatum = GroundDatum.AS_IS
+    tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
     # A declared property of the CAD, not of the flow.
     #
     # half_model used to be derived from flow symmetry alone, which forced a
@@ -251,6 +297,11 @@ class CaseSpec(BaseModel):
     """Fully resolved case. Every value explicit; no downstream defaults."""
 
     name: str
+    # Which driving state was selected. Provenance only: the state's contents
+    # have already been merged into the fields below, so nothing downstream
+    # reads this. It is here so a result can be traced to a state by name
+    # without diffing the whole spec.
+    driving_state: str | None = None
     flow: FlowConfig
     ground: GroundConfig
     physics: PhysicsConfig

@@ -208,7 +208,7 @@ def test_refinement_range_inverted_is_rejected() -> None:
 def test_static_ground_on_a_vehicle_case_warns() -> None:
     case = copy.deepcopy(BASE)
     case["geometry"]["kind"] = "stl"
-    case["geometry"]["stl_dir"] = "geom"
+    case["geometry"]["source_dir"] = "geom"
     case["geometry"]["ahmed"] = None
     warnings = validate(resolve(case, profile="dev"))
     assert any("static ground" in w for w in warnings)

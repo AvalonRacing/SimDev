@@ -20,6 +20,10 @@ dependencies = [
     "networkx>=3.0",
     "shapely>=2.0",
     "pyyaml>=6.0",
+    # STEP import. Bundles OpenCASCADE, so there is no CAD-vendor or FreeCAD
+    # dependency. On Ubuntu the wheel still needs libGLU from apt - see
+    # docs/environment-setup.md.
+    "gmsh>=4.11",
 ]
 
 [project.scripts]

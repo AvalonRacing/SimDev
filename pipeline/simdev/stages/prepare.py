@@ -7,19 +7,21 @@ from typing import Any
 import trimesh
 
 from simdev.config.resolve import load_case
-from simdev.config.schema import CaseSpec
+from simdev.config.schema import CaseSpec, GroundDatum
 from simdev.config.validate import validate
 from simdev.domain.annulus import AnnulusDomainBuilder, check_sweep
 from simdev.domain.base import Domain, DomainSector
 from simdev.domain.box import BoxDomainBuilder, check_blockage
 from simdev.geometry.ahmed import write_ahmed_stl
-from simdev.geometry.roles import traits
+from simdev.geometry.roles import PatchRole, traits
+from simdev.geometry.step import Tessellation, convert, default_cache_dir
 from simdev.geometry.stl import (
     check_geometry,
-    import_surface,
     load_surface,
+    place_surface,
     projected_frontal_area,
     stl_info,
+    write_surface,
 )
 from simdev.geometry.wheels import Wheel, derive_wheels
 from simdev.render.context import corner_frame, layer_patches, wheel_speeds
@@ -63,40 +65,85 @@ def _write_geometry(
         files = write_ahmed_stl(spec.geometry.ahmed, tri_surface)
         return files, {name: load_surface(p) for name, p in files.items()}
 
-    assert spec.geometry.stl_dir is not None
-    source_dir = Path(spec.geometry.stl_dir)
+    assert spec.geometry.source_dir is not None
+    source_dir = Path(spec.geometry.source_dir)
+    suffix = ".step" if spec.geometry.kind == "step" else ".stl"
 
-    files: dict[str, Path] = {}
+    tessellation = Tessellation(
+        max_edge=spec.geometry.tessellation.max_edge,
+        min_edge=spec.geometry.tessellation.min_edge,
+        curvature_segments=spec.geometry.tessellation.curvature_segments,
+    )
+    cache_dir = (
+        default_cache_dir(source_dir) if spec.geometry.kind == "step" else None
+    )
+
     meshes: dict[str, trimesh.Trimesh] = {}
     missing: list[str] = []
 
     for patch in spec.geometry.patches:
         if not traits(patch.role).from_stl:
             continue
-        source = source_dir / f"{patch.name}.stl"
+        source = source_dir / f"{patch.name}{suffix}"
         if not source.exists():
             missing.append(f"{patch.name} (role {patch.role.value})")
             continue
-        target = tri_surface / source.name
-        meshes[patch.name] = import_surface(
-            source,
-            target,
+
+        if spec.geometry.kind == "step":
+            source, _ = convert(source, cache_dir, tessellation, spec.geometry.scale)
+
+        meshes[patch.name] = place_surface(
+            load_surface(source),
             scale=spec.geometry.scale,
+            rotate_z_deg=spec.geometry.rotate_z_deg,
             translate=spec.geometry.translate,
         )
-        files[patch.name] = target
 
     # Silently skipping a missing file used to be the behaviour, and it turns
     # a mistyped part name into a car with no rear wing that meshes, solves
     # and converges.
     if missing:
         raise FileNotFoundError(
-            f"no STL found in {source_dir} for: {', '.join(missing)}. "
-            "Every patch whose role carries a surface needs "
-            "<patch name>.stl"
+            f"no {suffix} found in {source_dir} for: {', '.join(missing)}. "
+            f"Every patch whose role carries a surface needs "
+            f"<patch name>{suffix}"
         )
 
+    # The ground datum needs every surface placed first, because it is a
+    # single rigid move of the whole car chosen from where its tyres ended up.
+    _apply_ground_datum(spec, meshes)
+
+    files = {
+        name: write_surface(mesh, tri_surface / f"{name}.stl")
+        for name, mesh in meshes.items()
+    }
     return files, meshes
+
+
+def _apply_ground_datum(
+    spec: CaseSpec, meshes: dict[str, trimesh.Trimesh]
+) -> float:
+    """Drop the car onto the road, as one rigid body. Returns the shift."""
+    if spec.geometry.ground_datum is not GroundDatum.TYRE_CONTACT:
+        return 0.0
+
+    tyres = [
+        p.name
+        for p in spec.geometry.patches
+        if p.role is PatchRole.TYRE and p.name in meshes
+    ]
+    if not tyres:
+        raise ValueError(
+            "geometry.ground_datum is 'tyre_contact' but no patch has role "
+            "'tyre'; there is nothing for the car to stand on"
+        )
+
+    lowest = min(float(meshes[name].bounds[0][2]) for name in tyres)
+    shift = -lowest
+    if shift:
+        for mesh in meshes.values():
+            mesh.apply_translation([0.0, 0.0, shift])
+    return shift
 
 
 def _bounds(

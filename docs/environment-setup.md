@@ -142,17 +142,34 @@ Keep paths inside the quoted `bash -lc` string.
 
 ### CAD
 
-No conversion step and no extra dependency: the CAD is exported as STL, one
-file per patch, and `trimesh` (already required) reads it. The earlier
-STEP-via-gmsh plan is not needed — see
-`docs/superpowers/specs/2026-08-09-step-geometry-path-design.md` for why it was
-dropped.
+The CAD is exported as STEP, one file per patch. `gmsh` does the tessellation
+through its bundled OpenCASCADE kernel, so there is no FreeCAD or CAD-vendor
+install. It is a declared dependency in `pyproject.toml`, but on Ubuntu the
+wheel needs one system library that it does not carry:
 
-The export contract is in `docs/handbook.md` §6 "Bring in CAD". The part that
-bites: parts must be exported in **assembly position**, not in their own part
-frames. An export that loses the assembly transforms writes every corner of the
-car to the same coordinates, and all four wheels land on top of each other at
-the origin.
+```bash
+sudo apt-get install -y libglu1-mesa
+```
+
+Without it, `import gmsh` fails with `OSError: libGLU.so.1: cannot open shared
+object file`, and `prepare` reports it as a STEP conversion error naming this
+line.
+
+Conversion is cached in `.simdev-cache/` beside the CAD, keyed on the file's
+content hash and the tessellation settings, so it only re-runs when the CAD or
+those settings actually change. Deleting that directory is safe.
+
+The export contract is in `docs/handbook.md` §6 "Bring in CAD". Two things that
+have already gone wrong:
+
+- Parts must be exported in **assembly position**, not in their own part
+  frames. An export that loses the assembly transforms writes every corner of
+  the car to the same coordinates, and all four wheels land on top of each
+  other at the origin.
+- Each file must contain **only its own part**. An exporter that accumulates
+  the selection writes file *N* containing the previous *N−1* parts as well;
+  the duplicated solids then overlap, the tessellation is no longer closed, and
+  the wheel measurement rejects the result as not a solid of revolution.
 
 ### Coded boundary conditions
 

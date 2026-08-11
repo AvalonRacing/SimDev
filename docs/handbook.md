@@ -86,8 +86,12 @@ Resolution happens in exactly one place (`config/resolve.py`), merging in a
 fixed order:
 
 ```
-built-in defaults ◄ resolution profile ◄ wall-treatment profile ◄ case file ◄ CLI overrides
+built-in defaults ◄ resolution profile ◄ wall-treatment profile ◄ case file ◄ driving state ◄ CLI overrides
 ```
+
+The driving-state layer lives *inside* the case file and is merged by
+`resolve.py` like any other layer, so switching between tight cornering, a
+sweeper and braking is one line rather than four edits that have to agree.
 
 The result is validated, then written to the run directory as `caseSpec.json`
 with a hash. Every results record carries that hash, so a result can never be
@@ -129,7 +133,7 @@ So the pipeline makes it unrepresentable:
 - `half_model` is a *derived property*, never a config field:
 
   ```python
-  half_model = (mode is STRAIGHT) and (yaw_deg == 0.0)
+  half_model = geometry.symmetric and (mode is STRAIGHT) and (yaw_deg == 0.0)
   ```
 
 - A validator asserts the patch set agrees: half model ⟺ a `symmetry` patch
@@ -302,7 +306,8 @@ plots, and the result record.
 | `config/resolve.py` | Layer merging, YAML loading | profiles, schema |
 | `config/validate.py` | Cross-file assertions, `estimate_y_plus` | schema, roles |
 | `geometry/ahmed.py` | Procedural Ahmed body | schema |
-| `geometry/stl.py` | STL info, watertightness, import transform, projected area | nothing |
+| `geometry/stl.py` | STL info, watertightness, placement transform, projected area | nothing |
+| `geometry/step.py` | STEP tessellation via gmsh, conversion cache | nothing |
 | `geometry/wheels.py` | **Wheel axes measured from the surfaces** | roles |
 | `domain/base.py` | `Domain` protocol, `DomainBox`, `DomainSector` | schema |
 | `domain/box.py` | Rectangular tunnel, blockage | base, roles |
@@ -394,20 +399,93 @@ If the change should vary by case, promote it to a `CaseSpec` field first
 
 ### Bring in CAD
 
-`geometry.kind: stl` maps one file to one patch, by filename. That is the whole
-convention, and it is what makes swapping `Body.stl` or `Wing.stl` for a new
-design a drop-in with no config edit.
+`geometry.kind` is `step` or `stl`, and either way **one file is one patch,
+identified by filename**. That is the whole convention, and it is what makes
+swapping `Body.step` for a new design a drop-in with no config edit.
 
-**The geometry contract.** Export every part in its **assembly position** for
-the driving state, one folder per state. Frame: freestream along +x so the
-nose points along −x, z up, road at z = 0, tyres standing on it. Units may be
-millimetres — set `geometry.scale: 0.001` and the transform is applied once,
-on import, so the bounding box, frontal area, wheel axes and the file snappy
-reads are all the same metres in the same frame.
+**The geometry contract.** Export every part in its **assembly position**, one
+complete folder per driving state, using the same part names in every folder.
+Units may be millimetres — set `geometry.scale: 0.001`.
+
+**The import transform, in this fixed order:**
+
+```
+scale  ->  rotate about z  ->  translate  ->  ground datum
+```
+
+Not commutative, which is why it is stated. Rotating after translating turns
+the translation into a different offset, and a car 200 mm to the side of where
+it was meant to be still meshes and still solves.
+
+- `rotate_z_deg` exists because CAD assemblies are routinely built nose-forward
+  along +x while the pipeline frame has the freestream along +x, so the nose
+  faces −x. **A rotation, never a mirror** — negating x would also turn the car
+  round and would silently swap its left and right, which on geometry
+  asymmetric by 10% of its width is a different car.
+- `ground_datum: tyre_contact` drops the whole car rigidly until its lowest
+  tyre point rests on z = 0. Rigidly, and from the *tyres only*: in the test
+  export the four tyres reach −0.70, −1.04, −1.05 and −1.40 mm, and that 0.7 mm
+  spread is rake and suspension travel. Snapping each wheel separately would
+  flatten the car's attitude; snapping to the lowest point of any surface would
+  hand ride height to whatever boss hangs lowest.
 
 Positions are not configured because they cannot be: a driving state changes
 ride height, steer and camber together. Everything positional is measured from
 the surfaces, so a new driving state is a new export and no case file changes.
+
+**STEP tessellation is a physics setting, not a file-format detail.** Too
+coarse and a curved surface becomes a faceted one that separates in the wrong
+place; too fine and the surface mesh outweighs the volume mesh built from it.
+`geometry.tessellation` is in metres like every other length, and
+`curvature_segments` (elements per full circle) is the control that matters on
+this car — it decides whether a 6 mm suspension link is a hexagon or a cylinder,
+independently of the part's size.
+
+Conversion is cached on the file's content hash plus the tessellation settings
+plus the scale. Deliberately **not** on the rotation or translation: those are
+rigid transforms applied to the triangles afterwards, so a ride-height change
+reuses the cached tessellation instead of re-tessellating a 5 MB body. The
+cache sits in `.simdev-cache/` beside the CAD, falling back to the user cache
+if the CAD is read-only.
+
+**Never measure a STEP file without tessellating it.** OCC bounding boxes come
+from NURBS control hulls and run large — an earlier session recorded one about
+6× too big. Every dimension the pipeline reports comes from triangles.
+
+### Switch driving state
+
+A driving state is a named bundle of everything that changes together when the
+car is doing something different: which geometry folder to read, how fast it is
+going, whether it is cornering and how tightly. Switching is one line:
+
+```yaml
+driving_state: testcase
+
+driving_states:
+  testcase:
+    geometry: {source_dir: CAD/Testcase}
+    flow:     {u_inf: 15.0}
+    physics:  {mode: cornering, corner_radius: 4.0, corner_direction: left}
+    domain:   {kind: annulus}
+```
+
+To add one: export a complete folder under `CAD/` with the same part names,
+then add an entry. Nothing else changes — the wheel axes, rolling radii and
+ride height are measured from whichever state is selected.
+
+It is a **merge layer in `resolve.py`**, not something read later, for the
+reason the whole config design exists: after resolution there is one object in
+which every value is explicit and nothing downstream consults raw config. The
+order is:
+
+```
+defaults ◄ resolution profile ◄ wall profile ◄ case file ◄ driving state ◄ CLI --set
+```
+
+The table is dropped once the selected state is merged, and only its *name*
+survives into the spec. Keeping the whole table would put every unselected
+state into the spec hash, so editing the braking state would invalidate cached
+cornering runs it cannot possibly have affected.
 
 Two checks are deliberately hard failures rather than warnings:
 
@@ -624,7 +702,7 @@ is the whole reason the spec is a text file.
 | Transition model | `turbulence_model` is config-selected |
 | Full plane-cut image suite | `post` stage exists with a minimal set |
 | Parametric sweeps | Per-run records aggregate on read; `--set` overrides a single field without copying the case |
-| STEP import | Not needed — the CAD now exports STL directly |
+| Curved wake refinement for cornering | `refinement_regions` exist but are axis-aligned boxes |
 | Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
 | Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw` and `CmRoll`; `run/parsers.py` reads only Cd and Cl |
 | Curved refinement regions | `refinement_regions` are axis-aligned boxes; a cornering wake leaves them, and the validator warns |

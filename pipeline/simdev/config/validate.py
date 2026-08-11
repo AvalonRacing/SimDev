@@ -222,7 +222,7 @@ def validate(spec: CaseSpec) -> list[str]:
     # above, and a pair of warnings that disagree teaches people to ignore
     # both.
     if (
-        spec.geometry.kind == "stl"
+        spec.geometry.kind != "ahmed"
         and spec.ground.motion is GroundMotion.STATIC
         and spec.physics.mode is not Mode.CORNERING
     ):

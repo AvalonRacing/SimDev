@@ -84,7 +84,7 @@ def car_case(stl_dir: Path, **overrides) -> dict:
         "post": {"yplus_min": 30.0, "yplus_max": 300.0},
         "geometry": {
             "kind": "stl",
-            "stl_dir": str(stl_dir),
+            "source_dir": str(stl_dir),
             "scale": 0.001,
             "symmetric": False,
             "patches": [

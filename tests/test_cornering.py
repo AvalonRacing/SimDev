@@ -49,7 +49,7 @@ def _case(**physics) -> dict:
         "post": {"yplus_min": 0.0, "yplus_max": 5.0},
         "geometry": {
             "kind": "stl",
-            "stl_dir": "cad",
+            "source_dir": "cad",
             "patches": [
                 {"name": "Body", "role": "body"},
                 {"name": "Tire_FL", "role": "tyre", "wheel": "FL"},

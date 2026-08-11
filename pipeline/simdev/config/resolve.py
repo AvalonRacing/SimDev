@@ -21,17 +21,72 @@ def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+class UnknownDrivingStateError(KeyError):
+    pass
+
+
+def apply_driving_state(case: dict[str, Any]) -> dict[str, Any]:
+    """Fold the selected driving state into the case, and drop the table.
+
+    A driving state is a named bundle of everything that changes together
+    when the car is doing something different: which geometry folder to read,
+    how fast it is going, whether it is cornering and how tightly. Switching
+    between tight cornering, a wide sweeper and braking is then one line at
+    the top of the case file rather than an edit in four places that must
+    agree.
+
+    It is a merge layer rather than something read later, for the reason the
+    whole config design exists: after resolve() there is one object in which
+    every value is explicit, and nothing downstream may consult raw config to
+    find out what it should have been.
+
+    The table itself is removed once the selected state is merged. Keeping it
+    would put every *unselected* state into the spec hash, so editing the
+    braking state would invalidate cached cornering runs that cannot possibly
+    have been affected by it.
+    """
+    states = case.get("driving_states")
+    selected = case.get("driving_state")
+
+    if not states:
+        if selected:
+            raise UnknownDrivingStateError(
+                f"driving_state is {selected!r} but the case defines no "
+                "driving_states block"
+            )
+        return case
+
+    case = {k: v for k, v in case.items() if k != "driving_states"}
+
+    if not selected:
+        raise UnknownDrivingStateError(
+            "the case defines driving_states "
+            f"({', '.join(sorted(states))}) but driving_state selects none"
+        )
+    if selected not in states:
+        raise UnknownDrivingStateError(
+            f"unknown driving_state {selected!r}; the case defines "
+            f"{', '.join(sorted(states))}"
+        )
+
+    return deep_merge(case, states[selected] or {})
+
+
 def resolve(
     case: dict[str, Any],
     profile: str,
     wall_treatment: str | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> CaseSpec:
-    """Merge defaults, resolution profile, wall profile, case, CLI overrides."""
+    """Merge defaults, resolution profile, wall profile, case, state, overrides."""
     if profile not in RESOLUTION_PROFILES:
         raise KeyError(
             f"unknown profile {profile!r}; expected one of {sorted(RESOLUTION_PROFILES)}"
         )
+
+    # Before the wall profile is chosen, because a driving state may set the
+    # wall treatment along with everything else it changes.
+    case = apply_driving_state(case)
 
     merged = deep_merge(DEFAULTS, RESOLUTION_PROFILES[profile])
 
