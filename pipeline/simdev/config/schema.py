@@ -173,6 +173,23 @@ class MeshConfig(BaseModel):
     # that makes a whole case cheap without editing the patch list, which is
     # what a smoke test of the plumbing needs.
     refinement_cap: int | None = Field(default=None, ge=0)
+    # Whether checkMesh's own pass/fail verdict gates the run alongside the
+    # thresholds above.
+    #
+    # checkMesh judges skewness and non-orthogonality against limits compiled
+    # into it (4 and 70), which is a genuine second opinion and the default is
+    # to respect it. But it also means max_skewness and max_non_ortho can only
+    # ever *tighten* the gate: raising max_skewness to 12 leaves checkMesh
+    # still failing the mesh at 4.6, and the config then describes something
+    # other than what the code does - the exact "config says 300, code uses
+    # 100" shape section 3.1 exists to prevent.
+    #
+    # Setting this False makes the spec's own numbers the sole authority for
+    # those two quantities. It does *not* silence checkMesh generally: every
+    # other failure it reports - negative volumes, non-closed cells,
+    # zero-area faces, multiple regions - has no equivalent in the spec and
+    # still gates.
+    trust_check_mesh_verdict: bool = True
 
 
 class ForcesConfig(BaseModel):

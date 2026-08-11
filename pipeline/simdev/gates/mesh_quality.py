@@ -6,6 +6,22 @@ from simdev.geometry.roles import traits
 from simdev.run.parsers import CheckMeshResult, LayerInfo
 
 
+# The two quantities the spec carries its own thresholds for, and therefore
+# the only checkMesh verdicts that `trust_check_mesh_verdict: false` drops.
+#
+# Deliberately not "ignore checkMesh". Everything else it fails a mesh on -
+# negative volumes, non-closed cells, zero-area faces, multiple regions - is
+# something the pipeline cannot detect for itself, so those keep gating
+# whatever the case says. Turning the flag into a blanket mute would let a
+# smoke profile sail past a mesh in two disconnected pieces.
+SPEC_OWNED_CHECKS = ("skew", "non-orthogonal")
+
+
+def _is_spec_owned(check: str) -> bool:
+    lowered = check.lower()
+    return any(token in lowered for token in SPEC_OWNED_CHECKS)
+
+
 def check_mesh_quality(
     result: CheckMeshResult,
     layers: dict[str, LayerInfo],
@@ -36,6 +52,8 @@ def check_mesh_quality(
         )
 
     for check in result.failed_checks:
+        if _is_spec_owned(check) and not spec.mesh.trust_check_mesh_verdict:
+            continue
         reasons.append(f"checkMesh reported: {check}")
 
     # Layer coverage on every wall patch, since every wall carries a wall

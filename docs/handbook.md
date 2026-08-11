@@ -648,6 +648,29 @@ ones in a car going round a corner.
 `ROLE_TRAITS[MRF_ZONE].in_forces` is `False` — and this is the exact bug the old
 pipeline needed a name filter to avoid.
 
+### Decide who owns a mesh-quality threshold
+
+`checkMesh` reaches its own pass/fail verdict using limits compiled into it —
+skewness 4, non-orthogonality 70 — and by default that verdict gates the run
+alongside `mesh.max_skewness` and `mesh.max_non_ortho`. Two opinions, both
+have to be satisfied.
+
+The consequence is easy to trip over: **the spec's numbers can only ever
+tighten the gate.** Raising `max_skewness` to 12 leaves checkMesh still
+failing the mesh at 4.6, and the config then describes something other than
+what the code does — the shape §3.1 exists to prevent.
+
+`mesh.trust_check_mesh_verdict: false` makes the spec the sole authority for
+those two quantities. It is **not** a general mute: every other failure
+checkMesh reports — negative volumes, non-closed cells, zero-area faces,
+multiple regions — is something the pipeline cannot detect for itself and
+keeps gating regardless. `gates/mesh_quality.py::SPEC_OWNED_CHECKS` is the
+list that gets dropped, and it is deliberately two entries long.
+
+`car_smoke` sets it false, because a mesh coarse enough to run in two minutes
+cannot avoid one bad cell where a tyre meets the road. Every other profile
+leaves it true.
+
 ### Add a gate
 
 1. Write a pure function returning `GateResult(passed, reasons, detail)` in
@@ -730,6 +753,7 @@ a log.
 | snappyHexMesh leaks into the body | `check_geometry` warnings | Non-watertight STL |
 | Mesh gate fails on layer coverage | `logs/log.snappyHexMesh` layer table | Thin trailing edges; reduce `first_layer_thickness` or `expansionRatio`, or relax `minThickness` |
 | Mesh gate fails on non-orthogonality | `logs/log.checkMesh` | Too-aggressive refinement jumps; raise `nCellsBetweenLevels` |
+| Mesh gate fails although `max_skewness` was raised | `mesh.trust_check_mesh_verdict` | checkMesh judges skewness against its own hardcoded limit of 4 and that verdict gates too. The spec's number can only tighten unless the flag is off — see §6 |
 | Solve diverges immediately | `logs/log.simpleFoam` | Usually a BC or a bad cell; check `checkMesh` passed and `locationInMesh` is actually in the fluid |
 | `converged=False` with tight scatter but a slope | `results/forces.png` | Genuinely still drifting — raise `max_iterations` |
 | `converged=False` with large scatter | `results/forces.png` | Unsteadiness the steady solver cannot settle; may need transient |

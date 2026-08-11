@@ -220,3 +220,101 @@ def test_y_plus_gate_only_judges_force_patches() -> None:
         }
     )
     assert check_y_plus(df, spec).passed is True
+
+
+# --- trusting checkMesh's own verdict --------------------------------------
+#
+# checkMesh judges skewness and non-orthogonality against limits compiled into
+# it, so without this switch mesh.max_skewness can only ever tighten the gate:
+# raising it leaves checkMesh still failing the mesh at 4.6, and the config
+# then describes something other than what the code does.
+
+
+def _check_result(**overrides):
+    fields = {
+        "n_cells": 21908,
+        "max_non_ortho": 68.5,
+        "max_skewness": 4.55,
+        "has_negative_volumes": False,
+        "failed_checks": [
+            "Max skewness = 4.5489768, 1 highly skew faces detected which "
+            "may impair the quality of the results",
+        ],
+    }
+    fields.update(overrides)
+    return CheckMeshResult(**fields)
+
+
+def _mesh_spec(**mesh_overrides):
+    return _spec({"mesh": mesh_overrides})
+
+
+def test_trusting_check_mesh_fails_even_when_the_spec_is_permissive() -> None:
+    spec = _mesh_spec(max_skewness=20.0, trust_check_mesh_verdict=True)
+    gate = check_mesh_quality(_check_result(), {}, spec, {})
+    assert not gate.passed
+    assert any("checkMesh reported" in r for r in gate.reasons)
+
+
+def test_not_trusting_it_leaves_the_spec_as_the_authority() -> None:
+    spec = _mesh_spec(max_skewness=20.0, trust_check_mesh_verdict=False)
+    gate = check_mesh_quality(_check_result(), {}, spec, {})
+    assert gate.passed, gate.reasons
+
+
+def test_the_spec_threshold_still_bites_when_not_trusting_check_mesh() -> None:
+    """Opting out is not opting out of skewness, only of checkMesh's number."""
+    spec = _mesh_spec(max_skewness=3.0, trust_check_mesh_verdict=False)
+    gate = check_mesh_quality(_check_result(), {}, spec, {})
+    assert not gate.passed
+    assert any("max skewness 4.55 exceeds 3.00" in r for r in gate.reasons)
+
+
+def test_structural_failures_gate_whatever_the_case_says() -> None:
+    """A blanket mute would let a smoke profile sail past a broken mesh."""
+    spec = _mesh_spec(max_skewness=20.0, trust_check_mesh_verdict=False)
+    result = _check_result(
+        failed_checks=[
+            "Max skewness = 4.5489768, 1 highly skew faces detected",
+            "Number of not closed cells: 3",
+            "The mesh has multiple regions",
+        ]
+    )
+
+    gate = check_mesh_quality(result, {}, spec, {})
+
+    assert not gate.passed
+    assert any("not closed cells" in r for r in gate.reasons)
+    assert any("multiple regions" in r for r in gate.reasons)
+    assert not any("skew" in r.lower() for r in gate.reasons)
+
+
+def test_negative_volumes_are_never_waived() -> None:
+    spec = _mesh_spec(max_skewness=20.0, trust_check_mesh_verdict=False)
+    gate = check_mesh_quality(
+        _check_result(has_negative_volumes=True), {}, spec, {}
+    )
+    assert not gate.passed
+    assert any("negative volume" in r for r in gate.reasons)
+
+
+def test_non_orthogonality_verdict_is_also_spec_owned() -> None:
+    spec = _mesh_spec(
+        max_non_ortho=75.0, max_skewness=20.0, trust_check_mesh_verdict=False
+    )
+    result = _check_result(
+        failed_checks=["Number of severely non-orthogonal faces: 12"]
+    )
+    assert check_mesh_quality(result, {}, spec, {}).passed
+
+
+def test_production_profiles_still_trust_check_mesh() -> None:
+    from simdev.config.profiles import RESOLUTION_PROFILES
+
+    for name in ("production", "car", "car_dev"):
+        mesh = RESOLUTION_PROFILES[name].get("mesh", {})
+        assert mesh.get("trust_check_mesh_verdict", True) is True, name
+    assert (
+        RESOLUTION_PROFILES["car_smoke"]["mesh"]["trust_check_mesh_verdict"]
+        is False
+    )
