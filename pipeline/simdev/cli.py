@@ -86,8 +86,28 @@ def _doctor() -> int:
             "a differently-structured surfaceFeatureExtractDict."
         )
 
+    # gmsh is a Python import rather than a utility on PATH, and it fails at
+    # import time on a missing system library rather than at install time -
+    # so a venv that pip reports as complete still cannot read a STEP file.
+    # Checked here because this is the command someone runs when a fresh
+    # machine misbehaves.
+    try:
+        import gmsh  # noqa: F401
+
+        print(f"{'gmsh (STEP import)':18s} {gmsh.GMSH_API_VERSION}")
+    except Exception as error:
+        print(f"{'gmsh (STEP import)':18s} BROKEN: {error}")
+        missing.append("gmsh")
+
     if missing:
         print(f"\nMissing: {', '.join(missing)}")
+        if "gmsh" in missing:
+            print(
+                "gmsh imports a system library the wheel does not carry. On "
+                "Ubuntu:\n  sudo apt-get install -y libglu1-mesa libopengl0 "
+                "libxft2\nNote libGLU pulls in libOpenGL, so installing only "
+                "libglu1-mesa moves the error rather than fixing it."
+            )
         print("See docs/environment-setup.md")
         return 1
     return 0

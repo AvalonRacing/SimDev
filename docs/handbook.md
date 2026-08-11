@@ -775,34 +775,62 @@ is the whole reason the spec is a text file.
 
 ---
 
-## 9. What is deliberately not here yet
+## 9. Where this stands, and what is next
+
+### Verified
+
+The whole chain runs end to end in WSL against the real car CAD, on the
+`car_smoke` profile, in one command:
+
+```
+prepare  ok    15 STEP parts tessellated, 4 wheels measured, annular sector built
+mesh     ok    21,908 cells, non-ortho 69.1, skewness 3.7
+solve    gate_failed   50 iterations - has not plateaued, correctly
+post     gate_failed   y+ far outside the low_y_plus band, correctly
+```
+
+Both gate failures are the right answer for a deliberately absurd mesh. The
+claim is that the **plumbing** is correct — geometry import, placement,
+wheel measurement, sector meshing, cell zones, coded wheel conditions, the
+rotating frame, the gates, the result record. It is not a claim about physics.
+
+Also verified along the way: blockMesh accepts the sector and `checkMesh`
+reports its volume as exactly the analytic annulus volume; snappy creates the
+MRF cell zones where the wheels are; the coded cornering wheel conditions
+compile; `simpleFoam` runs and writes coefficients.
+
+### Not verified, in the order it will matter
+
+1. **No production-resolution run has ever been attempted.** The `car` profile
+   is 1.82 M background cells before refinement — an overnight job. Everything
+   above was measured on a mesh nobody should solve on.
+2. **`low_y_plus` has never been run at a resolution where it means anything.**
+   The wall-profile machinery is unit tested; the physics path is not. The
+   `car` and `car_dev` profiles are sized on paper, not measured.
+3. **The Ahmed validation has never been run**, and its reference number is
+   still unpinned — see `docs/validation-ahmed.md`.
+4. **Nothing about the car is validated against data.**
+
+### Known loose ends
+
+| Thing | State |
+|---|---|
+| `a_ref_full = 0.02 m²` | Declared by the user. Nothing checks it against the geometry — the projected-area computation was removed, and it now drives the blockage check too |
+| `TIre_RR.step` | Filename differs from the patch by capitalisation. Accepted with a warning; a rename makes it exact |
+| CAD attitude | A heavy-understeer pose (10° body slip, 14–22° steer). Intentional; the user plans to revisit it for later driving states |
+| `car_smoke` mesh limits | `trust_check_mesh_verdict: false`, skewness 20, non-ortho 75. Almost no quality net, by design |
+
+### Deferred, with the hook already in place
 
 | Deferred | Already provided for |
 |---|---|
-| Yaw / pitch / roll attitude | Mode table drives symmetry derivation; `geometry.symmetric` is a separate input |
-| Transition model | `turbulence_model` is config-selected |
-| Full plane-cut image suite | `post` stage exists with a minimal set |
-| Parametric sweeps | Per-run records aggregate on read; `--set` overrides a single field without copying the case |
-| Curved wake refinement for cornering | `refinement_regions` exist but are axis-aligned boxes |
+| Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw`, `CmRoll`; `run/parsers.py` reads only Cd and Cl |
+| Curved wake refinement for cornering | `refinement_regions` are axis-aligned boxes; a cornering wake leaves them, and the validator warns |
 | Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
-| Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw` and `CmRoll`; `run/parsers.py` reads only Cd and Cl |
-| Curved refinement regions | `refinement_regions` are axis-aligned boxes; a cornering wake leaves them, and the validator warns |
-
-Cornering, the annular domain, MRF zones, rotating wheels and the CAD geometry
-path are **built and exercised against real OpenFOAM v2412** — a cornering car
-case meshes, creates its cell zones, compiles its coded wheel conditions and
-solves. What that does *not* mean is that any of it is validated: it means the
-plumbing is correct, not the physics.
-
-**Three things that would bite next:**
-
-- **`a_ref_full` for the car is a placeholder** taken from the body bounding
-  box. `prepare` reports the true projected frontal area — set it from that and
-  record which convention it follows.
-- **`low_y_plus` has never been run.** The wall-profile machinery is unit
-  tested; the physics path is not. The car is intended to use it, and the
-  `car`/`car_dev` profiles are sized on paper rather than measured.
-- **Nothing about the car is validated against data.** See the risk note below.
+| Full plane-cut image suite | `post` exists with a minimal set |
+| Rim pumping while cornering | Wheel MRF zones are meshed but carry the corner frame; needs a sliding mesh to do properly |
+| Transition model | `turbulence_model` is config-selected |
+| Parametric sweeps | Per-run records aggregate on read; `--set` overrides one field without copying the case |
 
 **One open risk, stated plainly:** the Ahmed validation runs at Re ≈ 2.8×10⁶ with
 `high_y_plus`. It validates plumbing, numerics, domain construction, force

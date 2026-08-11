@@ -53,6 +53,16 @@ def test_doctor_reports_without_crashing(capsys: pytest.CaptureFixture[str]) -> 
     assert code in (0, 1)
 
 
+def test_doctor_checks_step_import(capsys: pytest.CaptureFixture[str]) -> None:
+    """gmsh fails at import on a missing system library, not at install.
+
+    A venv pip reports as complete can still be unable to read a STEP file,
+    and doctor is what gets run when a fresh machine misbehaves.
+    """
+    main(["doctor"])
+    assert "gmsh (STEP import)" in capsys.readouterr().out
+
+
 def test_unknown_subcommand_exits_nonzero() -> None:
     with pytest.raises(SystemExit) as exc:
         main(["nonsense"])

@@ -157,32 +157,28 @@ naming this line. Note it is **`libGLU` that pulls in `libOpenGL`**, not gmsh
 directly — installing only `libglu1-mesa` moves the error along rather than
 fixing it.
 
-### If you cannot get root
+`sudo` in this WSL install prompts for a password, which a non-interactive
+shell cannot answer. WSL lets you pick the user instead, and root has no
+password, so this works from a PowerShell window without one:
 
-This machine's WSL install has no passwordless sudo, so the libraries were
-instead placed inside the venv, where gmsh already looks. Reproduce with:
-
-```bash
-cd ~/.local/pkg
-apt-get download libglu1-mesa libopengl0 libxft2      # needs no root
-for f in *.deb; do dpkg-deb -x "$f" ~/.local/glu; done
-cp -a ~/.local/glu/usr/lib/x86_64-linux-gnu/lib{GLU,OpenGL,Xft}.so.* \
-      ~/.venvs/simdev/lib/
-~/.venvs/simdev/bin/pip install patchelf
-~/.venvs/simdev/bin/patchelf --force-rpath --set-rpath '$ORIGIN' \
-      ~/.venvs/simdev/lib/libGLU.so.1.3.1
+```powershell
+wsl -d Ubuntu-24.04 -u root -- apt-get update
+wsl -d Ubuntu-24.04 -u root -- apt-get install -y libglu1-mesa libopengl0 libxft2
 ```
 
-`libgmsh.so` has `RUNPATH $ORIGIN/../lib`, which resolves to that same venv
-directory, so it finds `libGLU` there on its own. The `patchelf` line is the
-part that is not obvious: **`RUNPATH` is not inherited transitively**, so
-`libGLU` cannot see its own sibling `libOpenGL` through gmsh's search path and
-needs an `rpath` of its own. Setting `LD_LIBRARY_PATH` also works and is what
-most write-ups suggest — it is avoided here because an env var that must be
-set for the pipeline to function is exactly the trap described in §6.
+**If you cannot get root at all**, the libraries can be unpacked into the venv
+instead — `apt-get download` and `dpkg-deb -x` need no privileges, and
+`libgmsh.so` has `RUNPATH $ORIGIN/../lib` pointing at its own venv directory.
+One catch makes that harder than it looks: **`RUNPATH` is not inherited
+transitively**, so `libGLU` cannot see its sibling `libOpenGL` through gmsh's
+search path and needs an `rpath` of its own (`patchelf`, available as a PyPI
+wheel). `LD_LIBRARY_PATH` also works and is what most write-ups suggest; it is
+worth avoiding, because an environment variable the pipeline silently depends
+on is the trap described in §6.
 
-This is a workaround, not the recommended state. It lives inside the venv, so
-recreating the venv loses it. Prefer the apt install when root is available.
+That route was used here briefly and has been removed now that the packages
+are installed properly. It is recorded only so nobody has to rediscover the
+`RUNPATH` behaviour.
 
 Conversion is cached in `.simdev-cache/` beside the CAD, keyed on the file's
 content hash and the tessellation settings, so it only re-runs when the CAD or
