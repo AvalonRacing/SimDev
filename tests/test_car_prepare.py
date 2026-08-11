@@ -151,15 +151,21 @@ def test_a_missing_part_is_an_error_not_a_silent_skip(car, tmp_path) -> None:
         car("missing")
 
 
-def test_a_body_through_the_road_is_rejected(car, tmp_path) -> None:
-    """Only tyres may cross z = 0; a hull below it is a bad export."""
+def test_a_body_through_the_road_is_reported_but_not_rejected(car, tmp_path) -> None:
+    """Attitude is the modeller's to own, so this reports rather than stops.
+
+    At a big enough roll or dive a splitter really does touch the road, and
+    that is a condition to simulate. It stays loud because it is equally a
+    symptom of a mis-positioned export.
+    """
     sunk = trimesh.creation.box(extents=(0.40, 0.18, 0.10))
     sunk.apply_translation([0.0, 0.0, 0.03])
     sunk.apply_scale(1000.0)
     (tmp_path / "cad" / "Body.stl").write_bytes(trimesh.exchange.stl.export_stl(sunk))
 
-    with pytest.raises(ValueError, match="passes through the road plane"):
-        car("sunk")
+    result = car("sunk")
+
+    assert any("crosses the road plane" in w for w in result.warnings)
 
 
 # --- measurement ----------------------------------------------------------
@@ -298,3 +304,89 @@ def test_inner_and_outer_wheels_turn_at_different_speeds(car) -> None:
     assert speeds["FR"] / speeds["FL"] == pytest.approx(
         (3.0 + TRACK / 2) / (3.0 - TRACK / 2), rel=1e-2
     )
+
+
+# --- attitude is the modeller's, not the pipeline's -----------------------
+#
+# An RC car spends most of its cornering life in heavy understeer, so large
+# steer and body slip angles are the normal operating point. Nothing about
+# them may stop a run.
+
+
+def _steered_car(directory: Path, steer_deg: float) -> None:
+    """The same car with every wheel turned hard out of square."""
+    write_car(directory)
+    for wheel, (x, y) in CORNERS.items():
+        transform = (
+            trimesh.transformations.translation_matrix([x, y, TYRE_RADIUS])
+            @ trimesh.transformations.rotation_matrix(
+                math.radians(steer_deg), [0.0, 0.0, 1.0]
+            )
+            @ trimesh.transformations.rotation_matrix(math.pi / 2, [1.0, 0.0, 0.0])
+        )
+        for name, mesh in (
+            (f"Tire_{wheel}", trimesh.creation.annulus(
+                r_min=0.005, r_max=TYRE_RADIUS, height=0.027, transform=transform)),
+            (f"MRF_{wheel}", trimesh.creation.cylinder(
+                radius=SLEEVE_RADIUS, height=0.022, transform=transform)),
+        ):
+            mesh.apply_scale(1000.0)
+            (directory / f"{name}.stl").write_bytes(
+                trimesh.exchange.stl.export_stl(mesh)
+            )
+
+
+@pytest.mark.parametrize("steer_deg", [10.0, 25.0, 45.0])
+def test_a_heavily_yawed_car_prepares_without_failing(tmp_path, steer_deg) -> None:
+    cad = tmp_path / "cad"
+    _steered_car(cad, steer_deg)
+
+    case_path = tmp_path / "yawed.yaml"
+    case_path.write_text(yaml.safe_dump(car_case(cad)), encoding="utf-8")
+
+    result = prepare(case_path, tmp_path / "yawed", profile="car_dev")
+
+    assert set(result.wheels) == set(CORNERS)
+    for wheel in CORNERS:
+        assert result.wheels[wheel].radius == pytest.approx(TYRE_RADIUS, rel=1e-2)
+
+
+def test_slip_is_reported_as_an_angle_not_as_a_fault(tmp_path) -> None:
+    cad = tmp_path / "cad"
+    _steered_car(cad, 30.0)
+
+    case_path = tmp_path / "slip.yaml"
+    case_path.write_text(yaml.safe_dump(car_case(cad)), encoding="utf-8")
+    result = prepare(case_path, tmp_path / "slip", profile="car_dev")
+
+    reported = [w for w in result.warnings if "slip angle" in w]
+    assert len(reported) == 1
+    # Measured, not judged: no language suggesting the pose is wrong.
+    assert "mistake" not in reported[0]
+
+    status = json.loads(
+        (result.run_dir / "status" / "prepare.json").read_text(encoding="utf-8")
+    )
+    for wheel in CORNERS:
+        assert status["detail"]["wheels"][wheel]["slip_deg"] == pytest.approx(
+            30.0, abs=0.5
+        )
+
+
+def test_a_wheel_turned_hard_still_rolls_at_the_projected_speed(tmp_path) -> None:
+    """Only the component along the wheel's own rolling direction turns it."""
+    cad = tmp_path / "cad"
+    _steered_car(cad, 30.0)
+
+    case_path = tmp_path / "roll.yaml"
+    case_path.write_text(yaml.safe_dump(car_case(cad)), encoding="utf-8")
+    result = prepare(case_path, tmp_path / "roll", profile="car_dev")
+
+    status = json.loads(
+        (result.run_dir / "status" / "prepare.json").read_text(encoding="utf-8")
+    )
+    for wheel in CORNERS:
+        recorded = status["detail"]["wheels"][wheel]
+        assert recorded["surface_speed"] == pytest.approx(
+            12.0 * math.cos(math.radians(30.0)), rel=1e-2
+        )

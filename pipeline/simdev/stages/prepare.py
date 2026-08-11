@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -153,12 +154,12 @@ def check_ground_placement(
     footprint of the right size. Reporting that as an error would be
     rejecting correct CAD.
 
-    Anything else below the road is still an error. A chassis or a wing
-    through the ground plane is a mis-positioned export, and snappy will
-    happily mesh the intersection into a shape nobody drew and produce a run
-    that looks entirely normal. The pipeline does not move the geometry to
-    fix it - attitude and ride height belong to the CAD - so this reports and
-    stops rather than correcting.
+    Bodywork below the road is reported loudly but does not stop the run.
+    Attitude and ride height are set in CAD and are the modeller's to own, and
+    at a big enough roll or dive a splitter really can touch the road - which
+    is a condition to simulate, not a defect to reject. snappy clips it
+    against the ground the same way it clips a tyre. Since it is equally a
+    symptom of a mis-positioned export, it is never silent.
     """
     warnings: list[str] = []
     tyres = {p.name for p in spec.geometry.patches if p.role is PatchRole.TYRE}
@@ -169,12 +170,12 @@ def check_ground_placement(
         if name not in tyres and float(mesh.bounds[0][2]) < 0.0
     ]
     if offenders:
-        raise ValueError(
-            "geometry passes through the road plane at z = 0: "
+        warnings.append(
+            "geometry other than a tyre crosses the road plane at z = 0: "
             + "; ".join(sorted(offenders))
-            + ". Only tyres may cross it, where the part below the plane is "
-            "the contact patch. Fix the ride height in CAD - the pipeline "
-            "does not move the geometry"
+            + ". snappyHexMesh will clip it against the ground. Intended if "
+            "the part is meant to touch the road at this attitude; otherwise "
+            "the ride height in CAD is wrong"
         )
 
     contact = {
@@ -206,19 +207,22 @@ def _wheel_warnings(
     speeds = wheel_speeds(spec, wheels, corner_frame(spec, domain))
     warnings: list[str] = []
 
+    # Slip is reported, never judged. An RC car spends most of its cornering
+    # life in heavy understeer, so a wheel whose axis is well off square to
+    # its direction of travel is the normal operating point rather than a
+    # symptom. The pose is a modelling decision made in CAD; the pipeline's
+    # job is to say what it measured, not to have an opinion about it.
+    slips = [
+        f"{n} {math.degrees(math.asin(min(1.0, speeds[n]['slip'] / speeds[n]['road_speed']))):.1f} deg"
+        for n in sorted(speeds)
+        if speeds[n]["road_speed"] > 0.0
+    ]
+    if slips:
+        warnings.append("wheel slip angle: " + ", ".join(slips))
+
     for name in sorted(speeds):
         entry = speeds[name]
         wheel = entry["wheel"]
-        # Slip beyond a few per cent of the road speed means the wheel's axis
-        # and its direction of travel disagree - a steer angle that was not
-        # expected, or a mislabelled corner.
-        if entry["road_speed"] > 0.0 and entry["slip"] > 0.05 * entry["road_speed"]:
-            warnings.append(
-                f"wheel '{name}' cannot roll off "
-                f"{entry['slip']:.2f} m/s of its {entry['road_speed']:.2f} m/s "
-                "road speed; its axis is not square to the direction of "
-                "travel. Expected for a steered wheel, a mistake otherwise"
-            )
         if wheel.axis_surface_radius > wheel.radius:
             warnings.append(
                 f"wheel '{name}': the MRF sleeve '{wheel.axis_source}' reaches "
@@ -331,7 +335,22 @@ def prepare(
                         "width": w.width,
                         "omega": speeds[name]["omega"],
                         "surface_speed": speeds[name]["surface_speed"],
+                        "road_speed": speeds[name]["road_speed"],
                         "slip": speeds[name]["slip"],
+                        # The attitude the CAD encodes, as a number rather
+                        # than a warning. Large values are the normal
+                        # operating point for an RC car in understeer.
+                        "slip_deg": math.degrees(
+                            math.asin(
+                                min(
+                                    1.0,
+                                    speeds[name]["slip"]
+                                    / speeds[name]["road_speed"],
+                                )
+                            )
+                        )
+                        if speeds[name]["road_speed"] > 0.0
+                        else 0.0,
                     }
                     for name, w in wheels.items()
                 },

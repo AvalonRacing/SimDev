@@ -420,9 +420,20 @@ Two consequences worth knowing:
 - **Tyres are expected to cross z = 0.** A loaded tyre is modelled deflected
   into the road and the part below the plane is the contact patch;
   snappyHexMesh clips it against the ground and what remains is a flat
-  footprint of the right size. Anything *else* below the road is a hard error,
-  because a chassis through the ground plane is a mis-positioned export and
-  snappy will mesh the intersection into a shape nobody drew.
+  footprint of the right size. Bodywork below the road is *reported* rather
+  than rejected — at a big enough roll or dive a splitter really does touch
+  the road, and that is a condition to simulate.
+
+**Attitude is never failed on.** An RC car spends most of its cornering life
+in heavy understeer, so large steer and body-slip angles are the normal
+operating point rather than a symptom. Nothing in the pipeline gates on them:
+slip is measured and reported as an angle, per wheel, and recorded in
+`status/prepare.json` as `slip_deg`. The test suite prepares a car at 10, 25
+and 45 degrees of steer to keep it that way.
+
+The one attitude-adjacent failure left is a genuine singularity, not a policy:
+a wheel whose axis is within about 6 degrees of vertical has no contact patch
+and no rolling speed to solve for.
 
 ### Reverse the tunnel instead of the car
 
@@ -721,7 +732,7 @@ a log.
 | blockMesh reports negative volumes on a sector | `domain/annulus.py` | Hex handedness follows the sign of the angular step; blocks must be ordered by increasing θ |
 | Wheels turn but the road does not | Validation warnings | Straight-line case with `ground.motion: static` and spinning wheels |
 | Cd comes out negative | `caseSpec.json` `flow.direction` | The tunnel was reversed and the drag axis was not, or the car faces the wrong way for the direction set |
-| Large wheel slip warnings | `status/prepare.json` `wheels` | The CAD attitude has real steer and body slip in it. Expected in a cornering state; check the numbers are the ones intended |
+| Large wheel slip angles | `status/prepare.json` `wheels.*.slip_deg` | The CAD attitude has real steer and body slip in it. Normal for an RC car in understeer; reported, never gated |
 | `not a solid of revolution` on a wheel | The export | A `Tire_*` or `MRF_*` file containing more than its own part |
 | Part not found, but the file is there | The filename | Patch identity is the filename. A case-only mismatch is accepted with a warning; anything else is an error |
 

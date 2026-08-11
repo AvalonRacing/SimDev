@@ -300,8 +300,8 @@ def test_the_car_is_left_exactly_where_the_cad_put_it(sunken_car) -> None:
     assert float(tyre.bounds[0][2]) == pytest.approx(-0.0014, abs=1e-6)
 
 
-def test_a_non_tyre_part_through_the_road_is_rejected(tmp_path: Path) -> None:
-    """A chassis below the road is a mis-positioned export, not a contact patch."""
+def test_a_non_tyre_part_through_the_road_is_reported(tmp_path: Path) -> None:
+    """Reported, not rejected: ride height belongs to the CAD."""
     cad = tmp_path / "cad"
     # Body centred at z = 40 mm spans -10..90: it is through the road.
     _write_wheeled_car(cad, body_centre_z=40.0, tyre_centre_z=31.6)
@@ -309,8 +309,9 @@ def test_a_non_tyre_part_through_the_road_is_rejected(tmp_path: Path) -> None:
     case_path = tmp_path / "sunk.yaml"
     case_path.write_text(yaml.safe_dump(_car_case(cad)), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="passes through the road plane"):
-        prepare(case_path, tmp_path / "sunk", profile="car_dev")
+    result = prepare(case_path, tmp_path / "sunk", profile="car_dev")
+
+    assert any("crosses the road plane" in w for w in result.warnings)
 
 
 def test_a_floating_car_is_reported(tmp_path: Path) -> None:
