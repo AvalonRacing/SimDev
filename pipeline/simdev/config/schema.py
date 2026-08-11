@@ -39,12 +39,37 @@ class GroundConfig(BaseModel):
     motion: GroundMotion
 
 
+class CornerDirection(str, Enum):
+    LEFT = "left"
+    RIGHT = "right"
+
+
+class WheelRotation(str, Enum):
+    """How tyre and rim surfaces are driven.
+
+    SPINNING is the physical answer and the default. LOCKED exists because a
+    stationary wheel is a recognisable, well-documented modelling error rather
+    than a silent one: if a coded boundary condition cannot be compiled in
+    some environment, the fallback should be a choice on the record, not a
+    surprise.
+    """
+
+    SPINNING = "spinning"
+    LOCKED = "locked"
+
+
 class PhysicsConfig(BaseModel):
     turbulence_model: Literal["kOmegaSST", "kOmegaSSTLM"] = "kOmegaSST"
     wall_treatment: WallTreatment
     mode: Mode = Mode.STRAIGHT
     yaw_deg: float = 0.0
     corner_radius: float | None = None
+    # Which way the car turns. The corner centre is placed this far to the
+    # named side of the vehicle, so the sign of the frame rotation - and with
+    # it every wheel speed - follows from the flow direction rather than from
+    # a hardcoded sign. See render/context.py::corner_frame().
+    corner_direction: CornerDirection = CornerDirection.LEFT
+    wheel_rotation: WheelRotation = WheelRotation.SPINNING
 
 
 class RefinementRegion(BaseModel):
@@ -71,6 +96,16 @@ class RefinementRegion(BaseModel):
 
 
 class DomainConfig(BaseModel):
+    """Extents are in body lengths for both domain kinds.
+
+    The annulus reads the same four numbers as the box and converts them to a
+    sector: upstream/downstream become arc length along the path at the
+    vehicle's own corner radius, half_width becomes radial half-extent, and
+    height is unchanged. Declaring a cornering domain therefore needs no new
+    numbers, and a case can be flipped between straight and cornering without
+    its domain silently changing size.
+    """
+
     kind: Literal["box", "annulus"] = "box"
     upstream_lengths: float = 5.0
     downstream_lengths: float = 10.0
@@ -78,6 +113,10 @@ class DomainConfig(BaseModel):
     height_lengths: float = 3.0
     max_blockage: float = 0.01
     refinement_regions: list[RefinementRegion] = Field(default_factory=list)
+    # Arc segments per 90 degrees of sector. blockMesh draws block edges as
+    # circular arcs, but snappy's background cells are still hexes, so a
+    # sector spanned by too few segments has visibly faceted radial walls.
+    arc_segments_per_quadrant: int = Field(default=12, ge=2)
 
 
 class MeshConfig(BaseModel):
@@ -145,6 +184,15 @@ class PatchSpec(BaseModel):
     # Caps the prism stack on this patch. Still clamped by what fits the
     # cell, so this only ever asks for fewer layers, never more.
     n_layers: int | None = None
+    # Which wheel this surface belongs to, e.g. "FL". Declared, never parsed
+    # out of the patch name: a rotating wall that silently stopped rotating
+    # because a part was renamed is not a failure anyone would notice.
+    #
+    # Every surface carrying a wheel id rotates with that wheel - tyre, rim,
+    # hub, upright face. The axis, centre and radius are measured from the
+    # geometry itself (geometry/wheels.py), so they follow the driving state
+    # instead of being restated per case.
+    wheel: str | None = None
 
 
 class AhmedParams(BaseModel):
@@ -160,10 +208,43 @@ class AhmedParams(BaseModel):
 
 
 class GeometryConfig(BaseModel):
+    """Where the surfaces come from and how they are placed.
+
+    scale and translate are applied once, on import, before anything measures
+    the geometry. Everything downstream - bounding box, frontal area, domain,
+    wheel axes, ride height - therefore sees metres in the pipeline's own
+    frame, and no consumer has to remember that the CAD was authored in
+    millimetres.
+    """
+
     kind: Literal["ahmed", "stl"]
     ahmed: AhmedParams | None = None
     stl_dir: str | None = None
+    scale: float = Field(default=1.0, gt=0.0)
+    translate: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # A declared property of the CAD, not of the flow.
+    #
+    # half_model used to be derived from flow symmetry alone, which forced a
+    # symmetry plane onto any straight zero-yaw case - correct for the Ahmed
+    # body, and a silent halving of a_ref for an asymmetric vehicle. Defaults
+    # to False because that is the direction that cannot corrupt a result: a
+    # full model of symmetric geometry merely costs cells, whereas a half
+    # model of asymmetric geometry reports coefficients that are wrong and
+    # plausible at the same time.
+    symmetric: bool = False
+    # How far any surface may sit below z = 0 before prepare refuses.
+    # Geometry through the road is not a small error: snappy meshes the
+    # intersection into a shape nobody drew.
+    max_ground_penetration: float = 1.0e-4
     patches: list[PatchSpec]
+
+    def wheel_ids(self) -> list[str]:
+        """Distinct wheel ids, in first-appearance order."""
+        seen: list[str] = []
+        for patch in self.patches:
+            if patch.wheel is not None and patch.wheel not in seen:
+                seen.append(patch.wheel)
+        return seen
 
 
 class CaseSpec(BaseModel):
@@ -182,8 +263,25 @@ class CaseSpec(BaseModel):
 
     @property
     def half_model(self) -> bool:
-        """Symmetry is derived, never set. Yaw alone breaks it."""
-        return self.physics.mode is Mode.STRAIGHT and self.physics.yaw_deg == 0.0
+        """Symmetry is derived, never set.
+
+        Three independent things must all hold, and every one of them has
+        been got wrong somewhere in the literature:
+
+        - the *geometry* is symmetric about y = 0 (declared per case);
+        - the *mode* is straight, so the path does not curve;
+        - the *yaw* is zero, because sideslip breaks symmetry on its own.
+
+        The geometry term is the one this pipeline originally missed. Without
+        it a straight zero-yaw case is forced to be a half model whatever it
+        is a model *of*, and a_ref_effective is halved for a car that has no
+        symmetry plane.
+        """
+        return (
+            self.geometry.symmetric
+            and self.physics.mode is Mode.STRAIGHT
+            and self.physics.yaw_deg == 0.0
+        )
 
     @property
     def a_ref_effective(self) -> float:
@@ -281,9 +379,34 @@ class CaseSpec(BaseModel):
 
     @property
     def omega_rotation(self) -> float | None:
+        """Magnitude of the frame rotation, |omega| = U / R."""
         if self.physics.mode is Mode.CORNERING and self.physics.corner_radius:
             return self.flow.u_inf / self.physics.corner_radius
         return None
+
+    @property
+    def corner_side(self) -> float:
+        """Sign of the y offset from the car to the corner centre.
+
+        The pipeline frame has the freestream along +x, so the car travels
+        along -x, and with z up its left-hand side faces -y. A left-hand
+        corner therefore puts the centre of the turn at negative y.
+        """
+        return -1.0 if self.physics.corner_direction is CornerDirection.LEFT else 1.0
+
+    @property
+    def omega_signed(self) -> float | None:
+        """Frame rotation about +z, sign included.
+
+        Follows from corner_side rather than being asserted: with the centre
+        at y = corner_side * R and the car moving along -x, the angular
+        velocity is -corner_side * U / R. Getting this backwards mirrors the
+        entire cornering case, which looks perfectly converged.
+        """
+        magnitude = self.omega_rotation
+        if magnitude is None:
+            return None
+        return -self.corner_side * magnitude
 
     def patches_with_role(self, role: PatchRole) -> list[str]:
         return [p.name for p in self.geometry.patches if p.role is role]

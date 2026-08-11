@@ -28,6 +28,7 @@ def _spec(**physics_overrides: object) -> CaseSpec:
             "post": {"yplus_min": 30.0, "yplus_max": 300.0},
             "geometry": {
                 "kind": "ahmed",
+                "symmetric": True,
                 "ahmed": {},
                 "patches": [
                     {"name": "body", "role": "body"},

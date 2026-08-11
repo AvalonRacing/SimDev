@@ -1,0 +1,52 @@
+{% with foam_class="dictionary", foam_object="blockMeshDict" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+// Cornering domain: an annular sector swept about a vertical axis at the
+// corner centre. Curvature comes from the arc edges below; the Coriolis and
+// centrifugal terms that go with it come from constant/MRFProperties.
+//
+//   corner centre   ({{ "%.6g"|format(domain.centre[0]) }} {{ "%.6g"|format(domain.centre[1]) }})
+//   path radius     {{ "%.6g"|format(domain.radius) }} m
+//   sweep           {{ "%.4g"|format(domain.sweep * 180.0 / 3.141592653589793) }} deg
+//   arc length      {{ "%.6g"|format(domain.arc_length) }} m at the vehicle radius
+
+scale   1;
+
+vertices
+(
+{% for v in sector.vertices %}
+    ({{ "%.9g"|format(v[0]) }} {{ "%.9g"|format(v[1]) }} {{ "%.9g"|format(v[2]) }})
+{% endfor %}
+);
+
+// The name after the vertex list is a cellZone. It is what
+// constant/MRFProperties rotates, and snappyHexMesh hands it down to every
+// cell it splits out of these blocks - so the rotating frame covers the
+// refined mesh without a topoSet pass.
+blocks
+(
+{% for corners, cells in sector.hexes %}
+    hex ({{ corners|join(" ") }}) {{ background_cell_zone }} ({{ cells[0] }} {{ cells[1] }} {{ cells[2] }}) simpleGrading (1 1 1)
+{% endfor %}
+);
+
+edges
+(
+{% for start, end, mid in sector.arcs %}
+    arc {{ start }} {{ end }} ({{ "%.9g"|format(mid[0]) }} {{ "%.9g"|format(mid[1]) }} {{ "%.9g"|format(mid[2]) }})
+{% endfor %}
+);
+
+boundary
+(
+{% for name, patch_type, faces in sector_boundary %}
+    {{ name }}
+    {
+        type            {{ patch_type }};
+        faces           ({% for f in faces %}({{ f|join(" ") }}){% if not loop.last %} {% endif %}{% endfor %});
+    }
+{% endfor %}
+);
+
+mergePatchPairs ();

@@ -7,9 +7,10 @@ says what we decided. The plan
 (`docs/superpowers/plans/2026-08-09-openfoam-pipeline-vertical-slice.md`) says how
 to build it. This handbook is for the person who has to live with it afterwards.
 
-> **Status:** written against the design, before implementation. Section 5
-> (module map) and Section 8 (debugging) need a pass once the code exists —
-> they describe intent, and intent drifts.
+> **Status:** §5 (module map), §6 (how to change things) and §9 (what is not
+> here yet) describe the code as built, including the cornering and CAD work.
+> §8 (debugging) still describes intent and needs a pass once real runs have
+> failed in real ways.
 
 ---
 
@@ -138,6 +139,21 @@ So the pipeline makes it unrepresentable:
 easy to get wrong because "straight line" sounds symmetric. Cornering is not the
 only asymmetric case.
 
+**Note the geometry term, which was missing and was a real bug.** The rule
+above once read `half_model = straight and yaw == 0`, accounting only for
+symmetric *flow* and never for symmetric *geometry*. Any straight zero-yaw
+case was therefore forced to be a half model whatever it was a model of, and
+`a_ref_effective` was halved for a car with no symmetry plane. The RC car is
+asymmetric by up to 24.5 mm, about 10% of its width, so this would have
+reported every coefficient 2× high in a run that meshed, converged and looked
+entirely ordinary — the exact failure §3.3 exists to prevent, arriving through
+the one door that was left open.
+
+`geometry.symmetric` is the third input, declared per case. It **defaults to
+`False`**, which is the direction that cannot corrupt a result: a full model of
+symmetric geometry merely costs cells, while a half model of asymmetric
+geometry is silently wrong. The Ahmed case declares `true` explicitly.
+
 ### 3.4 Why the convergence gate reports a windowed mean
 
 Steady aero forces routinely keep drifting long after residuals hit 1e-4.
@@ -241,13 +257,20 @@ overrides.
 The case argument is the config **file**, not the case directory.
 
 **prepare** — resolve config → `CaseSpec` → validate (raises on inconsistency,
-returns warnings) → generate or copy geometry into `constant/triSurface/` →
-check watertightness and units → compute the union bounding box → build the
-domain → compute the *true projected* frontal area and assert blockage → render
-every dictionary → write `caseSpec.json`.
+returns warnings) → generate or import geometry into `constant/triSurface/`,
+applying the scale and translate once → check watertightness, units and ground
+placement → **measure the wheel axes, centres and rolling radii** → compute the
+union bounding box → build the domain (box or sector) → compute the *true
+projected* frontal area and assert blockage → render every dictionary → write
+`caseSpec.json`.
 
-Runs without OpenFOAM installed. This is the stage that turns a config file into
-a complete, hand-runnable case.
+Runs without OpenFOAM installed. This is the stage that turns a config file
+into a complete, hand-runnable case.
+
+What was *measured* rather than configured — the wheels, the frontal area, the
+cell count — goes into `status/prepare.json`, not `caseSpec.json`. The spec
+records what was asked for; the status records what the geometry turned out to
+be.
 
 **mesh** — `blockMesh` → `surfaceFeatureExtract` → `decomposePar` → `snappyHexMesh
 -parallel -overwrite` → `checkMesh -parallel`. Parses the layer table and the
@@ -279,9 +302,11 @@ plots, and the result record.
 | `config/resolve.py` | Layer merging, YAML loading | profiles, schema |
 | `config/validate.py` | Cross-file assertions, `estimate_y_plus` | schema, roles |
 | `geometry/ahmed.py` | Procedural Ahmed body | schema |
-| `geometry/stl.py` | STL info, watertightness, projected area | nothing |
-| `domain/base.py` | `DomainBox`, `DomainBuilder` protocol | schema |
+| `geometry/stl.py` | STL info, watertightness, import transform, projected area | nothing |
+| `geometry/wheels.py` | **Wheel axes measured from the surfaces** | roles |
+| `domain/base.py` | `Domain` protocol, `DomainBox`, `DomainSector` | schema |
 | `domain/box.py` | Rectangular tunnel, blockage | base, roles |
+| `domain/annulus.py` | Cornering sector, its block topology | base, roles |
 | `render/context.py` | **All derived values and BC logic** | schema, domain, roles |
 | `render/render.py` | Template dispatch, `caseSpec.json` | context |
 | `render/templates/` | Dictionary text | nothing (logic-free) |
@@ -367,57 +392,148 @@ that is why they are templates and not generated objects.
 If the change should vary by case, promote it to a `CaseSpec` field first
 (see above), then interpolate it.
 
-### Add a new geometry source
+### Bring in CAD
 
-Implement a writer with the same contract as `write_ahmed_stl`:
-`(params, out_dir) -> dict[str, Path]` mapping patch name to STL path. Add a
-branch in `_write_geometry()` in `stages/prepare.py` and a `kind` value in
-`GeometryConfig`.
+`geometry.kind: stl` maps one file to one patch, by filename. That is the whole
+convention, and it is what makes swapping `Body.stl` or `Wing.stl` for a new
+design a drop-in with no config edit.
+
+**The geometry contract.** Export every part in its **assembly position** for
+the driving state, one folder per state. Frame: freestream along +x so the
+nose points along −x, z up, road at z = 0, tyres standing on it. Units may be
+millimetres — set `geometry.scale: 0.001` and the transform is applied once,
+on import, so the bounding box, frontal area, wheel axes and the file snappy
+reads are all the same metres in the same frame.
+
+Positions are not configured because they cannot be: a driving state changes
+ride height, steer and camber together. Everything positional is measured from
+the surfaces, so a new driving state is a new export and no case file changes.
+
+Two checks are deliberately hard failures rather than warnings:
+
+- **A missing STL for a patch whose role carries one.** Silently skipping it
+  used to be the behaviour, and it turns a mistyped part name into a car with
+  no rear wing that meshes, solves and converges.
+- **Geometry through the road.** snappy meshes the intersection of a wheel and
+  the ground into a shape nobody drew, and the run looks entirely normal.
+  `geometry.max_ground_penetration` sets the tolerance.
+
+Keep every STL **watertight and whole**, even for half models — half models come
+from the *domain* restricting to y ≥ 0 with a `symmetry` patch, never from
+cutting geometry. Note that STL stores each facet's vertices separately, so a
+sound solid loads as unconnected triangles; `load_surface()` merges them first,
+and without that every mesh ever exported reports as leaking.
+
+For a *procedural* source instead, implement a writer with the same contract as
+`write_ahmed_stl`: `(params, out_dir) -> dict[str, Path]` mapping patch name to
+STL path. Add a branch in `_write_geometry()` in `stages/prepare.py` and a
+`kind` value in `GeometryConfig`.
 
 Keep the STL **full-body and watertight** even for half models. Half models are
 produced by the *domain* restricting to y ≥ 0 with a `symmetry` patch, not by
 cutting geometry. Cutting geometry makes it non-watertight, and snappyHexMesh
 leaks into non-watertight surfaces.
 
-### Add the cornering domain
+### How cornering works
 
-This is the big one, and the architecture was shaped around it.
+Steady cornering is only steady in a frame that turns with the car, so the
+curved domain and the rotating frame are two halves of one model. Neither
+means anything alone, and the most common way to get a plausible, wrong
+cornering result is to build one and not the other.
 
-1. Implement `AnnulusDomainBuilder` in `domain/annulus.py` satisfying the
-   `DomainBuilder` protocol. It builds a curved sector; ω = U/R is already
-   available as `CaseSpec.omega_rotation`.
-2. `DomainBox` will not describe a sector — introduce a common return type or a
-   protocol both satisfy. Do this deliberately; do not bolt sector fields onto
-   `DomainBox`.
-3. Add `blockMeshDict_annulus.jinja` and select the template set by
-   `spec.domain.kind`.
-4. **The ground BC changes.** In the rotating frame the road surface moves; the
-   straight-line `fixedValue (U 0 0)` is wrong there. Add the rotating-frame
-   expression in `build_bcs()`.
-5. Remove the "cornering requires the annulus domain" error in
-   `config/validate.py` — and *only* that one. The half-model/cornering
-   assertion must stay.
-6. Force axes are in the car frame, and **side force becomes first-class**. Check
-   `liftDir`/`dragDir`/`CofR` in `render/context.py`.
+**The domain** (`domain/annulus.py`) is an annular sector swept about a
+vertical axis through the corner centre. It reads the *same* four numbers as
+the box — upstream, downstream, half width, height — and reinterprets them for
+a curved path: upstream and downstream become arc length at the vehicle's own
+radius, half width becomes radial half-extent. A case therefore keeps its
+domain proportions when switched between straight and cornering, so a
+difference between the two runs is physics rather than tunnel size.
 
-The validator already rejects a half-model cornering case, so you cannot
-accidentally ship one.
+A sector rather than a box because in the rotating frame the still air outside
+is in solid-body rotation and its streamlines are circles. A box cuts those
+circles at an angle, making every outer face simultaneously an inlet and an
+outlet.
+
+**The frame** is a whole-domain MRF zone at ω = U/R about that same axis. The
+`all` cellZone is created by `blockMesh` — the name sits between the vertex
+list and the cell counts on each block — and snappy hands it down to every cell
+it refines. It is **not** an OpenFOAM keyword: `MRFZone::read` looks the name
+up and aborts with `cannot find MRF cellZone all` if nothing made it.
+
+**The boundary conditions follow from the frame, and are not what instinct
+says.** OpenFOAM's MRF solves the *absolute* velocity, so:
+
+| Patch | Condition | Why |
+|---|---|---|
+| inlet | `fixedValue (0 0 0)` | Far from the car the air really is at rest over the track. The onset flow emerges from the frame rotation; prescribing a freestream as well drives the case twice |
+| ground | `noSlip`, listed in `nonRotatingPatches` | The road is genuinely stationary. Its sweep under the car comes out of the frame transform — which is why it correctly varies across the track width |
+| car body | `noSlip`, *not* excluded | An included patch is forced to Ω×r, i.e. it rotates with the car. Correct, and it overrides whatever is written |
+| tyres | `codedFixedValue`, excluded | See below |
+
+`ground.motion` is ignored in cornering, and the validator says so rather than
+applying the motion twice.
+
+**Why the tyres need a coded condition.** A cornering tyre is carried around
+the corner *and* spins about its own axis — two rotations about different,
+non-intersecting axes, which is a screw motion. No single OpenFOAM
+rotating-wall condition describes one. Excluded patches carry absolute
+velocities, so `render/context.py::_tyre_bc()` sums the two terms explicitly.
+Leaving the corner term out parks a spinning wheel in space while the car
+drives away from it.
+
+Straight-line needs none of this: one rotation, so `rotatingWallVelocity`
+expresses it exactly.
+
+**The signs are derived, never asserted**, because a mirrored cornering case
+converges just as happily as a correct one. `corner_side` places the centre on
+the side the car turns toward; `omega_signed` follows from that; the inlet end
+of the sector follows from both. The test that ties them together asserts the
+property that must hold: still air, seen from the rotating frame, arrives at
+the car as +x at `u_inf`.
+
+**Blocks are ordered by increasing θ regardless of flow direction.** Hex
+handedness depends on the sign of the angular step, so generating them in flow
+order inverts every cell on a right-hand corner — and blockMesh reports that as
+negative volume, a long way from the cause.
 
 ### Add MRF / rotating wheels
 
-Two mechanisms, and you will likely want both:
+Wheels are declared by giving surfaces a shared `wheel` id in the patch list.
+Everything else is measured.
 
-- **`rotatingWallVelocity` on tyre surfaces** — cheap, correct for a smooth
-  tread. Add the BC branch for `PatchRole.TYRE` in `build_bcs()`. Needs the
-  wheel axis and ω per wheel in config.
-- **A genuine MRF cell zone** — needed where rim and spoke geometry actually
-  pump air. Requires a closed STL per zone, a `cellZone` created during
-  meshing, and `constant/MRFProperties`. Add an `MRFProperties.jinja` and a
-  `mrfZone` branch in `_write_geometry`.
+- **`geometry/wheels.py` measures the axis, centre, rolling radius and width**
+  from the surfaces themselves, per driving state. The axis is the odd one out
+  of the area-weighted second-moment tensor of a solid of revolution — one rule
+  that works for a wide wheel and a long driveshaft alike, where "largest" or
+  "smallest" would get one of them backwards. The moment is integrated exactly
+  over each triangle rather than approximated by centroids: tessellators fan a
+  flat end cap from one rim vertex, and centroid weighting read that as a 24%
+  asymmetry on a machined cylinder.
+- **Rolling speed is solved against the road, not configured.** In cornering
+  each wheel stands on road moving at its own radius from the corner centre, so
+  the outer wheels turn faster — 6.5% at a 3 m corner on a 190 mm track. The
+  component the axis cannot roll away is returned as slip, which is how a
+  steered wheel announces itself.
+- **MRF cell zones** come from a closed STL per zone with role `mrfZone`.
+  snappy makes the cellZone directly (`cellZone`/`faceZone`/`cellZoneInside`),
+  so no `topoSet` pass is needed, and the faces stay internal so no boundary
+  patch is created — which is why `build_bcs()` skips the role entirely.
 
-**Do not let MRF surfaces enter force integration.** They already cannot —
-`ROLE_TRAITS[MRF_ZONE].in_forces` is `False` — but verify it when you wire this
-up, because it is the exact bug the old pipeline needed a name filter to avoid.
+**Straight-line and cornering cannot both have wheel MRF zones.** An MRF cell
+carries exactly one frame rotation, so no cell can be going round the corner
+*and* round the wheel. Straight-line gets a zone per wheel and real rim
+pumping; cornering gets one frame over everything and drives the tyre surface
+through its boundary condition instead. What is lost in cornering is rim
+pumping, not wheel rotation, and the validator says so.
+
+One subtlety worth keeping: snappy takes the wheel-zone cells *out* of `all`
+when it creates their zones, so cornering also emits a corner-frame entry for
+each wheel zone. Without it those few hundred cells would be the only inertial
+ones in a car going round a corner.
+
+**Do not let MRF surfaces enter force integration.** They cannot —
+`ROLE_TRAITS[MRF_ZONE].in_forces` is `False` — and this is the exact bug the old
+pipeline needed a name filter to avoid.
 
 ### Add a gate
 
@@ -487,7 +603,12 @@ a log.
 | `converged=False` with tight scatter but a slope | `results/forces.png` | Genuinely still drifting — raise `max_iterations` |
 | `converged=False` with large scatter | `results/forces.png` | Unsteadiness the steady solver cannot settle; may need transient |
 | y⁺ gate fails | `results/result.json` `yplus` | Wrong wall profile for the condition, or collapsed layers (check the mesh gate detail) |
-| Coefficients ~2× expected | `caseSpec.json` `half_model` and `a_ref_full` | Should be impossible by construction — if it happens, the derivation is broken and that is a bug worth a test |
+| Coefficients ~2× expected | `caseSpec.json` `half_model`, `a_ref_full`, `geometry.symmetric` | Should be impossible by construction — if it happens, the derivation is broken and that is a bug worth a test |
+| `cannot find MRF cellZone all` | `system/blockMeshDict` | The zone is named on the block, not a keyword. A cornering case whose blockMeshDict came from the box template has no zone |
+| `Failed wmake ... corneringWheel*` | `dynamicCode/`, then `0/U` | The coded tyre condition did not compile. The generated file is C++, so vectors are comma-separated — `_cpp_vec`, not `_foam_vec` |
+| Cornering forces mirrored | `caseSpec.json` `corner_direction`; `status/prepare.json` wheel speeds | Outer wheels must turn faster than inner ones. If they do not, the corner centre is on the wrong side |
+| blockMesh reports negative volumes on a sector | `domain/annulus.py` | Hex handedness follows the sign of the angular step; blocks must be ordered by increasing θ |
+| Wheels turn but the road does not | Validation warnings | Straight-line case with `ground.motion: static` and spinning wheels |
 
 **The provenance rule:** every result carries its `spec_hash`. If a number
 surprises you, diff the `caseSpec.json` against a run you trust. That comparison
@@ -499,33 +620,30 @@ is the whole reason the spec is a text file.
 
 | Deferred | Already provided for |
 |---|---|
-| Cornering / annular domain | `DomainBuilder` protocol; `Mode.CORNERING` validates and rejects cleanly |
-| MRF zones, rotating wheels | `tyre` and `mrfZone` roles defined and unused |
-| Yaw / pitch / roll attitude | Mode table drives symmetry derivation |
+| Yaw / pitch / roll attitude | Mode table drives symmetry derivation; `geometry.symmetric` is a separate input |
 | Transition model | `turbulence_model` is config-selected |
 | Full plane-cut image suite | `post` stage exists with a minimal set |
-| Parametric sweeps | Per-run records aggregate on read |
-| STEP/CAD geometry import | `geometry.kind: stl` in the schema — **never exercised**; design in progress, see below |
+| Parametric sweeps | Per-run records aggregate on read; `--set` overrides a single field without copying the case |
+| STEP import | Not needed — the CAD now exports STL directly |
 | Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
+| Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw` and `CmRoll`; `run/parsers.py` reads only Cd and Cl |
+| Curved refinement regions | `refinement_regions` are axis-aligned boxes; a cornering wake leaves them, and the validator warns |
 
-**Three things are in flight, not merely deferred.** Design notes live in
-`docs/superpowers/specs/2026-08-09-step-geometry-path-design.md`:
+Cornering, the annular domain, MRF zones, rotating wheels and the CAD geometry
+path are **built and exercised against real OpenFOAM v2412** — a cornering car
+case meshes, creates its cell zones, compiles its coded wheel conditions and
+solves. What that does *not* mean is that any of it is validated: it means the
+plumbing is correct, not the physics.
 
-- **CAD geometry path.** The RC car arrives as STEP. `geometry.kind: stl` has
-  no test and no run behind it. Measurements of the real CAD and two settled
-  decisions are in that document; one question (ride height / ground
-  placement) is open.
-- **A correctness bug this exposes:** `half_model` is derived from flow
-  symmetry alone (`straight AND yaw == 0`), which silently forces a symmetry
-  plane onto asymmetric geometry. The car's CAD is asymmetric by up to 24.5 mm.
-  The fix is to add `geometry.symmetric` to the derivation. Until then, do not
-  run an asymmetric case in straight-line mode.
-- **A profile for the car.** `base_cell_size` is absolute metres and
-  `production` is sized for the 1 m Ahmed body. It will not transfer to a
-  447 mm car.
+**Three things that would bite next:**
 
-Each is a new module behind an interface the current code already defines. That
-was the point of building the slice first.
+- **`a_ref_full` for the car is a placeholder** taken from the body bounding
+  box. `prepare` reports the true projected frontal area — set it from that and
+  record which convention it follows.
+- **`low_y_plus` has never been run.** The wall-profile machinery is unit
+  tested; the physics path is not. The car is intended to use it, and the
+  `car`/`car_dev` profiles are sized on paper rather than measured.
+- **Nothing about the car is validated against data.** See the risk note below.
 
 **One open risk, stated plainly:** the Ahmed validation runs at Re ≈ 2.8×10⁶ with
 `high_y_plus`. It validates plumbing, numerics, domain construction, force

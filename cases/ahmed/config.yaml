@@ -67,6 +67,11 @@ forces:
 
 geometry:
   kind: ahmed
+  # The Ahmed body genuinely is symmetric about y = 0, so this case may run
+  # as a half model. It is declared rather than inferred: symmetric *flow*
+  # (straight, no yaw) is not the same claim as symmetric *geometry*, and
+  # deriving one from the other silently halves a_ref for any asymmetric car.
+  symmetric: true
   ahmed:
     length: 1.044
     width: 0.389

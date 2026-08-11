@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from simdev.config.schema import CaseSpec, GroundMotion, Mode
+from simdev.config.schema import CaseSpec, GroundMotion, Mode, WheelRotation
 from simdev.geometry.roles import PatchRole, force_roles, traits
 
 MAX_PHYSICAL_CORES = 40
@@ -59,6 +59,66 @@ def validate(spec: CaseSpec) -> list[str]:
             errors.append(
                 "mode is 'cornering' but domain.kind is "
                 f"'{spec.domain.kind}'; cornering requires the 'annulus' domain"
+            )
+        if spec.geometry.patches and any(
+            p.role is PatchRole.MRF_ZONE for p in spec.geometry.patches
+        ):
+            warnings.append(
+                "cornering rotates the whole domain about the corner, so the "
+                "per-wheel MRF zones are meshed but not used: a cell carries "
+                "one frame rotation and cannot be going round the corner and "
+                "round the wheel at once. The tyres are still driven at the "
+                "right speed by their boundary condition, so what is lost is "
+                "rim pumping, not wheel rotation"
+            )
+        if spec.ground.motion is GroundMotion.MOVING:
+            warnings.append(
+                "ground.motion is 'moving', which does nothing in a cornering "
+                "case: the road is stationary in the ground frame and its "
+                "apparent motion comes from the rotating frame instead. The "
+                "setting is ignored rather than applied twice"
+            )
+        if spec.domain.refinement_regions:
+            warnings.append(
+                f"{len(spec.domain.refinement_regions)} refinement region(s) "
+                "are axis-aligned boxes, but a cornering wake follows the "
+                "curve of the path and will leave them. Expect the far wake "
+                "to be resolved at the background cell size"
+            )
+    elif spec.domain.kind == "annulus":
+        errors.append(
+            f"domain.kind is 'annulus' but mode is '{spec.physics.mode.value}'; "
+            "the curved domain only describes a curved path"
+        )
+
+    # --- rotating wheels --------------------------------------------------
+    wheel_ids = spec.geometry.wheel_ids()
+    if wheel_ids and spec.physics.wheel_rotation is WheelRotation.LOCKED:
+        warnings.append(
+            f"{len(wheel_ids)} wheel(s) are declared but wheel_rotation is "
+            "'locked', so they are modelled as stationary walls. Stationary "
+            "wheels change the wake and the drag they generate; this is a "
+            "known simplification, not a neutral one"
+        )
+    if (
+        wheel_ids
+        and spec.physics.mode is Mode.STRAIGHT
+        and spec.ground.motion is GroundMotion.STATIC
+        and spec.physics.wheel_rotation is WheelRotation.SPINNING
+    ):
+        warnings.append(
+            "the ground is static but the wheels are set to spin, so the tyre "
+            "contact patch moves and the road under it does not. Either both "
+            "move or neither does"
+        )
+    for patch in spec.geometry.patches:
+        if patch.wheel is not None and not (
+            traits(patch.role).is_wall or patch.role is PatchRole.MRF_ZONE
+        ):
+            errors.append(
+                f"patch '{patch.name}' declares wheel '{patch.wheel}' but its "
+                f"role '{patch.role.value}' is neither a wall nor an MRF zone; "
+                "nothing about it can rotate"
             )
 
     # --- patch set -------------------------------------------------------
@@ -156,7 +216,16 @@ def validate(spec: CaseSpec) -> list[str]:
         )
 
     # --- ground ----------------------------------------------------------
-    if spec.geometry.kind == "stl" and spec.ground.motion is GroundMotion.STATIC:
+    # Not in cornering: there the road is *correctly* stationary in the
+    # ground frame and its motion under the car comes from the rotating
+    # frame. Warning about it there would contradict the cornering advice
+    # above, and a pair of warnings that disagree teaches people to ignore
+    # both.
+    if (
+        spec.geometry.kind == "stl"
+        and spec.ground.motion is GroundMotion.STATIC
+        and spec.physics.mode is not Mode.CORNERING
+    ):
         warnings.append(
             "static ground under a vehicle case: ground-effect aerodynamics "
             "will be wrong unless you are deliberately matching a fixed-floor "

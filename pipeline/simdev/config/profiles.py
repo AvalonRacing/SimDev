@@ -64,6 +64,37 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 40 physical cores. Never 80 threads: OpenFOAM is bandwidth bound.
         "solve": {"max_iterations": 4000, "n_ranks": 40},
     },
+    # The RC car. A different vehicle scale needs its own absolute cell size,
+    # because base_cell_size is metres and every refinement level is relative
+    # to it.
+    #
+    # The car is ~0.44 m long against the Ahmed body's 1.044 m, and its
+    # features are far smaller: a 42 mm wing chord, 4 mm suspension links,
+    # 66 mm tyres. 24 mm background cells with five levels of surface
+    # refinement give 0.75 mm on refined surfaces - about 56 cells across the
+    # wing chord and 5 across a control arm, which is the coarsest that still
+    # resolves the appendages generating the downforce.
+    #
+    # It runs low_y_plus, so the first layer is 20 um and 18 layers stack to
+    # 0.79 mm. That does *not* fit inside half a 0.75 mm cell, and validate()
+    # will say so patch by patch rather than letting snappy discover it forty
+    # minutes into meshing - see docs/handbook.md section 6.
+    "car_dev": {
+        "mesh": {
+            "base_cell_size": 0.024,
+            "surface_refinement_min": 3,
+            "surface_refinement_max": 4,
+        },
+        "solve": {"max_iterations": 400, "n_ranks": 8, "plateau_window": 50},
+    },
+    "car": {
+        "mesh": {
+            "base_cell_size": 0.024,
+            "surface_refinement_min": 4,
+            "surface_refinement_max": 5,
+        },
+        "solve": {"max_iterations": 5000, "n_ranks": 40},
+    },
 }
 
 WALL_PROFILES: dict[WallTreatment, dict[str, Any]] = {

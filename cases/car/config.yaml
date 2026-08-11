@@ -1,0 +1,155 @@
+# AvalonRacing RC car - straight-line baseline, driving state "testcase".
+#
+# Run with the car profile:
+#   simdev run cases/car/config.yaml --run-dir ~/runs/car-01 --profile car_dev
+#
+# GEOMETRY CONTRACT
+#
+# The pipeline frame is: x streamwise with the freestream along +x, so the
+# car's nose points along -x; y to the side; z up with the road at z = 0 and
+# the tyres standing on it. Every STL must be exported in the *assembly*
+# position for the driving state, in one folder per state - the wheel axes,
+# centres and rolling radii are measured from those positions, so a new
+# driving state is a new export and nothing in this file changes.
+#
+# One file per patch, named exactly as the patch. Body.stl and Wing.stl are
+# expected to be replaced on every design change; because identity comes from
+# the filename, that is a drop-in with no config edit.
+#
+# a_ref_full and l_ref below are declarations, not measurements. prepare
+# reports the true projected frontal area it computed - set a_ref_full from
+# that once the assembled geometry is in place, and record which convention
+# it follows.
+name: car
+
+flow:
+  u_inf: 12.0
+  nu: 1.5e-05
+  rho: 1.225
+  turbulence_intensity: 0.01
+  turbulence_length_scale: 0.02
+
+ground:
+  # A vehicle in ground effect. Unlike the Ahmed validation there is no fixed
+  # floor to reproduce here, so the road moves with the flow.
+  motion: moving
+
+physics:
+  turbulence_model: kOmegaSST
+  # At 1/10 scale the appendages sit at Re_chord ~ 3.5e4, where the first
+  # cell of a high-y+ mesh swallows most of the boundary layer. See
+  # docs/handbook.md section 3.6.
+  wall_treatment: low_y_plus
+  mode: straight
+  yaw_deg: 0.0
+  wheel_rotation: spinning
+
+domain:
+  kind: box
+  upstream_lengths: 5.0
+  downstream_lengths: 10.0
+  half_width_lengths: 3.0
+  height_lengths: 3.0
+  max_blockage: 0.01
+
+  refinement_regions:
+    - name: wake
+      level: 2
+      x_start: -0.2
+      x_end: 3.0
+      half_width: 0.6
+      height: 0.6
+    # The rear wing and the wake immediately behind it, where the downforce
+    # is made and lost.
+    - name: rearWake
+      level: 3
+      x_start: 0.5
+      x_end: 1.2
+      half_width: 0.35
+      height: 0.5
+
+forces:
+  # PLACEHOLDER, from the body bounding box (194 x 112 mm). Replace with the
+  # projected frontal area prepare reports for the assembled car.
+  a_ref_full: 0.0217
+  l_ref: 0.429
+  c_of_r: [0.0, 0.0, 0.0]
+
+geometry:
+  kind: stl
+  stl_dir: CAD/Testcase
+  # The CAD is authored in millimetres; SI_UNIT(.MILLI.,.METRE.).
+  scale: 0.001
+  translate: [0.0, 0.0, 0.0]
+  # The car is NOT symmetric about y = 0 - the measured offsets reach 24.5 mm
+  # on the wing, about 10% of vehicle width. Declaring this keeps the model
+  # full and keeps a_ref at its full value. See docs/handbook.md section 3.3.
+  symmetric: false
+
+  patches:
+    # --- bodywork ------------------------------------------------------
+    - {name: Body, role: body}
+    - {name: Chassis, role: body}
+    # A 42 mm chord against a 429 mm car: at the case-wide level it lands a
+    # handful of cells across and the section stops being an aerofoil.
+    - {name: Wing, role: body, refinement_min: 5, refinement_max: 6}
+
+    # --- wheels --------------------------------------------------------
+    # Each corner is three surfaces sharing one wheel id. The id is what
+    # pairs them; nothing parses the names. The rotation axis, centre and
+    # rolling radius are measured from these surfaces at prepare time, so
+    # they follow the driving state rather than being restated here.
+    - {name: Tire_FL, role: tyre, wheel: FL, refinement_min: 4, refinement_max: 5}
+    - {name: Tire_FR, role: tyre, wheel: FR, refinement_min: 4, refinement_max: 5}
+    - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 4, refinement_max: 5}
+    - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 4, refinement_max: 5}
+
+    # Closed sleeves around the rims. They become cell zones rather than
+    # walls, so the rim and spokes actually pump air instead of presenting a
+    # moving skin. Not used in cornering - see cases/car/cornering.yaml.
+    - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 3, refinement_max: 4}
+    - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 3, refinement_max: 4}
+    - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 3, refinement_max: 4}
+    - {name: MRF_RR, role: mrfZone, wheel: RR, refinement_min: 3, refinement_max: 4}
+
+    # Concentric with the wheel by construction, so they turn with it.
+    - {name: Wheelhub_FL, role: body, wheel: FL, refinement_min: 4, refinement_max: 5}
+    - {name: Wheelhub_FR, role: body, wheel: FR, refinement_min: 4, refinement_max: 5}
+    - {name: Wheelhub_RL, role: body, wheel: RL, refinement_min: 4, refinement_max: 5}
+    - {name: Wheelhub_RR, role: body, wheel: RR, refinement_min: 4, refinement_max: 5}
+
+    # --- suspension ----------------------------------------------------
+    # Deliberately static walls, including the driveshafts. A 6 mm shaft's
+    # own rotation moves a negligible amount of air, and tagging it to a
+    # wheel would drive it about the *wheel's* axis - correct only if the two
+    # are exactly collinear, which is not true once the suspension moves.
+    #
+    # These are 4 mm sections. They carry extra refinement for the same
+    # reason the Ahmed stilts do: at the case-wide level snappy cannot build
+    # a medial axis it trusts and the layers collapse.
+    - {name: UCA_FL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: UCA_FR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: UCA_RL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: UCA_RR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: LCA_FL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: LCA_FR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: LCA_RL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: LCA_RR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: TR_FL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: TR_FR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: TR_RL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: TR_RR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: DS_FL, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: DS_FR, role: body, refinement_min: 5, refinement_max: 6}
+    - {name: DS_RL, role: body, refinement_min: 5, refinement_max: 6}
+    # NOTE: the current export ships this part as FS_RR.stl. Rename it to
+    # DS_RR.stl, or rename this patch - prepare fails loudly either way
+    # rather than meshing a car with three driveshafts.
+    - {name: DS_RR, role: body, refinement_min: 5, refinement_max: 6}
+
+    # --- domain boundaries ---------------------------------------------
+    # No symmetry patch: the geometry is not symmetric, so the model is full.
+    - {name: ground, role: ground}
+    - {name: inlet, role: inlet}
+    - {name: outlet, role: outlet}
+    - {name: farfield, role: farfield}

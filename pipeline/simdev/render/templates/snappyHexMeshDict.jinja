@@ -50,6 +50,16 @@ castellatedMeshControls
         {{ patch.name }}
         {
             level   ({{ patch.level_min }} {{ patch.level_max }});
+{% if patch.is_cell_zone %}
+            // A closed volume rather than a wall. Its faces stay internal so
+            // flow passes through them, and the cells it encloses become a
+            // cellZone for constant/MRFProperties to rotate. No boundary
+            // patch is created, which is why nothing writes a boundary
+            // condition for this name.
+            cellZone        {{ patch.name }};
+            faceZone        {{ patch.name }};
+            cellZoneInside  inside;
+{% endif %}
         }
 {% endfor %}
     }

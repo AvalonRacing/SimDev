@@ -1,0 +1,24 @@
+{% with foam_class="dictionary", foam_object="MRFProperties" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+{% for zone in mrf_zones %}
+{{ zone.name }}
+{
+    cellZone        {{ zone.cell_zone }};
+    active          yes;
+
+{% if zone.non_rotating_patches %}
+    // Patches that stay still in the ground frame while the zone turns.
+    // Their boundary values are read as absolute velocities and converted,
+    // which is how a stationary road ends up sweeping under a cornering car
+    // at a speed that varies correctly across the track.
+    nonRotatingPatches ({% for p in zone.non_rotating_patches %}{{ p }} {% endfor %});
+
+{% endif %}
+    origin          ({{ "%.10g"|format(zone.origin[0]) }} {{ "%.10g"|format(zone.origin[1]) }} {{ "%.10g"|format(zone.origin[2]) }});
+    axis            ({{ "%.10g"|format(zone.axis[0]) }} {{ "%.10g"|format(zone.axis[1]) }} {{ "%.10g"|format(zone.axis[2]) }});
+    omega           {{ "%.10g"|format(zone.omega) }};
+}
+
+{% endfor %}

@@ -60,3 +60,10 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+
+# CAD exports. Input rather than output, but still not tracked: these are
+# large binaries (Testcase.zip is 26 MB) and Body/Wing are replaced on every
+# design change, so tracking them would grow the repo by a full copy per
+# iteration. Keep them alongside the checkout and point geometry.stl_dir at
+# them. Reverse this line if the team decides CAD revisions belong in git.
+CAD/

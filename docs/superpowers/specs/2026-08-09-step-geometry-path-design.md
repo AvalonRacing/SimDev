@@ -1,11 +1,27 @@
-# STEP/STL Geometry Path — Design (DRAFT, INCOMPLETE)
+# STEP/STL Geometry Path — Design (SUPERSEDED, 2026-08-11)
 
-**Status: brainstorming paused mid-design.** Two decisions are made, one is
-open, and the design was never presented or approved. Do not implement from
-this document as though it were settled. Resume at §6.
+**Status: superseded. Kept for the reasoning, not as instructions.** The
+geometry path is built; see `docs/handbook.md` §6 "Bring in CAD" and
+`cases/car/config.yaml` for what it actually became.
 
-This exists so the next session does not have to re-measure the CAD or
-re-derive the findings below.
+What changed between this document and the implementation:
+
+- **No STEP.** The CAD now exports STL directly (31 parts, `Testcase.zip`), so
+  §3.2's tessellation-inside-`prepare` design and the gmsh dependency are both
+  moot. `geometry.scale` handles the millimetres.
+- **The ride-height question in §4 answered itself** by moving upstream: parts
+  are exported in assembly position with the tyres on the road, and
+  `prepare` *checks* placement (`geometry.max_ground_penetration`) rather than
+  inferring it. Option 1 in §4, in effect.
+- **§3.3's `half_model` fix was implemented as proposed**, with the default
+  `geometry.symmetric = False` chosen as the safe direction.
+- **§5's open items** are resolved except tessellation quality, which the
+  exporter now owns, and the car resolution profile, which exists (`car`,
+  `car_dev`) but is sized on paper rather than measured.
+
+One finding here does *not* transfer: the measurements in §2 are of the older
+STEP files and disagree with the current STL export. Re-measure rather than
+citing them.
 
 ---
 

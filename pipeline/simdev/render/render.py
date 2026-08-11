@@ -7,13 +7,16 @@ from typing import Any
 import jinja2
 
 from simdev.config.schema import CaseSpec
-from simdev.domain.base import DomainBox
+from simdev.domain.base import Domain
+from simdev.geometry.wheels import Wheel
 from simdev.render.context import build_context
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+# blockMeshDict is chosen by the domain rather than listed here: a straight
+# tunnel and a cornering sector are different block topologies, not one
+# template with a branch in it.
 MESH_DICTS: dict[str, str] = {
-    "blockMeshDict.jinja": "system/blockMeshDict",
     "surfaceFeatureExtractDict.jinja": "system/surfaceFeatureExtractDict",
     "snappyHexMeshDict.jinja": "system/snappyHexMeshDict",
     "decomposeParDict.jinja": "system/decomposeParDict",
@@ -45,11 +48,15 @@ def _render_set(
 
 def render_mesh_dicts(
     spec: CaseSpec,
-    domain: DomainBox,
+    domain: Domain,
     geometry_files: dict[str, Path],
     out_dir: Path,
+    wheels: dict[str, Wheel] | None = None,
 ) -> None:
-    _render_set(MESH_DICTS, build_context(spec, domain, geometry_files), out_dir)
+    context = build_context(spec, domain, geometry_files, wheels)
+    templates = dict(MESH_DICTS)
+    templates[domain.block_mesh_template] = "system/blockMeshDict"
+    _render_set(templates, context, out_dir)
 
 
 SOLVER_DICTS: dict[str, str] = {
@@ -65,12 +72,19 @@ FIELDS = ("U", "p", "k", "omega", "nut")
 
 def render_solver_dicts(
     spec: CaseSpec,
-    domain: DomainBox,
+    domain: Domain,
     geometry_files: dict[str, Path],
     out_dir: Path,
+    wheels: dict[str, Wheel] | None = None,
 ) -> None:
-    context = build_context(spec, domain, geometry_files)
-    _render_set(SOLVER_DICTS, context, out_dir)
+    context = build_context(spec, domain, geometry_files, wheels)
+    templates = dict(SOLVER_DICTS)
+    # Only written when something actually rotates. An empty MRFProperties is
+    # valid OpenFOAM and does nothing, but it leaves a rotating-frame file in
+    # a straight-line case for someone to read and mistrust later.
+    if context["mrf_zones"]:
+        templates["MRFProperties.jinja"] = "constant/MRFProperties"
+    _render_set(templates, context, out_dir)
 
     environment = env()
     template = environment.get_template("field.jinja")
@@ -92,14 +106,15 @@ def render_solver_dicts(
 
 def render_case(
     spec: CaseSpec,
-    domain: DomainBox,
+    domain: Domain,
     geometry_files: dict[str, Path],
     out_dir: Path,
+    wheels: dict[str, Wheel] | None = None,
 ) -> None:
     """Render a complete, self-contained case plus its provenance record."""
     out = Path(out_dir)
-    render_mesh_dicts(spec, domain, geometry_files, out)
-    render_solver_dicts(spec, domain, geometry_files, out)
+    render_mesh_dicts(spec, domain, geometry_files, out, wheels)
+    render_solver_dicts(spec, domain, geometry_files, out, wheels)
     (out / "caseSpec.json").write_text(
         json.dumps(
             {"spec": spec.model_dump(mode="json"), "hash": spec.spec_hash()},

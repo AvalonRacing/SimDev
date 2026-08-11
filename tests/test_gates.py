@@ -17,6 +17,7 @@ BASE: dict = {
     "forces": {"a_ref_full": 0.112, "l_ref": 1.044},
     "geometry": {
         "kind": "ahmed",
+        "symmetric": True,
         "ahmed": {},
         "patches": [
             {"name": "body", "role": "body"},

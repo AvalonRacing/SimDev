@@ -37,6 +37,20 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("--profile", default="dev")
         sub.add_argument("--wall-treatment", default=None)
         sub.add_argument("--force", action="store_true")
+        sub.add_argument(
+            "--set",
+            dest="overrides",
+            action="append",
+            default=[],
+            metavar="path.to.field=value",
+            help=(
+                "override one resolved field, e.g. "
+                "--set physics.mode=cornering. Repeatable. This is the last "
+                "layer of the merge, so it wins over the case file, and it "
+                "lands in caseSpec.json like any other value - a sweep does "
+                "not need a copy of the case per point."
+            ),
+        )
 
     for name in ("mesh", "solve", "post"):
         sub = subparsers.add_parser(name)
@@ -79,6 +93,31 @@ def _doctor() -> int:
     return 0
 
 
+def parse_overrides(assignments: list[str]) -> dict:
+    """Turn `a.b=value` strings into the nested dict resolve() expects.
+
+    Values go through the YAML scalar parser, so 3.0 is a float, cornering is
+    a string and true is a boolean - the same reading they would get from the
+    case file, rather than everything arriving as text and failing schema
+    validation for the wrong reason.
+    """
+    import yaml
+
+    overrides: dict = {}
+    for assignment in assignments:
+        key, separator, raw = assignment.partition("=")
+        if not separator:
+            raise ValueError(
+                f"--set expects path.to.field=value, got {assignment!r}"
+            )
+        target = overrides
+        parts = key.strip().split(".")
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = yaml.safe_load(raw)
+    return overrides
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
@@ -99,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.run_dir,
                 profile=args.profile,
                 wall_treatment=args.wall_treatment,
+                overrides=parse_overrides(args.overrides),
                 force=args.force,
             )
             if args.command == "prepare":
@@ -125,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     # SchemaValidationError is pydantic's: a case file that is malformed rather
     # than merely inconsistent fails in model_validate, before our own
     # cross-file assertions ever run.
-    except (StageError, ValidationError, SchemaValidationError) as error:
+    except (StageError, ValidationError, SchemaValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     except FileNotFoundError as error:

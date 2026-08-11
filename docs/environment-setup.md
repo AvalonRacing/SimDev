@@ -140,17 +140,26 @@ Also note that Git Bash rewrites bare Unix paths passed as `wsl.exe`
 arguments (`/home/info/...` becomes `C:/Program Files/Git/home/info/...`).
 Keep paths inside the quoted `bash -lc` string.
 
-### CAD conversion (in progress)
+### CAD
 
-STEP import uses `gmsh`, which bundles OpenCASCADE and needs no FreeCAD
-install. On Ubuntu it additionally needs a system library that the wheel does
-not carry:
+No conversion step and no extra dependency: the CAD is exported as STL, one
+file per patch, and `trimesh` (already required) reads it. The earlier
+STEP-via-gmsh plan is not needed — see
+`docs/superpowers/specs/2026-08-09-step-geometry-path-design.md` for why it was
+dropped.
 
-```bash
-sudo apt-get install -y libglu1-mesa
-```
+The export contract is in `docs/handbook.md` §6 "Bring in CAD". The part that
+bites: parts must be exported in **assembly position**, not in their own part
+frames. An export that loses the assembly transforms writes every corner of the
+car to the same coordinates, and all four wheels land on top of each other at
+the origin.
 
-Without it, `import gmsh` fails with `OSError: libGLU.so.1: cannot open
-shared object file`. `gmsh` is not yet a declared dependency in
-`pyproject.toml` — see
-`docs/superpowers/specs/2026-08-09-step-geometry-path-design.md`.
+### Coded boundary conditions
+
+Cornering tyres use `codedFixedValue`, which OpenFOAM compiles at run time into
+`<case>/dynamicCode/`. This needs `allowSystemOperations 1` in
+`etc/controlDict` — the default in v2412 — and a writable run directory, which
+is another reason runs live under `~/runs` on ext4 rather than on `/mnt/c`.
+
+A compile failure aborts the solver with `Failed wmake` and the generated
+source is left in `dynamicCode/` to read.
