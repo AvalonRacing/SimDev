@@ -36,9 +36,12 @@ functions
         lRef            {{ spec.forces.l_ref }};
         Aref            {{ a_ref }};
 
+        // Drag acts along the flow and the side axis completes a
+        // right-handed set with it, so both follow flow.direction. Leaving
+        // dragDir at +x with the tunnel reversed reports a negative Cd.
         liftDir         (0 0 1);
-        dragDir         (1 0 0);
-        pitchAxis       (0 1 0);
+        dragDir         {{ drag_dir }};
+        pitchAxis       {{ pitch_axis }};
         CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
     }
 

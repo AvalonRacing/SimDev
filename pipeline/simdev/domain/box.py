@@ -28,8 +28,15 @@ class BoxDomainBuilder:
         length = hi[0] - lo[0]
         d = spec.domain
 
-        x_min = lo[0] - d.upstream_lengths * length
-        x_max = hi[0] + d.downstream_lengths * length
+        # Upstream and downstream are relative to the flow, not to +x. With
+        # the tunnel reversed the long tail of the domain has to be on the
+        # other side of the car, or the wake runs straight out of the inlet.
+        if spec.flow_sign > 0:
+            x_min = lo[0] - d.upstream_lengths * length
+            x_max = hi[0] + d.downstream_lengths * length
+        else:
+            x_min = lo[0] - d.downstream_lengths * length
+            x_max = hi[0] + d.upstream_lengths * length
         z_min = 0.0
         z_max = d.height_lengths * length
         y_max = d.half_width_lengths * length
@@ -57,6 +64,7 @@ class BoxDomainBuilder:
             ground=_only(spec, PatchRole.GROUND),
             farfield=_only(spec, PatchRole.FARFIELD),
             symmetry=symmetry,
+            flow_sign=spec.flow_sign,
             geom_min=(lo[0], lo[1], lo[2]),
             geom_max=(hi[0], hi[1], hi[2]),
         )

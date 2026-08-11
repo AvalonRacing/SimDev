@@ -27,12 +27,33 @@ class GroundMotion(str, Enum):
     MOVING = "moving"
 
 
+class FlowDirection(str, Enum):
+    """Which way along x the freestream blows.
+
+    The car is never rotated to suit the pipeline - attitude belongs to the
+    CAD - so the tunnel is turned around instead. A CAD assembly built
+    nose-forward along +x is a car travelling along +x, which means the air
+    comes at it from +x and the freestream is '-x'.
+
+    Everything directional is derived from this: which end of the domain is
+    the inlet, the drag axis, which side of the car is its left, the sign of
+    the cornering frame, and the direction the road moves under the tyres.
+    None of those may be written down separately, because a case with the
+    tunnel reversed and the drag axis not is one that converges to a
+    confidently negative Cd.
+    """
+
+    PLUS_X = "+x"
+    MINUS_X = "-x"
+
+
 class FlowConfig(BaseModel):
     u_inf: float = Field(gt=0.0)
     nu: float = 1.5e-5
     rho: float = 1.225
     turbulence_intensity: float = 0.01
     turbulence_length_scale: float = Field(gt=0.0)
+    direction: FlowDirection = FlowDirection.PLUS_X
 
 
 class GroundConfig(BaseModel):
@@ -207,24 +228,6 @@ class AhmedParams(BaseModel):
     include_stilts: bool = True
 
 
-class GroundDatum(str, Enum):
-    """How the road plane is established relative to the geometry.
-
-    AS_IS trusts the CAD: z = 0 is already the road. TYRE_CONTACT moves the
-    whole car rigidly until its lowest tyre point rests on z = 0.
-
-    Rigidly, and from the tyres only, matters. The four tyres in the test
-    export reach z = -0.70, -1.05, -1.04 and -1.40 mm; that 0.7 mm spread is
-    suspension travel and rake, which is real and must survive. Snapping each
-    wheel to the road separately would flatten the car's attitude, and
-    snapping to the lowest point of *any* surface would hand ride height to
-    whatever splitter or sensor boss happens to hang lowest.
-    """
-
-    AS_IS = "as_is"
-    TYRE_CONTACT = "tyre_contact"
-
-
 class TessellationConfig(BaseModel):
     """Surface mesh sizing for STEP import, in metres.
 
@@ -243,30 +246,24 @@ class TessellationConfig(BaseModel):
 
 
 class GeometryConfig(BaseModel):
-    """Where the surfaces come from and how they are placed.
+    """Where the surfaces come from.
 
-    The import transform is applied once, in a fixed order - scale, then
-    rotation about z, then translation, then the ground datum - before
-    anything measures the geometry. Everything downstream (bounding box,
-    frontal area, domain, wheel axes, ride height) therefore sees metres in
-    the pipeline's own frame, and no consumer has to remember that the CAD
-    was authored in millimetres and facing the other way.
+    **The CAD is the truth, and the pipeline does not move it.** Yaw, pitch,
+    roll, steering, camber and ride height are all set in CAD and arrive
+    baked into the part positions, so there is no rotation, no translation
+    and no ground snapping here. The only thing applied on import is `scale`,
+    which is a unit conversion rather than a placement: OpenFOAM works in
+    metres and the CAD is authored in millimetres.
+
+    This is deliberate and worth keeping. Every transform the pipeline is
+    allowed to apply is a place where the simulated car can differ from the
+    drawn one, and the difference is invisible in the result.
     """
 
     kind: Literal["ahmed", "stl", "step"]
     ahmed: AhmedParams | None = None
     source_dir: str | None = None
     scale: float = Field(default=1.0, gt=0.0)
-    # Rotation about the vertical axis, applied after scaling.
-    #
-    # The pipeline frame has the freestream along +x, so the car's nose faces
-    # -x. CAD assemblies are routinely built nose-forward along +x, and 180
-    # here turns one into the other. It is a rotation and not a mirror on
-    # purpose: negating x would flip the car's chirality and quietly swap
-    # left for right on an asymmetric vehicle.
-    rotate_z_deg: float = 0.0
-    translate: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    ground_datum: GroundDatum = GroundDatum.AS_IS
     tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
     # A declared property of the CAD, not of the flow.
     #
@@ -278,10 +275,6 @@ class GeometryConfig(BaseModel):
     # model of asymmetric geometry reports coefficients that are wrong and
     # plausible at the same time.
     symmetric: bool = False
-    # How far any surface may sit below z = 0 before prepare refuses.
-    # Geometry through the road is not a small error: snappy meshes the
-    # intersection into a shape nobody drew.
-    max_ground_penetration: float = 1.0e-4
     patches: list[PatchSpec]
 
     def wheel_ids(self) -> list[str]:
@@ -436,28 +429,58 @@ class CaseSpec(BaseModel):
         return None
 
     @property
+    def flow_sign(self) -> float:
+        """+1 if the freestream blows along +x, -1 if along -x.
+
+        The single number every other direction is derived from. Nothing else
+        may hard-code a streamwise sign.
+        """
+        return 1.0 if self.flow.direction is FlowDirection.PLUS_X else -1.0
+
+    @property
+    def freestream(self) -> tuple[float, float, float]:
+        """Freestream velocity vector."""
+        return (self.flow_sign * self.flow.u_inf, 0.0, 0.0)
+
+    @property
+    def drag_dir(self) -> tuple[float, float, float]:
+        """Drag acts along the flow, so it follows the tunnel."""
+        return (self.flow_sign, 0.0, 0.0)
+
+    @property
+    def pitch_axis(self) -> tuple[float, float, float]:
+        """Completes a right-handed (drag, side, lift) set.
+
+        side = lift x drag, so reversing the tunnel reverses it too. Leaving
+        it at +y while the drag axis flips silently changes the sign of every
+        pitching moment - and aero balance is computed from that moment.
+        """
+        return (0.0, self.flow_sign, 0.0)
+
+    @property
     def corner_side(self) -> float:
         """Sign of the y offset from the car to the corner centre.
 
-        The pipeline frame has the freestream along +x, so the car travels
-        along -x, and with z up its left-hand side faces -y. A left-hand
-        corner therefore puts the centre of the turn at negative y.
+        The car travels *against* the freestream, so its forward direction is
+        -flow_sign in x, and with z up its left-hand side faces -flow_sign in
+        y. A left-hand corner puts the centre of the turn on that side.
         """
-        return -1.0 if self.physics.corner_direction is CornerDirection.LEFT else 1.0
+        turn = -1.0 if self.physics.corner_direction is CornerDirection.LEFT else 1.0
+        return self.flow_sign * turn
 
     @property
     def omega_signed(self) -> float | None:
         """Frame rotation about +z, sign included.
 
-        Follows from corner_side rather than being asserted: with the centre
-        at y = corner_side * R and the car moving along -x, the angular
-        velocity is -corner_side * U / R. Getting this backwards mirrors the
-        entire cornering case, which looks perfectly converged.
+        Derived rather than asserted: with the centre at y = corner_side * R
+        and the car moving at -flow_sign in x, the angular velocity works out
+        as -corner_side * flow_sign * U / R. Getting this backwards mirrors
+        the entire cornering case, which looks perfectly converged.
         """
         magnitude = self.omega_rotation
         if magnitude is None:
             return None
-        return -self.corner_side * magnitude
+        return -self.corner_side * self.flow_sign * magnitude
 
     def patches_with_role(self, role: PatchRole) -> list[str]:
         return [p.name for p in self.geometry.patches if p.role is role]

@@ -72,9 +72,12 @@ def location_in_mesh(domain: Domain) -> tuple[float, float, float]:
             domain.z_min + 0.50 * (domain.z_max - domain.z_min),
         )
 
+    # A tenth of the way in from the *inlet* end, which is not always the -x
+    # end: with the tunnel reversed this side is the long downstream tail,
+    # and seeding there is still in the fluid but a long way from the car.
     dx = domain.x_max - domain.x_min
     return (
-        domain.x_min + 0.10 * dx,
+        domain.inlet_x + domain.flow_sign * 0.10 * dx,
         domain.y_min + 0.25 * (domain.y_max - domain.y_min),
         domain.z_min + 0.50 * (domain.z_max - domain.z_min),
     )
@@ -251,15 +254,19 @@ def wheel_speeds(
     a 0.19 m track that is a 6% spread. Hard-coding one wheel speed would put
     that error on every corner of the car.
     """
+    # In the car's frame the road runs with the flow, so it follows the
+    # tunnel direction rather than +x.
     road_reference = (
-        spec.flow.u_inf if spec.ground.motion is GroundMotion.MOVING else 0.0
+        np.asarray(spec.freestream, dtype=float)
+        if spec.ground.motion is GroundMotion.MOVING
+        else np.zeros(3)
     )
 
     speeds: dict[str, dict[str, Any]] = {}
     for name, wheel in wheels.items():
         contact = wheel.contact_point()
         if frame is None:
-            road = np.array([road_reference, 0.0, 0.0])
+            road = road_reference
         else:
             road = frame.road_velocity_at(contact)
 
@@ -331,8 +338,7 @@ def build_bcs(
     frame: CornerFrame | None = None,
 ) -> dict[str, list[Bc]]:
     """Boundary conditions per field per patch. All branching happens here."""
-    u = spec.flow.u_inf
-    freestream = _vec(u, 0.0, 0.0)
+    freestream = _vec(*spec.freestream)
     moving_ground = spec.ground.motion is GroundMotion.MOVING
     speeds = speeds or {}
 
@@ -544,7 +550,9 @@ def build_context(
     # cornering case would seed the domain with a uniform velocity that no
     # boundary supports, and the first iterations would be spent unwinding
     # it; still air is both the correct absolute state and the quiet start.
-    internal_u = "uniform (0 0 0)" if frame else f"uniform ({spec.flow.u_inf} 0 0)"
+    internal_u = (
+        "uniform (0 0 0)" if frame else f"uniform {_foam_vec(spec.freestream)}"
+    )
 
     is_sector = isinstance(domain, DomainSector)
     sector_mesh = SectorMesh(domain) if is_sector else None
@@ -567,6 +575,8 @@ def build_context(
         "omega_inlet": omega,
         "nut_inlet": k / omega,
         "a_ref": spec.a_ref_effective,
+        "drag_dir": _foam_vec(spec.drag_dir),
+        "pitch_axis": _foam_vec(spec.pitch_axis),
         "location_in_mesh": location_in_mesh(domain),
         "ground_is_moving": spec.ground.motion.value == "moving",
         "symmetry_patch": domain.symmetry,

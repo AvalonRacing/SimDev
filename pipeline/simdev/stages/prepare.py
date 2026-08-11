@@ -7,7 +7,7 @@ from typing import Any
 import trimesh
 
 from simdev.config.resolve import load_case
-from simdev.config.schema import CaseSpec, GroundDatum
+from simdev.config.schema import CaseSpec
 from simdev.config.validate import validate
 from simdev.domain.annulus import AnnulusDomainBuilder, check_sweep
 from simdev.domain.base import Domain, DomainSector
@@ -19,7 +19,6 @@ from simdev.geometry.stl import (
     check_geometry,
     load_surface,
     place_surface,
-    projected_frontal_area,
     stl_info,
     write_surface,
 )
@@ -41,21 +40,20 @@ class PrepareResult:
     spec: CaseSpec
     domain: Domain
     run_dir: Path
-    frontal_area: float
     wheels: dict[str, Wheel] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
 
 def _write_geometry(
     spec: CaseSpec, run_dir: Path
-) -> tuple[dict[str, Path], dict[str, trimesh.Trimesh]]:
+) -> tuple[dict[str, Path], dict[str, trimesh.Trimesh], list[str]]:
     """Place every surface into the run directory, and keep what was loaded.
 
-    Returns the meshes alongside the paths because the car is 1.36 M
-    triangles across 31 parts, and the bounding box, the frontal area and the
-    wheel axes all want the same surfaces. Re-reading them from disk three
-    times was the difference between prepare taking seconds and taking a
-    minute.
+    Returns the meshes alongside the paths because the bounding box, the
+    ground check and the wheel axes all want the same surfaces, and the car
+    is several hundred thousand triangles across fifteen parts. Re-reading
+    them from disk for each was the difference between prepare taking
+    seconds and taking a minute.
     """
     tri_surface = run_dir / "constant" / "triSurface"
     tri_surface.mkdir(parents=True, exist_ok=True)
@@ -63,7 +61,7 @@ def _write_geometry(
     if spec.geometry.kind == "ahmed":
         assert spec.geometry.ahmed is not None
         files = write_ahmed_stl(spec.geometry.ahmed, tri_surface)
-        return files, {name: load_surface(p) for name, p in files.items()}
+        return files, {name: load_surface(p) for name, p in files.items()}, []
 
     assert spec.geometry.source_dir is not None
     source_dir = Path(spec.geometry.source_dir)
@@ -80,23 +78,25 @@ def _write_geometry(
 
     meshes: dict[str, trimesh.Trimesh] = {}
     missing: list[str] = []
+    renamed: list[str] = []
 
     for patch in spec.geometry.patches:
         if not traits(patch.role).from_stl:
             continue
         source = source_dir / f"{patch.name}{suffix}"
         if not source.exists():
-            missing.append(f"{patch.name} (role {patch.role.value})")
-            continue
+            near = _case_insensitive_match(source_dir, patch.name, suffix)
+            if near is None:
+                missing.append(f"{patch.name} (role {patch.role.value})")
+                continue
+            renamed.append(f"{near.name} for patch '{patch.name}'")
+            source = near
 
         if spec.geometry.kind == "step":
             source, _ = convert(source, cache_dir, tessellation, spec.geometry.scale)
 
         meshes[patch.name] = place_surface(
-            load_surface(source),
-            scale=spec.geometry.scale,
-            rotate_z_deg=spec.geometry.rotate_z_deg,
-            translate=spec.geometry.translate,
+            load_surface(source), scale=spec.geometry.scale
         )
 
     # Silently skipping a missing file used to be the behaviour, and it turns
@@ -109,41 +109,26 @@ def _write_geometry(
             f"<patch name>{suffix}"
         )
 
-    # The ground datum needs every surface placed first, because it is a
-    # single rigid move of the whole car chosen from where its tyres ended up.
-    _apply_ground_datum(spec, meshes)
-
     files = {
         name: write_surface(mesh, tri_surface / f"{name}.stl")
         for name, mesh in meshes.items()
     }
-    return files, meshes
+    return files, meshes, renamed
 
 
-def _apply_ground_datum(
-    spec: CaseSpec, meshes: dict[str, trimesh.Trimesh]
-) -> float:
-    """Drop the car onto the road, as one rigid body. Returns the shift."""
-    if spec.geometry.ground_datum is not GroundDatum.TYRE_CONTACT:
-        return 0.0
+def _case_insensitive_match(
+    source_dir: Path, name: str, suffix: str
+) -> Path | None:
+    """A file whose name differs from the patch only in capitalisation.
 
-    tyres = [
-        p.name
-        for p in spec.geometry.patches
-        if p.role is PatchRole.TYRE and p.name in meshes
-    ]
-    if not tyres:
-        raise ValueError(
-            "geometry.ground_datum is 'tyre_contact' but no patch has role "
-            "'tyre'; there is nothing for the car to stand on"
-        )
-
-    lowest = min(float(meshes[name].bounds[0][2]) for name in tyres)
-    shift = -lowest
-    if shift:
-        for mesh in meshes.values():
-            mesh.apply_translation([0.0, 0.0, shift])
-    return shift
+    A concession to real exports, which arrive with things like TIre_RR.step.
+    Accepted with a warning rather than silently, because the filename is the
+    patch identity and a folder where that only nearly holds will eventually
+    hold two files that differ by case alone.
+    """
+    wanted = f"{name}{suffix}".lower()
+    matches = [p for p in source_dir.glob(f"*{suffix}") if p.name.lower() == wanted]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _bounds(
@@ -160,40 +145,54 @@ def _bounds(
 def check_ground_placement(
     spec: CaseSpec, meshes: dict[str, trimesh.Trimesh]
 ) -> list[str]:
-    """Where the geometry sits relative to the road, as a hard check.
+    """Where the geometry sits relative to the road.
 
-    Ride height drives car aerodynamics more strongly than almost any other
-    single dimension, so the pipeline states where the car ended up rather
-    than assuming the CAD arrived correctly placed. Anything meaningfully
-    below z = 0 is an error: snappyHexMesh will happily mesh the intersection
-    of a wheel and the road into a shape nobody designed, and the run that
-    follows looks entirely normal.
+    **Tyres are expected to cross z = 0.** A loaded tyre is modelled deflected
+    into the road, and the part below the plane is the contact patch;
+    snappyHexMesh clips it against the ground and what remains is a flat
+    footprint of the right size. Reporting that as an error would be
+    rejecting correct CAD.
+
+    Anything else below the road is still an error. A chassis or a wing
+    through the ground plane is a mis-positioned export, and snappy will
+    happily mesh the intersection into a shape nobody drew and produce a run
+    that looks entirely normal. The pipeline does not move the geometry to
+    fix it - attitude and ride height belong to the CAD - so this reports and
+    stops rather than correcting.
     """
-    limit = -spec.geometry.max_ground_penetration
     warnings: list[str] = []
-    offenders: list[str] = []
+    tyres = {p.name for p in spec.geometry.patches if p.role is PatchRole.TYRE}
 
-    for name, mesh in meshes.items():
-        z_min = float(mesh.bounds[0][2])
-        if z_min < limit:
-            offenders.append(f"{name} at {z_min * 1e3:.2f} mm")
-
+    offenders = [
+        f"{name} at {float(mesh.bounds[0][2]) * 1e3:.2f} mm"
+        for name, mesh in meshes.items()
+        if name not in tyres and float(mesh.bounds[0][2]) < 0.0
+    ]
     if offenders:
         raise ValueError(
-            "geometry penetrates the ground plane at z = 0: "
+            "geometry passes through the road plane at z = 0: "
             + "; ".join(sorted(offenders))
-            + f". The limit is {spec.geometry.max_ground_penetration * 1e3:.2f} mm. "
-            "Raise the car with geometry.translate, or re-export it sitting on "
-            "the road"
+            + ". Only tyres may cross it, where the part below the plane is "
+            "the contact patch. Fix the ride height in CAD - the pipeline "
+            "does not move the geometry"
         )
 
-    lowest = min(float(m.bounds[0][2]) for m in meshes.values())
-    if lowest > 0.05 * (max(float(m.bounds[1][2]) for m in meshes.values())):
-        warnings.append(
-            f"the lowest point of the geometry is {lowest * 1e3:.1f} mm above "
-            "the road; nothing is touching the ground, so either the car is "
-            "floating or the ride height is deliberate"
-        )
+    contact = {
+        name: float(meshes[name].bounds[0][2])
+        for name in sorted(tyres & set(meshes))
+    }
+    if contact:
+        if all(depth >= 0.0 for depth in contact.values()):
+            warnings.append(
+                "no tyre reaches the road plane at z = 0 (lowest is "
+                f"{min(contact.values()) * 1e3:.2f} mm above it); the car is "
+                "floating and has no contact patch"
+            )
+        else:
+            warnings.append(
+                "tyre contact patch depth: "
+                + ", ".join(f"{n} {-d * 1e3:.2f} mm" for n, d in contact.items())
+            )
     return warnings
 
 
@@ -255,9 +254,17 @@ def prepare(
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    geometry_files, meshes = _write_geometry(spec, run_dir)
+    geometry_files, meshes, renamed = _write_geometry(spec, run_dir)
     if not geometry_files:
         raise FileNotFoundError("no geometry files were produced or found")
+
+    if renamed:
+        warnings.append(
+            "filenames matched only by capitalisation: "
+            + "; ".join(renamed)
+            + ". The filename is the patch identity - rename the files so the "
+            "match is exact"
+        )
 
     for name, mesh in meshes.items():
         warnings.extend(
@@ -280,18 +287,20 @@ def prepare(
     if isinstance(domain, DomainSector):
         warnings.extend(check_sweep(domain))
 
-    combined = trimesh.util.concatenate(list(meshes.values()))
-    frontal_area = projected_frontal_area(combined, axis=0)
-    if spec.half_model:
-        frontal_area /= 2.0
-    warnings.extend(check_blockage(frontal_area, domain, spec.domain.max_blockage))
+    # Blockage is checked against the *declared* reference area. The
+    # pipeline used to compute a true projected area from the triangles and
+    # use that instead; it no longer does, so this number is only as good as
+    # forces.a_ref_full. Declaring an area smaller than the car's real
+    # silhouette understates blockage in exactly the same proportion.
+    warnings.extend(
+        check_blockage(spec.a_ref_effective, domain, spec.domain.max_blockage)
+    )
     warnings.extend(_wheel_warnings(spec, domain, wheels))
 
     result = PrepareResult(
         spec=spec,
         domain=domain,
         run_dir=run_dir,
-        frontal_area=frontal_area,
         wheels=wheels,
         warnings=warnings,
     )
@@ -309,7 +318,6 @@ def prepare(
             input_hash=spec.spec_hash(),
             reasons=warnings,
             detail={
-                "frontal_area": frontal_area,
                 "background_cells": domain.cell_count,
                 "half_model": spec.half_model,
                 # Measured, not configured, so it belongs in the run record

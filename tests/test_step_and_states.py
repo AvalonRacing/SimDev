@@ -20,7 +20,7 @@ import trimesh
 import yaml
 
 from simdev.config.resolve import UnknownDrivingStateError, resolve
-from simdev.config.schema import GroundDatum, Mode
+from simdev.config.schema import FlowDirection, Mode
 from simdev.geometry.stl import load_surface, place_surface
 from simdev.stages.prepare import prepare
 
@@ -175,36 +175,30 @@ def test_editing_the_cad_invalidates_the_cache(tmp_path: Path) -> None:
     assert cache_key(source, TESS, 0.001) != before
 
 
-# --- the placement transform ---------------------------------------------
+# --- the import applies units only -----------------------------------------
 
 
-def test_rotation_turns_the_car_round_without_mirroring_it() -> None:
-    """A mirror would swap left and right on asymmetric geometry."""
-    mesh = trimesh.creation.box(extents=(4.0, 2.0, 1.0))
-    mesh.apply_translation([10.0, 3.0, 0.0])
+def test_import_converts_units_and_nothing_else() -> None:
+    """The CAD is the truth. Every transform is a way to differ from it."""
+    mesh = trimesh.creation.box(extents=(400.0, 200.0, 100.0))
+    mesh.apply_translation([1000.0, 300.0, -50.0])
+    before = mesh.bounds.mean(axis=0) / 1000.0
 
-    placed = place_surface(mesh.copy(), scale=1.0, rotate_z_deg=180.0)
-    centre = placed.bounds.mean(axis=0)
+    placed = place_surface(mesh.copy(), scale=0.001)
 
-    assert centre[0] == pytest.approx(-10.0, abs=1e-9)
-    assert centre[1] == pytest.approx(-3.0, abs=1e-9)
-    assert placed.volume == pytest.approx(mesh.volume, rel=1e-9)
-
-
-def test_transform_order_is_scale_then_rotate_then_translate() -> None:
-    """Not commutative, so the order is fixed and asserted."""
-    mesh = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
-    mesh.apply_translation([1000.0, 0.0, 0.0])
-
-    placed = place_surface(
-        mesh.copy(), scale=0.001, rotate_z_deg=180.0, translate=(0.5, 0.0, 0.0)
-    )
-
-    # 1000 mm -> 1 m, rotated to -1 m, then shifted by +0.5 m.
-    assert placed.bounds.mean(axis=0)[0] == pytest.approx(-0.5, abs=1e-9)
+    assert placed.bounds.mean(axis=0) == pytest.approx(before, abs=1e-12)
+    assert placed.extents == pytest.approx([0.4, 0.2, 0.1], rel=1e-12)
 
 
-# --- ground datum ---------------------------------------------------------
+def test_place_surface_takes_no_transform_arguments() -> None:
+    """A regression guard: rotation and translation were removed on purpose."""
+    import inspect
+
+    parameters = set(inspect.signature(place_surface).parameters)
+    assert parameters == {"mesh", "scale"}
+
+
+# --- the road plane -------------------------------------------------------
 
 
 def _car_case(source_dir: Path, **overrides) -> dict:
@@ -253,22 +247,26 @@ def _car_case(source_dir: Path, **overrides) -> dict:
     return case
 
 
-@pytest.fixture
-def sunken_car(tmp_path: Path):
-    """A car whose tyre dips 1.4 mm below z = 0, as the real export does."""
-    cad = tmp_path / "cad"
-    write_step_box(cad / "Body.step", (400.0, 180.0, 100.0), centre=(0.0, 0.0, 80.0))
+def _write_wheeled_car(cad: Path, body_centre_z: float, tyre_centre_z: float) -> None:
+    write_step_box(cad / "Body.step", (400.0, 180.0, 100.0), centre=(0.0, 0.0, body_centre_z))
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.option.setNumber("General.Verbosity", 0)
         gmsh.clear()
-        # Tyre: axis along y, centre at z = 31.6 so its bottom sits at -1.4.
-        gmsh.model.occ.addCylinder(130.0, -13.5, 31.6, 0, 27.0, 0, 33.0)
+        # Tyre: axis along y, radius 33.
+        gmsh.model.occ.addCylinder(130.0, -13.5, tyre_centre_z, 0, 27.0, 0, 33.0)
         gmsh.model.occ.synchronize()
         gmsh.write(str(cad / "Tire_FL.step"))
     finally:
         gmsh.finalize()
+
+
+@pytest.fixture
+def sunken_car(tmp_path: Path):
+    """A car whose tyre dips 1.4 mm below z = 0, as the real export does."""
+    cad = tmp_path / "cad"
+    _write_wheeled_car(cad, body_centre_z=80.0, tyre_centre_z=31.6)
 
     def run(name: str = "run", **overrides):
         case_path = tmp_path / f"{name}.yaml"
@@ -280,51 +278,50 @@ def sunken_car(tmp_path: Path):
     return run
 
 
-def test_as_is_leaves_the_car_where_the_cad_put_it(sunken_car) -> None:
-    with pytest.raises(ValueError, match="penetrates the ground plane"):
-        sunken_car("asis", **{"geometry.ground_datum": "as_is"})
-
-
-def test_tyre_contact_drops_the_car_onto_the_road(sunken_car) -> None:
-    result = sunken_car("contact", **{"geometry.ground_datum": "tyre_contact"})
+def test_tyres_may_cross_the_road_plane(sunken_car) -> None:
+    """The part below z = 0 is the contact patch, not an error."""
+    result = sunken_car("contact")
 
     tyre = load_surface(result.run_dir / "constant" / "triSurface" / "Tire_FL.stl")
 
-    assert float(tyre.bounds[0][2]) == pytest.approx(0.0, abs=1e-9)
+    assert float(tyre.bounds[0][2]) < 0.0
+    assert any("contact patch depth" in w for w in result.warnings)
 
 
-def test_tyre_contact_moves_the_whole_car_rigidly(sunken_car) -> None:
-    """Rake and suspension travel are real and must survive the drop."""
-    result = sunken_car("rigid", **{"geometry.ground_datum": "tyre_contact"})
+def test_the_car_is_left_exactly_where_the_cad_put_it(sunken_car) -> None:
+    result = sunken_car("asis")
 
     surfaces = result.run_dir / "constant" / "triSurface"
     body = load_surface(surfaces / "Body.stl")
+    tyre = load_surface(surfaces / "Tire_FL.stl")
 
-    # Body was authored 30..130 mm; a 1.4 mm lift puts it at 31.4..131.4 mm.
-    assert float(body.bounds[0][2]) == pytest.approx(0.0314, abs=1e-6)
-
-
-def test_tyre_contact_without_a_tyre_is_an_error(sunken_car) -> None:
-    with pytest.raises(ValueError, match="nothing for the car to stand on"):
-        sunken_car(
-            "notyre",
-            **{
-                "geometry.ground_datum": "tyre_contact",
-                "geometry.patches": [
-                    {"name": "Body", "role": "body"},
-                    {"name": "ground", "role": "ground"},
-                    {"name": "inlet", "role": "inlet"},
-                    {"name": "outlet", "role": "outlet"},
-                    {"name": "farfield", "role": "farfield"},
-                ],
-            },
-        )
+    # Authored at 30..130 mm and -1.4..64.6 mm; nothing has moved.
+    assert float(body.bounds[0][2]) == pytest.approx(0.030, abs=1e-6)
+    assert float(tyre.bounds[0][2]) == pytest.approx(-0.0014, abs=1e-6)
 
 
-def test_a_missing_step_part_names_the_expected_extension(sunken_car, tmp_path) -> None:
-    (tmp_path / "cad" / "Tire_FL.step").unlink()
-    with pytest.raises(FileNotFoundError, match=r"Tire_FL.*\n?.*|\.step"):
-        sunken_car("missing")
+def test_a_non_tyre_part_through_the_road_is_rejected(tmp_path: Path) -> None:
+    """A chassis below the road is a mis-positioned export, not a contact patch."""
+    cad = tmp_path / "cad"
+    # Body centred at z = 40 mm spans -10..90: it is through the road.
+    _write_wheeled_car(cad, body_centre_z=40.0, tyre_centre_z=31.6)
+
+    case_path = tmp_path / "sunk.yaml"
+    case_path.write_text(yaml.safe_dump(_car_case(cad)), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="passes through the road plane"):
+        prepare(case_path, tmp_path / "sunk", profile="car_dev")
+
+
+def test_a_floating_car_is_reported(tmp_path: Path) -> None:
+    cad = tmp_path / "cad"
+    _write_wheeled_car(cad, body_centre_z=90.0, tyre_centre_z=40.0)
+
+    case_path = tmp_path / "float.yaml"
+    case_path.write_text(yaml.safe_dump(_car_case(cad)), encoding="utf-8")
+    result = prepare(case_path, tmp_path / "float", profile="car_dev")
+
+    assert any("no tyre reaches the road" in w for w in result.warnings)
 
 
 # --- driving states -------------------------------------------------------
@@ -464,7 +461,6 @@ def test_the_car_case_resolves_to_the_requested_corner() -> None:
     assert spec.physics.corner_radius == 4.0
     assert spec.physics.mode is Mode.CORNERING
     assert spec.domain.kind == "annulus"
-    assert spec.geometry.rotate_z_deg == 180.0
-    assert spec.geometry.ground_datum is GroundDatum.TYRE_CONTACT
+    assert spec.flow.direction is FlowDirection.MINUS_X
     assert spec.geometry.symmetric is False
     assert spec.omega_signed == pytest.approx(15.0 / 4.0)

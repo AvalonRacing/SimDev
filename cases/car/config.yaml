@@ -27,8 +27,9 @@ driving_state: testcase
 driving_states:
 
   # 4 m radius at 15 m/s: omega = 3.75 rad/s, about 5.7 g lateral.
-  # The CAD for this state is posed at 10.00 deg to the x axis, which is
-  # deliberate sideslip and is kept - see the geometry note below.
+  #
+  # The attitude for this state - body slip, steer, camber, ride height - is
+  # already in the CAD and is used exactly as exported.
   testcase:
     geometry:
       source_dir: CAD/Testcase
@@ -67,6 +68,17 @@ flow:
   turbulence_intensity: 0.01
   turbulence_length_scale: 0.02
 
+  # The CAD assembly is built nose-forward along +x, so the car travels along
+  # +x and the air comes at it from +x. The tunnel is reversed rather than the
+  # car, because the geometry is never transformed.
+  #
+  # This one setting drives every other direction: which end of the domain is
+  # the inlet, the drag and side axes in forceCoeffs, which side of the car is
+  # its left, the sign of the cornering frame, and the direction the road runs
+  # under the tyres. Reversing the tunnel and forgetting the drag axis is how
+  # a case converges to a confidently negative Cd.
+  direction: "-x"
+
 physics:
   turbulence_model: kOmegaSST
   # At 1/10 scale the appendages sit at Re_chord ~ 4e4, where the first cell
@@ -90,32 +102,22 @@ domain:
   refinement_regions: []
 
 forces:
-  # PLACEHOLDER. prepare reports the true projected frontal area of the
-  # assembled car - set this from that number and record the convention.
-  # 194 x 112 mm from the earlier body bounding box.
-  a_ref_full: 0.0217
+  # Declared, not measured. The pipeline no longer computes a projected area
+  # from the triangles, so this is the only reference area in play - it
+  # non-dimensionalises every coefficient AND is what the blockage check is
+  # measured against.
+  a_ref_full: 0.02
   l_ref: 0.44
   c_of_r: [0.0, 0.0, 0.0]
 
 geometry:
   kind: step
-  scale: 0.001            # the CAD is authored in millimetres
-
-  # The CAD assembly is built nose-forward along +x. The pipeline frame has
-  # the freestream along +x, so the nose faces -x. A rotation, never a mirror:
-  # negating x would swap the car's left and right, and this car is asymmetric
-  # by about 10% of its width.
-  #
-  # This turns the car through 180 deg and no further. The 10.00 deg the
-  # assembly sits at relative to the CAD x axis is deliberate sideslip for the
-  # driving state and is preserved, so the car meets the flow at 10 deg. If a
-  # future state should run square to the flow, pose it that way in CAD.
-  rotate_z_deg: 180.0
-
-  # The tyres reach between 0.70 and 1.40 mm below z = 0 in the export. Drop
-  # the whole car rigidly until the lowest one rests on the road: the 0.7 mm
-  # spread between corners is rake and suspension travel, and it survives.
-  ground_datum: tyre_contact
+  # The only thing applied on import: millimetres to metres. The pipeline
+  # does not rotate, translate or snap the geometry. Yaw, pitch, roll,
+  # steering, camber and ride height are all set in CAD and arrive baked into
+  # the part positions, and the tyres are expected to cross z = 0 because the
+  # part below the road is the contact patch.
+  scale: 0.001
 
   # Surface mesh sizing for the STEP import, in metres. curvature_segments is
   # elements per full circle and is what decides whether a 6 mm suspension
@@ -125,8 +127,8 @@ geometry:
     min_edge: 0.0004
     curvature_segments: 24
 
-  # Not symmetric about y = 0, and posed at a sideslip angle besides. Keeps
-  # the model full and a_ref at its full value. Handbook 3.3.
+  # Not symmetric about y = 0, and posed at an attitude besides. Keeps the
+  # model full and a_ref at its full value. Handbook 3.3.
   symmetric: false
 
   patches:

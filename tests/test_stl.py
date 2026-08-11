@@ -9,7 +9,6 @@ from simdev.config.schema import AhmedParams
 from simdev.geometry.ahmed import build_body, write_ahmed_stl
 from simdev.geometry.stl import (
     check_geometry,
-    projected_frontal_area,
     read_stl_info,
 )
 
@@ -23,23 +22,8 @@ def test_read_stl_info_round_trips(tmp_path: Path) -> None:
     assert info.extent[0] == pytest.approx(p.length, abs=1e-6)
 
 
-def test_projected_frontal_area_of_a_unit_box() -> None:
-    box = trimesh.creation.box(extents=[2.0, 3.0, 4.0])
-    # Projected along x, the box presents 3 x 4.
-    assert projected_frontal_area(box, axis=0) == pytest.approx(12.0, rel=1e-9)
 
 
-def test_projected_frontal_area_along_other_axes() -> None:
-    box = trimesh.creation.box(extents=[2.0, 3.0, 4.0])
-    assert projected_frontal_area(box, axis=1) == pytest.approx(8.0, rel=1e-9)
-    assert projected_frontal_area(box, axis=2) == pytest.approx(6.0, rel=1e-9)
-
-
-def test_ahmed_projected_area_is_close_to_width_times_height() -> None:
-    p = AhmedParams()
-    area = projected_frontal_area(build_body(p), axis=0)
-    # Slightly under width*height because the nose fillet insets the section.
-    assert 0.9 * p.width * p.height < area <= p.width * p.height + 1e-9
 
 
 def test_check_geometry_flags_non_watertight(tmp_path: Path) -> None:

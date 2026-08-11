@@ -151,9 +151,15 @@ def test_a_missing_part_is_an_error_not_a_silent_skip(car, tmp_path) -> None:
         car("missing")
 
 
-def test_geometry_through_the_road_is_rejected(car) -> None:
-    with pytest.raises(ValueError, match="penetrates the ground plane"):
-        car("sunk", **{"geometry.translate": [0.0, 0.0, -0.01]})
+def test_a_body_through_the_road_is_rejected(car, tmp_path) -> None:
+    """Only tyres may cross z = 0; a hull below it is a bad export."""
+    sunk = trimesh.creation.box(extents=(0.40, 0.18, 0.10))
+    sunk.apply_translation([0.0, 0.0, 0.03])
+    sunk.apply_scale(1000.0)
+    (tmp_path / "cad" / "Body.stl").write_bytes(trimesh.exchange.stl.export_stl(sunk))
+
+    with pytest.raises(ValueError, match="passes through the road plane"):
+        car("sunk")
 
 
 # --- measurement ----------------------------------------------------------

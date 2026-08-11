@@ -450,3 +450,127 @@ def test_a_wheel_id_on_a_non_rotating_role_is_rejected() -> None:
     )
     with pytest.raises(ValidationError, match="nothing about it can rotate"):
         validate(CaseSpec.model_validate(case))
+
+
+# --- a reversed tunnel ----------------------------------------------------
+#
+# The CAD is never rotated to suit the pipeline, so a car built nose-forward
+# along +x is met by air coming from +x. Every direction in the case has to
+# follow that one setting together; any one left behind is a sign error that
+# still converges.
+
+
+def _reversed(**physics) -> CaseSpec:
+    case = _case(**physics)
+    case["flow"]["direction"] = "-x"
+    return CaseSpec.model_validate(case)
+
+
+def test_reversing_the_tunnel_reverses_the_freestream() -> None:
+    assert spec().freestream[0] > 0.0
+    assert _reversed().freestream[0] < 0.0
+    assert abs(_reversed().freestream[0]) == pytest.approx(spec().freestream[0])
+
+
+def test_drag_and_side_axes_follow_the_tunnel() -> None:
+    """Leaving dragDir at +x with the tunnel reversed reports a negative Cd."""
+    assert spec().drag_dir == (1.0, 0.0, 0.0)
+    assert _reversed().drag_dir == (-1.0, 0.0, 0.0)
+    # side = lift x drag, so it flips too, or every pitching moment changes sign.
+    assert _reversed().pitch_axis == (0.0, -1.0, 0.0)
+
+
+def test_the_corner_centre_moves_to_the_other_side() -> None:
+    """The car's left is the other way round when it travels the other way."""
+    assert spec(corner_direction="left").corner_side == pytest.approx(-1.0)
+    assert _reversed(corner_direction="left").corner_side == pytest.approx(1.0)
+
+
+def test_the_frame_still_reproduces_the_freestream_at_the_car() -> None:
+    """The invariant that ties omega, the sector and the flow together.
+
+    Whichever way the tunnel points, still air seen from the rotating frame
+    must arrive at the vehicle as that case's own freestream.
+    """
+    for direction in ("left", "right"):
+        resolved = _reversed(corner_direction=direction)
+        domain = AnnulusDomainBuilder().build(resolved, GEOM_BOUNDS)
+        frame = corner_frame(resolved, domain)
+
+        car = domain.point(domain.theta_car, domain.radius, 0.0)
+        onset = frame.road_velocity_at(car)
+
+        assert onset[0] == pytest.approx(resolved.freestream[0], rel=1e-9), direction
+        assert onset[1] == pytest.approx(0.0, abs=1e-9), direction
+
+
+def test_the_inlet_is_still_upstream_of_the_car() -> None:
+    """With the flow along -x, upstream means the +x side."""
+    for direction in ("left", "right"):
+        resolved = _reversed(corner_direction=direction)
+        domain = AnnulusDomainBuilder().build(resolved, GEOM_BOUNDS)
+        car = np.array(domain.point(domain.theta_car, domain.radius, 0.0))
+        inlet = np.array(domain.point(domain.theta_inlet, domain.radius, 0.0))
+        assert inlet[0] > car[0], direction
+
+
+def test_a_reversed_box_puts_the_long_tail_downstream() -> None:
+    """Otherwise the wake runs straight out of the inlet."""
+    from simdev.domain.box import BoxDomainBuilder
+
+    case = _case(mode="straight", corner_radius=None)
+    case["domain"]["kind"] = "box"
+    case["flow"]["direction"] = "-x"
+    resolved = CaseSpec.model_validate(case)
+
+    domain = BoxDomainBuilder().build(resolved, GEOM_BOUNDS)
+    # Flow runs -x, so the car's nose is its +x end and the wake trails to -x.
+    nose, tail = GEOM_BOUNDS[1][0], GEOM_BOUNDS[0][0]
+    upstream = domain.x_max - nose
+    downstream = tail - domain.x_min
+
+    assert downstream > upstream
+    assert downstream / upstream == pytest.approx(
+        resolved.domain.downstream_lengths / resolved.domain.upstream_lengths
+    )
+    assert domain.x_max_patch == "inlet"
+    assert domain.x_min_patch == "outlet"
+    assert domain.inlet_x == domain.x_max
+
+
+def test_a_reversed_box_seeds_snappy_near_its_inlet() -> None:
+    from simdev.domain.box import BoxDomainBuilder
+    from simdev.render.context import location_in_mesh
+
+    case = _case(mode="straight", corner_radius=None)
+    case["domain"]["kind"] = "box"
+    case["flow"]["direction"] = "-x"
+    resolved = CaseSpec.model_validate(case)
+
+    domain = BoxDomainBuilder().build(resolved, GEOM_BOUNDS)
+    seed = location_in_mesh(domain)
+
+    assert domain.x_min < seed[0] < domain.x_max
+    assert seed[0] > GEOM_BOUNDS[1][0]
+
+
+def test_a_reversed_straight_case_runs_the_road_the_other_way() -> None:
+    """The contact patch must still match the road it stands on."""
+    from simdev.domain.box import BoxDomainBuilder
+
+    case = _case(mode="straight", corner_radius=None)
+    case["domain"]["kind"] = "box"
+    case["ground"]["motion"] = "moving"
+    case["flow"]["direction"] = "-x"
+    resolved = CaseSpec.model_validate(case)
+
+    domain = BoxDomainBuilder().build(resolved, GEOM_BOUNDS)
+    wheel = _wheel([0.15, -0.09, 0.033])
+    speeds = wheel_speeds(resolved, {"FL": wheel}, None)
+
+    velocity = wheel.surface_velocity(
+        wheel.contact_point()[None, :], speeds["FL"]["omega"]
+    )[0]
+
+    assert velocity[0] == pytest.approx(-12.0, rel=1e-6)
+    assert speeds["FL"]["slip"] == pytest.approx(0.0, abs=1e-9)

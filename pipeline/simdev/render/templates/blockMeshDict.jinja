@@ -25,12 +25,14 @@ edges ();
 
 boundary
 (
-    {{ domain.inlet }}
+    // Which of these is the inlet follows flow.direction, not the axis: a
+    // car whose nose points +x is met by air coming from +x.
+    {{ domain.x_min_patch }}
     {
         type            patch;
         faces           ((0 4 7 3));
     }
-    {{ domain.outlet }}
+    {{ domain.x_max_patch }}
     {
         type            patch;
         faces           ((1 2 6 5));

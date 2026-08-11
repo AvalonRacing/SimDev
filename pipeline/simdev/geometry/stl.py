@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,33 +56,20 @@ def read_stl_info(path: Path) -> StlInfo:
     return stl_info(load_surface(path))
 
 
-def place_surface(
-    mesh: trimesh.Trimesh,
-    scale: float = 1.0,
-    rotate_z_deg: float = 0.0,
-    translate: tuple[float, float, float] = (0.0, 0.0, 0.0),
-) -> trimesh.Trimesh:
-    """Move a CAD surface into the pipeline frame, in a fixed order.
+def place_surface(mesh: trimesh.Trimesh, scale: float = 1.0) -> trimesh.Trimesh:
+    """Convert a CAD surface's units. Nothing else.
 
-    Scale, then rotate about z, then translate. The order is fixed and stated
-    because it is not commutative: rotating before translating turns the
-    translation into a different offset, and a car that ends up 200 mm to the
-    side of where it was meant to be still meshes and still solves.
+    Scale only, and deliberately so. Attitude - yaw, pitch, roll, steering,
+    camber - and ride height are set in CAD and arrive baked into the part
+    positions, so the pipeline never rotates, translates or snaps the
+    geometry. Every transform it is allowed to apply is a place where the
+    simulated car can differ from the drawn one, invisibly.
 
-    A rotation and never a mirror. Negating x would also turn the car around,
-    and would silently swap its left and right - which on geometry that is
-    asymmetric by 10% of its width is a different car.
+    When the CAD frame and the tunnel disagree about which way the car
+    faces, the *tunnel* is reversed (flow.direction), not the car.
     """
     if scale != 1.0:
         mesh.apply_scale(scale)
-    if rotate_z_deg:
-        mesh.apply_transform(
-            trimesh.transformations.rotation_matrix(
-                math.radians(rotate_z_deg), [0.0, 0.0, 1.0]
-            )
-        )
-    if any(translate):
-        mesh.apply_translation(translate)
     return mesh
 
 
@@ -99,21 +86,6 @@ def write_surface(mesh: trimesh.Trimesh, target: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(trimesh.exchange.stl.export_stl(mesh))
     return target
-
-
-def projected_frontal_area(mesh: trimesh.Trimesh, axis: int = 0) -> float:
-    """Exact projected area along `axis`, via a shapely union of the triangles.
-
-    `precise` unions the triangles through shapely instead of trimesh's fast
-    boundary-edge path, and `rpad=0.0` disables the pad/de-pad step trimesh
-    applies to bridge gaps between regions. That padding costs ~5e-7 relative
-    area, which would make the blockage assertion depend on mesh scale rather
-    than on the geometry.
-    """
-    normal = [0.0, 0.0, 0.0]
-    normal[axis] = 1.0
-    projection = mesh.projected(normal, precise=True, rpad=0.0)
-    return float(sum(polygon.area for polygon in projection.polygons_full))
 
 
 def check_geometry(info: StlInfo, expected_length: float | None = None) -> list[str]:

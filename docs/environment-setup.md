@@ -170,6 +170,13 @@ have already gone wrong:
   the selection writes file *N* containing the previous *N−1* parts as well;
   the duplicated solids then overlap, the tessellation is no longer closed, and
   the wheel measurement rejects the result as not a solid of revolution.
+- The **filename is the patch identity**, so it has to match the case config
+  exactly. A mismatch in capitalisation alone (`TIre_RR.step`) is accepted with
+  a warning rather than silently, because a folder where the rule only nearly
+  holds will eventually contain two files differing by case.
+
+A quick sanity check on any new export: every corner's bounding box distinct,
+`Tire_xx` and `MRF_xx` differing from each other, and one part per file.
 
 ### Coded boundary conditions
 

@@ -18,7 +18,6 @@ dependencies = [
     # cleanly and raises only when the geometry is actually built.
     "scipy>=1.11",
     "networkx>=3.0",
-    "shapely>=2.0",
     "pyyaml>=6.0",
     # STEP import. Bundles OpenCASCADE, so there is no CAD-vendor or FreeCAD
     # dependency. On Ubuntu the wheel still needs libGLU from apt - see

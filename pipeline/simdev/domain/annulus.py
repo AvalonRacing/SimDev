@@ -71,13 +71,14 @@ class AnnulusDomainBuilder:
         # purely in y, so this is one of the two vertical directions.
         theta_car = math.atan2(-spec.corner_side * radius, 0.0)
 
-        # Which way round the sector the air arrives from. The vehicle
-        # travels along -x, so for a left-hand turn the oncoming air lies at
-        # increasing theta and for a right-hand turn at decreasing theta.
-        # Derived from corner_side rather than stated, for the same reason
-        # omega_signed is: a flipped sector mirrors the whole case and still
-        # converges.
-        inlet_direction = -spec.corner_side
+        # Which way round the sector the air arrives from.
+        #
+        # The tangent at the vehicle points along corner_side in x, and the
+        # air moves along flow_sign in x, so the two agree when their product
+        # is positive - and then the inlet lies at *decreasing* theta.
+        # Derived rather than stated, for the same reason omega_signed is: a
+        # flipped sector mirrors the whole case and still converges.
+        inlet_direction = -spec.flow_sign * spec.corner_side
 
         theta_inlet = theta_car + inlet_direction * d.upstream_lengths * length / radius
         theta_outlet = (

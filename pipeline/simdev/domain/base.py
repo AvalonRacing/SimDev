@@ -57,6 +57,9 @@ class DomainBox:
     ground: str
     farfield: str
     symmetry: str | None
+    # +1 if the freestream blows along +x, -1 if along -x. Decides which end
+    # of the box the air enters through.
+    flow_sign: float = 1.0
     # Bounding box of the geometry the domain was built around. Refinement
     # regions are anchored to the model, not the tunnel, so they need this.
     geom_min: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -65,6 +68,20 @@ class DomainBox:
     @property
     def geom_length(self) -> float:
         return self.geom_max[0] - self.geom_min[0]
+
+    @property
+    def x_min_patch(self) -> str:
+        """Patch on the -x face. The inlet only when the flow runs +x."""
+        return self.inlet if self.flow_sign > 0 else self.outlet
+
+    @property
+    def x_max_patch(self) -> str:
+        return self.outlet if self.flow_sign > 0 else self.inlet
+
+    @property
+    def inlet_x(self) -> float:
+        """The x coordinate the air enters at."""
+        return self.x_min if self.flow_sign > 0 else self.x_max
 
     @property
     def size(self) -> tuple[float, float, float]:

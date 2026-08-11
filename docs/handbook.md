@@ -262,11 +262,10 @@ The case argument is the config **file**, not the case directory.
 
 **prepare** — resolve config → `CaseSpec` → validate (raises on inconsistency,
 returns warnings) → generate or import geometry into `constant/triSurface/`,
-applying the scale and translate once → check watertightness, units and ground
-placement → **measure the wheel axes, centres and rolling radii** → compute the
-union bounding box → build the domain (box or sector) → compute the *true
-projected* frontal area and assert blockage → render every dictionary → write
-`caseSpec.json`.
+converting units → check watertightness, units and road placement → **measure
+the wheel axes, centres and rolling radii** → compute the union bounding box →
+build the domain (box or sector) → assert blockage → render every dictionary →
+write `caseSpec.json`.
 
 Runs without OpenFOAM installed. This is the stage that turns a config file
 into a complete, hand-runnable case.
@@ -405,33 +404,49 @@ swapping `Body.step` for a new design a drop-in with no config edit.
 
 **The geometry contract.** Export every part in its **assembly position**, one
 complete folder per driving state, using the same part names in every folder.
-Units may be millimetres — set `geometry.scale: 0.001`.
 
-**The import transform, in this fixed order:**
+**The CAD is the truth and the pipeline does not move it.** Yaw, pitch, roll,
+steering, camber and ride height are all set in CAD and arrive baked into the
+part positions. The only thing applied on import is `geometry.scale`, which is
+a unit conversion (millimetres to metres) rather than a placement. There is no
+rotation, no translation and no ground snapping, and that is deliberate: every
+transform the pipeline is allowed to apply is a place where the simulated car
+can differ from the drawn one, invisibly.
 
-```
-scale  ->  rotate about z  ->  translate  ->  ground datum
-```
+Two consequences worth knowing:
 
-Not commutative, which is why it is stated. Rotating after translating turns
-the translation into a different offset, and a car 200 mm to the side of where
-it was meant to be still meshes and still solves.
+- **When the CAD frame and the tunnel disagree about which way the car faces,
+  the tunnel is reversed** (`flow.direction`), not the car. See below.
+- **Tyres are expected to cross z = 0.** A loaded tyre is modelled deflected
+  into the road and the part below the plane is the contact patch;
+  snappyHexMesh clips it against the ground and what remains is a flat
+  footprint of the right size. Anything *else* below the road is a hard error,
+  because a chassis through the ground plane is a mis-positioned export and
+  snappy will mesh the intersection into a shape nobody drew.
 
-- `rotate_z_deg` exists because CAD assemblies are routinely built nose-forward
-  along +x while the pipeline frame has the freestream along +x, so the nose
-  faces −x. **A rotation, never a mirror** — negating x would also turn the car
-  round and would silently swap its left and right, which on geometry
-  asymmetric by 10% of its width is a different car.
-- `ground_datum: tyre_contact` drops the whole car rigidly until its lowest
-  tyre point rests on z = 0. Rigidly, and from the *tyres only*: in the test
-  export the four tyres reach −0.70, −1.04, −1.05 and −1.40 mm, and that 0.7 mm
-  spread is rake and suspension travel. Snapping each wheel separately would
-  flatten the car's attitude; snapping to the lowest point of any surface would
-  hand ride height to whatever boss hangs lowest.
+### Reverse the tunnel instead of the car
 
-Positions are not configured because they cannot be: a driving state changes
-ride height, steer and camber together. Everything positional is measured from
-the surfaces, so a new driving state is a new export and no case file changes.
+`flow.direction` is `+x` or `-x`. A CAD assembly built nose-forward along +x
+is a car travelling along +x, so the air comes at it from +x and the
+freestream is `-x`.
+
+This one setting drives **every** other direction, and they are all derived
+from it rather than written down separately:
+
+| Follows `flow.direction` | Where |
+|---|---|
+| Which end of the box is the inlet, and which side gets the long wake tail | `domain/box.py`, `DomainBox.x_min_patch` |
+| `dragDir` and `pitchAxis` in `forceCoeffs` | `CaseSpec.drag_dir`, `pitch_axis` |
+| Which side of the car is its left, hence where the corner centre goes | `CaseSpec.corner_side` |
+| The sign of the cornering frame rotation | `CaseSpec.omega_signed` |
+| Which end of the sector is the inlet | `domain/annulus.py` |
+| The direction the road runs under the tyres | `render/context.py::wheel_speeds` |
+| Where snappy's seed point goes | `location_in_mesh` |
+
+Reversing the tunnel and forgetting the drag axis produces a case that
+converges to a confidently negative Cd. The test that guards the whole set
+asserts one invariant: still air, seen from the rotating frame, arrives at the
+car as that case's own freestream.
 
 **STEP tessellation is a physics setting, not a file-format detail.** Too
 coarse and a curved surface becomes a faceted one that separates in the wrong
@@ -655,6 +670,24 @@ tunnel; above that, the domain walls contaminate the pressure field and inflate
 drag. For validation against a real experiment you want to *match* the
 experiment's blockage instead.
 
+The pipeline once computed a *true projected* area from the triangles and used
+that for the blockage check, deliberately keeping it separate from `a_ref_full`
+because a reference area is a convention that may exclude parts. **That
+computation has been removed.** `forces.a_ref_full` is now declared and is the
+only area in play: it non-dimensionalises every coefficient *and* is what
+blockage is measured against. Declaring an area smaller than the car's real
+silhouette therefore understates blockage in the same proportion, and nothing
+checks it against the geometry any more. That is the trade.
+
+The pipeline once computed a *true projected* area from the triangles and used
+that for the blockage check, deliberately keeping it separate from `a_ref_full`
+because a reference area is a convention that may exclude parts. That
+computation has been removed: `forces.a_ref_full` is now declared and is the
+only area in play. It non-dimensionalises every coefficient **and** is what
+blockage is measured against, so declaring an area smaller than the car's real
+silhouette understates blockage in the same proportion. Nothing checks it
+against the geometry any more — that is the trade.
+
 **Convergence is not residuals.** See §3.4.
 
 **Transition.** At Re_chord ≈ 3.5×10⁴ the appendages live in laminar-separation-
@@ -687,6 +720,10 @@ a log.
 | Cornering forces mirrored | `caseSpec.json` `corner_direction`; `status/prepare.json` wheel speeds | Outer wheels must turn faster than inner ones. If they do not, the corner centre is on the wrong side |
 | blockMesh reports negative volumes on a sector | `domain/annulus.py` | Hex handedness follows the sign of the angular step; blocks must be ordered by increasing θ |
 | Wheels turn but the road does not | Validation warnings | Straight-line case with `ground.motion: static` and spinning wheels |
+| Cd comes out negative | `caseSpec.json` `flow.direction` | The tunnel was reversed and the drag axis was not, or the car faces the wrong way for the direction set |
+| Large wheel slip warnings | `status/prepare.json` `wheels` | The CAD attitude has real steer and body slip in it. Expected in a cornering state; check the numbers are the ones intended |
+| `not a solid of revolution` on a wheel | The export | A `Tire_*` or `MRF_*` file containing more than its own part |
+| Part not found, but the file is there | The filename | Patch identity is the filename. A case-only mismatch is accepted with a warning; anything else is an error |
 
 **The provenance rule:** every result carries its `spec_hash`. If a number
 surprises you, diff the `caseSpec.json` against a run you trust. That comparison
