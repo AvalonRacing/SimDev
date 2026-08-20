@@ -554,10 +554,46 @@ grep -nE "Refinement phase|Snapping phase|Layer addition phase|ExecutionTime" lo
 
 ### Make the solve faster
 
-Short answer: on this machine, you cannot, except by meshing fewer cells or
-running fewer iterations. Everything below was measured on the production car
-mesh so that the next person does not spend the afternoon finding it out
-again.
+Short answer: the numerics have nothing left to give, but the *memory system*
+does. Two things were found after this section was first written, and both are
+worth more than anything in the table below: mesh renumbering, which is done
+and is in the pipeline, and the operating system, which is not. Everything
+here was measured on the production car mesh so that the next person does not
+spend the afternoon finding it out again.
+
+**`renumberMesh`, -9.6%, already in the mesh stage.** snappy emits cells in
+octree-refinement order, which bears no relation to adjacency, and that
+ordering sets the locality of every gather the linear solver makes -
+`lduMatrix` reaches `psi` indirectly through `lowerAddr`/`upperAddr`, which is
+what this solve is made of. Nothing renumbered before 2026-08-20, and this
+table never tested it: everything in it is numerics.
+
+| | band | profile | s/iter |
+|---|---|---|---|
+| as snappy left it | 174,038 | 5.81e10 | 15.10 |
+| after `renumberMesh` | 7,429 | 2.54e10 | **13.65** |
+
+At the old band a gather reached ~1.4 MB away, outside any cache; at the new
+one ~59 kB, inside L2. `mesh.renumber` turns it off, and the only reason to is
+reproducing a pre-renumbering run iteration for iteration — Gauss-Seidel
+sweeps in index order and GAMG agglomerates from the addressing, so the route
+to the answer changes even though the discrete system does not.
+
+**The operating system is worth ~1.8x, and that is now measured.** WSL2
+delivers 28.5 GB/s of memory bandwidth; the same hardware sustains ~51 GB/s
+from native Windows when each socket uses its own memory, and an
+OpenFOAM-shaped gather benchmark reproduces the same 1.85x under those two
+placements. The four DIMMs are *correctly* installed — one per channel, two
+channels per socket, proven by a per-socket rate that exceeds a single
+channel's theoretical peak — so there is nothing to fix in the hardware and
+nothing to buy yet. See `docs/linux-migration.md` §1b.
+
+With both, 2000 iterations goes from 8.4 h to **4.2-5.1 h**, which is the
+five-hour target this section closes by calling unreachable. It is reachable,
+and not by cutting cells.
+
+The rest of this section stands: within WSL2, and holding the mesh fixed, the
+numerics have nothing left.
 
 **The baseline.** `cases/car` at the `car` profile, 6,929,626 cells, 40 ranks,
 100 iterations from the same initial field each time: **14.78 s/iter**. That is
@@ -621,11 +657,13 @@ re-chase these:
   through `lowerAddr`/`upperAddr`, and indirect-addressed sparse work runs 3-5x
   below STREAM as a matter of course. Nothing is broken.
 
-**So what is left.** The cost is cells times iterations, and both are linear.
-To reach a five-hour wall clock at 2000 iterations you need 8.28 s/iter, which
-at this per-cell rate is about 3.9 M cells — a 44% cut from a mesh whose every
-level has a documented reason in `cases/car/config.yaml`. The honest levers, in
-the order they cost you something:
+**So what is left, if the platform is held fixed.** The cost is cells times
+iterations, and both are linear. To reach a five-hour wall clock at 2000
+iterations you need 8.28 s/iter, which at this per-cell rate is about 3.9 M
+cells — a 44% cut from a mesh whose every level has a documented reason in
+`cases/car/config.yaml`. These are the levers that remain *inside WSL2*, and
+the migration above reaches the same target without spending any of them, so
+price them against that rather than against doing nothing:
 
 1. **Fewer iterations.** 1150 iterations fits five hours with no change to the
    physics at all. The first production solve was stationary in the mean long
@@ -647,8 +685,12 @@ the order they cost you something:
    next to it, and the tyres were moved 6 → 7 specifically to bring y+ inside
    the gate band.
 
-The real fix is not in this file. It is the memory bandwidth: four of twelve
-DIMM slots are populated, and the machine runs under WSL2. See
+The real fix is not in this file, and none of those four levers is now the
+first thing to reach for. It is the memory system: the machine runs under
+WSL2, which delivers 28.5 GB/s of the ~51 GB/s it has. The DIMM population is
+*not* the problem it was once written up as — four of twelve channels is a
+real ceiling, but the four are correctly placed and the operating system costs
+more than they do. Migrate first, measure, and only then price RAM. See
 `docs/linux-migration.md` §1b.
 
 ### Add a patch role

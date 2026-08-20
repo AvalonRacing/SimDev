@@ -4,6 +4,37 @@ Written 2026-08-20, from measurements taken on this machine. Everything here
 was measured rather than assumed; where something is still an inference it says
 so.
 
+## 0. The day itself
+
+Everything that can be prepared in advance has been. What is staged:
+
+- the repo is committed and pushed, so a clone on Linux is current;
+- `C:\Users\info\AvalonRacing-migration\` holds `CAD/` and
+  `run-histories.tar.gz`, the two things a clone will not have (section 4);
+- `scripts/migration/bootstrap-linux.sh` installs the whole environment;
+- `scripts/migration/verify-bandwidth.sh` proves whether it worked.
+
+Order, with the irreversible step as late as possible:
+
+| # | Step | Reversible? |
+|---|---|---|
+| 1 | Confirm the archive: `CAD/` 30 files / 35.8 MB, tarball 414 paths | — |
+| 2 | Write the Ubuntu 24.04 USB installer | yes |
+| 3 | BIOS: SATA controller RST -> AHCI (section 2, gotcha 1) | yes, revert it |
+| 4 | Boot Windows once to confirm it still boots from the NVMe | — |
+| 5 | Shrink C: from Windows Disk Management, leaving the free space unformatted | yes |
+| 6 | **Install Ubuntu into that free space** | **no** |
+| 7 | `bootstrap-linux.sh`, then section 5 steps 3-8 | yes |
+
+Steps 3 and 4 are ordered that way deliberately. Windows boots from the NVMe
+through `stornvme`, which does not go through the RAID controller, so the
+AHCI switch should not affect it — "should" is why it is verified before
+anything is repartitioned. Expect D: to change or disappear; nothing needed
+for the migration lives there.
+
+BitLocker is off (checked 2026-08-20), so shrinking C: needs no recovery key.
+Secure Boot can stay on; Ubuntu ships a signed shim.
+
 ## 1. Why — the measured case
 
 The solver does not get faster when given more cores. Two full 100-iteration
@@ -48,26 +79,44 @@ done
 # s/iter = ClockTime / iterations
 ```
 
-Read it like this. Known: 20 ranks and 40 ranks are both 15.3-15.4 s/iter.
+**That benchmark never finished, and the number it was supposed to produce
+does not exist.** `~/runs/bench-10` has no `log.simpleFoam` and no
+`status/solve.json`, and its `coefficient.dat` stops at 74 iterations: the run
+was interrupted. `~/runs/bench-5` was never created. Any "10 ranks" figure in
+older session notes was reconstructed from directory timestamps, not read from
+a log - do not cite it.
 
-- **10 ranks near 30 s/iter** - saturation sits between 10 and 20 ranks. The
-  case is bandwidth-bound, the NUMA story holds, migrate.
-- **10 ranks also near 15 s/iter** - the ceiling is far lower than 20 ranks and
-  is NOT ordinary bandwidth saturation. Something more basic is capping the VM.
-  **Find that before repartitioning anything** - native Linux may not fix it.
+**It no longer matters, because the question was settled directly.** See
+section 1b: the answer is the second branch above - the ceiling is reached
+well below 10 ranks - and the "something more basic capping the VM" has been
+found and measured. It is memory placement, and native Linux does fix it.
+
 **Honest caveat.** A CPU-burn scaling test run to confirm this came out
 self-contradictory (10 -> 20 threads gained nothing, 20 -> 40 gained 1.8x,
 pinned and unpinned runs disagreed). Nothing above rests on it. The claim rests
 on the two OpenFOAM runs, which are clean and reproducible.
 
-**Expected upside: see section 1b - the earlier ~2x estimate was made before
-the bandwidth was measured and before the DIMM population was known.** That is an inference from the mechanism, not a measurement, and it is
-the main thing the migration is buying. It turns a 20 M-cell 5000-iteration
-solve from ~59 h into ~30 h. It does **not** on its own reach a 4-5 h target at
-20 M cells; the iteration count has to be attacked as well.
+**Expected upside: ~1.8x, and it is now measured rather than inferred - see
+section 1b.** The machine sustains ~51 GB/s when memory is placed on the node
+that uses it, against the 28.5 GB/s WSL2 delivers, and an OpenFOAM-shaped
+gather benchmark reproduces that 1.85x under the same two placements.
 
-## 1b. STOP - read this before migrating. It is a memory-bandwidth problem,
-##      and the OS is only part of it.
+What that buys on the production car case, with `renumberMesh` already in:
+
+| | s/iter | 2000 iterations |
+|---|---|---|
+| WSL2, before renumbering | 15.10 | 8.4 h |
+| WSL2, after renumbering | 13.65 | 7.6 h |
+| native Linux, 1.5-1.8x | 7.6-9.1 | **4.2-5.1 h** |
+
+Which means the five-hour target the handbook section 6 called unreachable is
+reachable, with no cell cut, no iteration cut and no change to the numerics.
+Treat the 1.5-1.8x band as a range, not a promise: the proxy measures the
+matrix gather, and the real solve also does assembly and halo exchange that
+will not speed up by the same factor.
+
+## 1b. It is a memory-bandwidth problem, and the operating system is the
+##     larger half - and the free one
 
 Measured 2026-08-20 with a STREAM triad (1.9 GB working set, far out of cache):
 
@@ -101,33 +150,91 @@ CPU0-DIMM12 32 GB      CPU1-DIMM12 32 GB      4 DIMMs of 12 slots, 2666 MT/s
 ```
 
 A Xeon Gold 6148 has **six memory channels per socket**. Two are populated per
-socket - **4 of 12 channels**. At 21.3 GB/s per DDR4-2666 channel that caps the
-machine at ~85 GB/s theoretical, against ~256 GB/s fully populated. A real
-STREAM on this DIMM layout should still reach ~60-70 GB/s on bare metal, so:
+socket - **4 of 12 channels**, on a board with 24 slots (two per channel). At
+21.3 GB/s per DDR4-2666 channel that caps the machine at ~85 GB/s theoretical,
+against ~256 GB/s fully populated.
 
-| | bandwidth | note |
+### The four DIMMs are already placed correctly. Do not rearrange them.
+
+Measured 2026-08-20 from **native Windows**, outside the VM, binding threads to
+one processor group at a time (Windows puts the two sockets in separate groups,
+so a process reaches one socket unless it asks otherwise):
+
+| | bandwidth |
+|---|---|
+| socket 0 alone | 25.4 GB/s |
+| socket 1 alone | 25.4 GB/s |
+| both concurrently | **~51 GB/s** (25.6 + 25.3, no interference) |
+| threads on one socket, memory on the other | 20.1 GB/s (21% NUMA penalty) |
+
+**A single DDR4-2666 channel peaks at 21.33 GB/s. Each socket sustains 25.4.**
+That exceeds one channel's theoretical maximum on the STREAM convention alone,
+before counting the read-for-ownership the store does, which puts real traffic
+near 34 GB/s. So each socket's two DIMMs are necessarily on **two different
+channels**, at ~80% of a two-channel peak - a healthy result. For four DIMMs on
+a two-socket six-channel-per-socket board, 2+2 on distinct channels is the best
+arrangement there is, and it is the one installed. **There is nothing to gain
+by moving them.**
+
+### The operating system is the bigger half, and it is free to fix
+
+WSL2 delivers **28.5 GB/s for the whole machine** against the ~51 GB/s the
+hardware demonstrably has - roughly one socket's worth. Ruled out as
+explanations:
+
+- **A benchmark artefact.** The 28 GB/s reproduces exactly with parallel first
+  touch and threads pinned to cores. Serial first touch was the obvious
+  suspect and is not the cause.
+- **The working set fitting on one node.** At a 72 GB working set - which
+  *must* span both sockets, since each holds only 64 GB - it rose only 12%, to
+  31.8 GB/s.
+- **NUMA distance.** Remote access costs 21%, nowhere near a factor of two.
+
+What it behaves like is a machine whose working set lives on one node's memory
+controllers however many cores are used. The confirming test used an
+OpenFOAM-style face-based gather/scatter - the actual `lduMatrix` access
+pattern, not a streaming one - with the same binary and memory placement the
+only variable:
+
+| threads | NUMA-local | all memory on one node |
 |---|---|---|
-| now (WSL2, 4 channels) | **28 GB/s** | measured |
-| native Linux, 4 channels | ~60-70 GB/s | inferred, ~2.3x |
-| native Linux, 12 channels | ~190 GB/s | inferred, ~7x |
+| 8 | 35.3 GB/s | 23.5 GB/s |
+| 16 | 37.0 GB/s | 24.1 GB/s |
+| 32 | **45.4 GB/s** | **24.5 GB/s** |
 
-The last two rows are **inferences from the channel count and normal STREAM
-efficiency, not measurements.** Verify by running the same STREAM binary from a
-live USB before buying anything.
+The single-node column is **flat from 8 to 32 threads** - which is precisely
+the "adding cores does nothing" signature in section 1 - while NUMA-local
+placement keeps scaling. **1.85x at 32 threads and still climbing.** Native
+Linux sees both NUMA nodes and lets each rank first-touch its own data, which
+is the left column.
 
-**Populating the other eight slots is probably the highest-leverage single
-change available, and it is independent of the operating system.** Eight more
-matched 32 GB DDR4-2666 ECC RDIMMs fills all twelve channels. Do not mix
-capacities across channels if it can be avoided - interleaving wants identical
-DIMMs.
+So the honest split, now measured rather than inferred:
 
-Sequence worth following, cheapest and least destructive first:
+| | bandwidth | |
+|---|---|---|
+| now (WSL2) | **28.5 GB/s** | measured |
+| native Linux, 4 channels | ~51 GB/s | measured on this hardware, ~1.8x |
+| native Linux, 12 channels | ~150 GB/s | still an inference from channel count |
 
-1. Boot a Linux live USB, run the same STREAM triad. This costs nothing and
-   separates 'WSL is slow' from 'this machine is slow'.
-2. If bare metal gives ~60-70 GB/s, the OS is worth ~2.3x - migrate.
-3. Populate the remaining channels either way. On the numbers above it is worth
-   more than the migration is.
+**Populating the other eight slots is no longer the first move.** It still
+raises the ceiling and it would help under WSL too - WSL is bottlenecked on one
+node's channels, and giving that node six instead of two lifts the same
+ceiling - but it costs money, and the operating system is worth ~1.8x for
+nothing. Eight more matched 32 GB DDR4-2666 ECC RDIMMs fills all twelve
+channels; do not mix capacities, interleaving wants identical DIMMs.
+
+Sequence, cheapest first:
+
+1. **`renumberMesh`. Already done** - see the handbook section 6 table. 9.6% of
+   the solve for no resolution and no hardware.
+2. **Migrate to native Linux.** Free, and worth ~1.8x on the measurement above.
+   The live-USB STREAM check this document used to recommend is no longer a
+   prerequisite: the machine's true bandwidth has been measured from outside
+   the VM, which is what that test was for.
+3. **Then re-measure, and only then consider the DIMMs.** Run
+   `scripts/migration/verify-bandwidth.sh`. If native Linux lands near 50 GB/s
+   and keeps climbing past four threads, the placement problem is fixed and the
+   remaining headroom is what the DIMMs would buy.
 ## 2. Hardware, and the three gotchas
 
 ```
@@ -182,32 +289,72 @@ shapely 2.1.2     pytest 9.1.1
 
 | What | Where | Size | Notes |
 |---|---|---|---|
-| The repo | `C:\Users\info\Documents\AvalonRacing\SimDev` | 39 MB | **Commit first — see below** |
-| `CAD/` | same, **gitignored** | 36 MB | Not in git. Must be copied by hand or it is gone |
-| `~/runs` | WSL | 24 GB | Mostly regenerable meshes. The force histories are not |
+| The repo | `C:\Users\info\Documents\AvalonRacing\SimDev` | 39 MB | In git, pushed. A clone is enough |
+| `CAD/` | same, **gitignored** | 36 MB | Not in git. Archived — see below |
+| `~/runs` | WSL | 27 GB | Meshes and fields regenerate. The histories do not |
 | `~/.venvs` | WSL | 556 MB | Do not copy — rebuild from pyproject |
 
 `.gitattributes` already normalises to LF (`* text=auto eol=lf`), so a fresh
 clone on Linux gets correct line endings. Nothing in the pipeline is
 Windows-specific; it has only ever run against Linux OpenFOAM.
 
-**28 files are uncommitted right now**, including new modules
-(`geometry/contact.py`, `geometry/mrf.py`, `geometry/decimate.py`) and their
-tests. None of that reaches a fresh clone. Commit before migrating.
+**The archive is already staged**, at
+`C:\Users\info\AvalonRacing-migration\`:
+
+```
+CAD/                    35.8 MB, 30 files   verified byte-identical to the repo copy
+run-histories.tar.gz     1.9 MB, 414 paths  every postProcessing/, logs/,
+                                            status/ and caseSpec.json under ~/runs
+```
+
+Only 14 MB of the 27 GB in `~/runs` is irreplaceable, which is what that
+tarball holds: the force traces, the solver logs and the stage records. The
+rest is mesh and field data that the pipeline regenerates.
+
+It sits on **C:**, deliberately. The Linux install shrinks C: rather than
+wiping it, so the partition survives and Linux can mount it. Do not stage this
+on D: — D: is on the Intel RST controller discussed in section 2, and is the
+one volume that may not be visible after a BIOS change.
 
 ## 5. Once Linux is up
 
-1. `sudo add-apt-repository` the OpenFOAM repo above, `apt install
-   openfoam2412-default libglu1-mesa libopengl0 libxft2 python3-venv python3-pip`
-2. `python3 -m venv ~/.venvs/simdev && ~/.venvs/simdev/bin/pip install -e ~/SimDev`
-3. Copy `CAD/` back in place (it is gitignored, so the clone will not have it)
+Steps 1 and 2 are automated. `scripts/migration/bootstrap-linux.sh` adds the
+OpenFOAM repository (by explicit signed source line, not by piping their
+installer into `sudo bash`), installs v2412 plus the gmsh runtime libraries
+and `numactl`, clones or updates `~/SimDev`, builds the venv, appends the
+OpenFOAM `bashrc` to `~/.bashrc`, and checks that every utility the pipeline
+calls — `renumberMesh` included — is on PATH. It is safe to re-run.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AvalonRacing/SimDev/main/scripts/migration/bootstrap-linux.sh -o bootstrap.sh
+less bootstrap.sh          # it runs sudo; read it first
+bash bootstrap.sh
+```
+
+Then, in order:
+
+3. Mount the Windows partition and restore what git does not carry:
+   ```bash
+   sudo mkdir -p /mnt/windows && sudo mount /dev/nvme0n1p3 /mnt/windows   # check lsblk
+   MIG=/mnt/windows/Users/info/AvalonRacing-migration
+   cp -a "$MIG/CAD" ~/SimDev/CAD
+   mkdir -p ~/runs && tar xzf "$MIG/run-histories.tar.gz" -C ~/runs
+   ```
 4. `~/.venvs/simdev/bin/simdev doctor` — checks every OpenFOAM utility and the
    STEP import path
-5. `~/.venvs/simdev/bin/python -m pytest tests/ -q` — 408 tests
-6. **Re-run the rank benchmark.** 20 vs 40 ranks on `cases/car`, 100 iterations.
-   If 40 ranks is now meaningfully faster than 20, the migration delivered what
-   it was for. If it is still flat, the NUMA inference was wrong and the
-   bottleneck is elsewhere — find it before buying hardware.
+5. `~/.venvs/simdev/bin/python -m pytest ~/SimDev/tests -q` — 415 tests
+6. **Confirm the migration delivered, before anything else.**
+   `bash ~/SimDev/scripts/migration/verify-bandwidth.sh`. Expect ~50 GB/s
+   still climbing past four threads. **28 GB/s flat from four threads means the
+   placement problem is not fixed** — stop and read section 1b rather than
+   buying DIMMs.
+7. **Re-run the rank benchmark.** 20 vs 40 ranks on `cases/car`, 100
+   iterations. Under WSL2 it was flat at 15.3-15.4 s/iter. If 40 ranks is now
+   meaningfully faster than 20, the migration delivered what it was for.
+8. `numactl --hardware` should report two nodes. WSL2 reported one, and that
+   was the whole problem. Consider `mpirun --bind-to core --map-by socket`
+   settled only after re-measuring: it was noise under WSL2 precisely because
+   placement could not matter there, and it may matter now.
 
 Two WSL-era traps that stop applying, and should be deleted from
 `docs/environment-setup.md` once native: the one-way `tar` sync into `~/SimDev`
