@@ -552,6 +552,105 @@ different knobs entirely:
 grep -nE "Refinement phase|Snapping phase|Layer addition phase|ExecutionTime" logs/log.snappyHexMesh
 ```
 
+### Make the solve faster
+
+Short answer: on this machine, you cannot, except by meshing fewer cells or
+running fewer iterations. Everything below was measured on the production car
+mesh so that the next person does not spend the afternoon finding it out
+again.
+
+**The baseline.** `cases/car` at the `car` profile, 6,929,626 cells, 40 ranks,
+100 iterations from the same initial field each time: **14.78 s/iter**. That is
+8.2 hours for 2000 iterations, plus about 24 minutes for everything else
+(prepare, blockMesh, snappy at ~16 min, checkMesh, and a `post` stage that is
+pure Python — the pipeline never calls `reconstructPar`).
+
+| variant | s/iter | vs baseline | cumulative continuity | outcome |
+|---|---|---|---|---|
+| baseline | 14.78 | — | 2.4e-4 | ok |
+| `mpirun --bind-to core --map-by socket` | 14.84 | +0.4% | 2.4e-4 | ok |
+| `nNonOrthogonalCorrectors 0` | 35.4 | — | 7.3e+12 | **SIGFPE, iter 29** |
+| ” + `nCellsInCoarsestLevel 1000` | 19.9 | — | -4.6e+13 | **SIGFPE, iter 39** |
+| ” + unlimited `grad(p)` | 12.28 | -17% | -1.3e-3 | survived, see below |
+| `nCellsInCoarsestLevel 1000` | 14.77 | -0.1% | -2.5e-4 | ok |
+| ” + `relTol` 0.05 → 0.1 | 14.46 | -2.2% | -1.4e-3 | ok |
+| ” + unlimited `grad(p)` | 13.35 | -9.7% | -1.7e-3 | ok |
+
+**`nNonOrthogonalCorrectors 0` diverges. Do not use it here.** It is the
+obvious saving and it is the first thing anyone will reach for, because the
+corrector costs *more* than the solve it corrects: the log shows the first
+pressure solve taking two GAMG cycles and the corrector taking four, since
+`relTol` is relative and bites harder on an already-reduced residual. Dropping
+it is still fatal. Local continuity error at iteration 20 goes from 9.5e-4 with
+the corrector to 1.3e-2 without, and the run dies with a floating point
+exception inside forty iterations. 71.7° of non-orthogonality across 68
+severely non-orthogonal faces is more than `limited corrected 0.33` can absorb.
+
+The variant that survived — corrector off *and* `grad(p)` unlimited — is a
+knife edge, not a setting. Its two siblings died, it carries ten times the
+baseline continuity error, and it moved Cd by 4.2% at iteration 100. It is in
+the table to be ruled out, not to be used.
+
+**Rank binding does nothing, and that is the expected answer.** Open MPI
+defaults to `--bind-to socket` above two ranks, so pinning to cores should help
+a NUMA-sensitive code. It measured 0.4% *slower*, i.e. noise. This is
+consistent with the STREAM result in `docs/linux-migration.md` §1b: a solver
+that saturates memory bandwidth at four threads cannot care where its ranks
+sit. The flags are kept because they are correct, not because they are faster;
+`SIMDEV_MPI_ARGS` turns them off.
+
+**GAMG's coarsest level does nothing either.** The mechanism is real —
+`GAMGAgglomeration.C` stops agglomerating when `nTotalCoarseCells < nProcs *
+nCellsInCoarsestLevel`, so the default of 10 at 40 ranks keeps building coarse
+levels until the whole coarse grid is under 400 cells, each level costing a
+global reduction for almost no work. Raising it to 1000 removes those levels
+and changes the wall clock by 0.1%. Whatever this case is waiting on, it is not
+coarse-grid reductions.
+
+**Things already ruled out, with the measurement that ruled them out.** Do not
+re-chase these:
+
+- *Decomposition quality.* `decomposePar` runs on the 28,420-cell background
+  mesh, not the refined one, so it is natural to suspect that snappy's
+  mid-refinement redistribution left bad subdomains. It did not: the final mesh
+  has 209,940 processor faces against 20,979,929 internal faces (1.0%), and
+  cells are balanced across ranks to within 2%.
+- *A hidden factor-of-ten.* 14.78 s/iter looks far slower than 6.9 M cells at
+  28 GB/s implies. It is not, and the arithmetic that says otherwise is a
+  STREAM model applied to a code that does not stream: the matrix is traversed
+  through `lowerAddr`/`upperAddr`, and indirect-addressed sparse work runs 3-5x
+  below STREAM as a matter of course. Nothing is broken.
+
+**So what is left.** The cost is cells times iterations, and both are linear.
+To reach a five-hour wall clock at 2000 iterations you need 8.28 s/iter, which
+at this per-cell rate is about 3.9 M cells — a 44% cut from a mesh whose every
+level has a documented reason in `cases/car/config.yaml`. The honest levers, in
+the order they cost you something:
+
+1. **Fewer iterations.** 1150 iterations fits five hours with no change to the
+   physics at all. The first production solve was stationary in the mean long
+   before 3000; whether 1150 is enough is a question about *this* case's limit
+   cycle, and `plateau_window` is what answers it.
+2. **`nCellsBetweenLevels` 3 → 2.** Levels 3-6 hold 1.77 M cells, much of it
+   buffer between rungs of a seven-level ladder. Costs sharper transitions and
+   raises non-orthogonality — which the corrector result above says this case
+   has no margin for. Measure `checkMesh` before believing it.
+3. **The prism stack.** Layer addition takes level 7 from 2,098,855 cells to
+   5,126,051, so **3.03 M cells — 44% of the mesh — are prism.** `n_layers`
+   6 → 3 recovers half of that. It does not change y+ at the wall (the first
+   layer is still 40 µm) but it wrecks the hand-off: three layers span 152 µm
+   into a 598 µm remaining cell, a 9.6x jump against the present 2.5x, and the
+   stack no longer reaches the log layer. See the long note in
+   `cases/car/config.yaml` for why that grading was chosen.
+4. **Surface level 7 → 6 somewhere.** Quarters both the surface cells and the
+   prism cells on that patch. Every patch currently at 7 has a reason recorded
+   next to it, and the tyres were moved 6 → 7 specifically to bring y+ inside
+   the gate band.
+
+The real fix is not in this file. It is the memory bandwidth: four of twelve
+DIMM slots are populated, and the machine runs under WSL2. See
+`docs/linux-migration.md` §1b.
+
 ### Add a patch role
 
 1. Add to `PatchRole` and `ROLE_TRAITS` in `geometry/roles.py`. Decide
@@ -1043,6 +1142,7 @@ compile; `simpleFoam` runs and writes coefficients.
 | ~~`TIre_RR.step`~~ | Fixed. The export is now `Tire_RR.step` and matches the patch exactly |
 | Ground layers far from the car | `ground` is a blockMesh patch at the 96 mm background size, so its 450 µm stack hands off to a 96 mm cell out in the far field. Harmless where it happens (still air over bare track) and well graded under the car, where the innermost refinement shell — thicker than the ride height — takes the floor down with it. Only worth fixing if a floor-refinement region is ever added |
 | CAD attitude | A heavy-understeer pose (10° body slip, 14–22° steer). Intentional; the user plans to revisit it for later driving states |
+| Production wall clock | 14.78 s/iter measured, so 2000 iterations is ~8.6 h, not the 5 h that was wanted. Solver numerics were measured and are a dead end (~2% safely, and `nNonOrthogonalCorrectors 0` diverges) - see §6, "Make the solve faster". Only cells and iterations are left |
 | `car_smoke` mesh limits | `trust_check_mesh_verdict: false`, skewness 20, non-ortho 75. Almost no quality net, by design |
 
 ### Deferred, with the hook already in place

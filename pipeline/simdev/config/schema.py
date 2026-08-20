@@ -331,6 +331,50 @@ class SolveConfig(BaseModel):
     plateau_tol: float = 0.002
     residual_tol: float = 1.0e-4
 
+    # --- pressure equation cost -------------------------------------------
+    #
+    # These three exist because the pressure solve is where a bandwidth-bound
+    # case spends its wall clock, and the defaults are sized for correctness
+    # on an arbitrary mesh rather than for throughput on this one. All three
+    # default to the previous behaviour, so raising them is opt-in and the old
+    # numbers stay reachable for a comparison run.
+
+    # Extra pressure solves per SIMPLE iteration to recover the
+    # non-orthogonal part of the Laplacian.
+    #
+    # It is not the cheap half. On the production car mesh the corrector solve
+    # took FOUR GAMG cycles against the first solve's two, because relTol is
+    # relative and bites harder on an already-reduced residual - so one
+    # corrector is not a 2x on the pressure equation, it is nearer 3x.
+    #
+    # 0 is safe here only because snGradSchemes and laplacianSchemes both run
+    # `limited corrected 0.33`, which damps the non-orthogonal correction to
+    # at most a third of the orthogonal part. It is still a mesh-dependent
+    # choice: watch `time step continuity errors` in the log, not just the
+    # clock. On a mesh with severe non-orthogonality the error grows and the
+    # iterations you saved get spent again on slower convergence.
+    n_non_orth_correctors: int = Field(default=1, ge=0)
+
+    # Relative tolerance on the pressure solve within one SIMPLE iteration.
+    #
+    # Loosening this trades inner cycles for outer iterations, which is a good
+    # trade only when the run stops on convergence. With a fixed iteration
+    # budget it is a bad one - the outer iterations are not there to be spent.
+    p_rel_tol: float = Field(default=0.05, gt=0.0, lt=1.0)
+
+    # GAMG's coarsest level, in cells.
+    #
+    # OpenFOAM's default is 10. On a 6.9 M cell mesh that agglomerates all the
+    # way down to a handful of cells, and every extra coarse level costs a
+    # global reduction across the ranks for a level that carries almost no
+    # work. A coarsest level of ~1000 stops the ladder while the levels still
+    # earn their keep and hands the remainder to the direct solve.
+    #
+    # Rendered explicitly at the OpenFOAM default rather than left out, for
+    # the same reason maxLoadUnbalance is: the policy should be a property of
+    # the case, not of whichever build happened to run it.
+    gamg_coarsest_cells: int = Field(default=10, gt=0)
+
 
 class PostConfig(BaseModel):
     yplus_min: float

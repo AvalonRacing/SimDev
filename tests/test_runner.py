@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -24,9 +25,76 @@ def test_parallel_argv_wraps_with_mpirun_and_parallel_flag() -> None:
         "mpirun",
         "-np",
         "8",
+        "--bind-to",
+        "core",
+        "--map-by",
+        "socket",
         "simpleFoam",
         "-parallel",
     ]
+
+
+def test_mpi_args_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIMDEV_MPI_ARGS", "--oversubscribe --bind-to none")
+    assert parallel_argv(["simpleFoam"], 2) == [
+        "mpirun",
+        "-np",
+        "2",
+        "--oversubscribe",
+        "--bind-to",
+        "none",
+        "simpleFoam",
+        "-parallel",
+    ]
+
+
+def test_empty_mpi_args_gives_stock_mpirun(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An escape hatch for an MPI build that rejects the binding flags."""
+    monkeypatch.setenv("SIMDEV_MPI_ARGS", "")
+    assert parallel_argv(["simpleFoam"], 4) == [
+        "mpirun",
+        "-np",
+        "4",
+        "simpleFoam",
+        "-parallel",
+    ]
+
+
+def test_log_is_written_while_the_command_still_runs(tmp_path: Path) -> None:
+    """The whole point of streaming: a killed run still leaves its log.
+
+    The old runner held the entire log in memory until the process exited,
+    so a solve stopped by a timeout left no log at all. The child here writes
+    a line, then blocks until the log already contains it.
+    """
+    runner = Runner(tmp_path)
+    log_path = tmp_path / "logs" / "log.slow"
+    script = (
+        "import time; "
+        "print('first line', flush=True); "
+        "time.sleep(1.5); "
+        "print('second line', flush=True)"
+    )
+    import threading
+
+    seen: list[str] = []
+
+    def watch() -> None:
+        for _ in range(40):
+            time.sleep(0.1)
+            if log_path.exists():
+                text = log_path.read_text(encoding="utf-8")
+                if "first line" in text:
+                    seen.append(text)
+                    return
+
+    watcher = threading.Thread(target=watch)
+    watcher.start()
+    runner.run([sys.executable, "-c", script], name="slow")
+    watcher.join()
+
+    assert seen, "log had no content until the process exited"
+    assert "second line" not in seen[0], "watcher caught it too late to prove anything"
 
 
 def test_successful_command_writes_a_log(tmp_path: Path) -> None:

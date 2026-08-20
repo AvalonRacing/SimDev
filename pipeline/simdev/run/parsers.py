@@ -191,6 +191,19 @@ def read_y_plus(path: Path) -> pd.DataFrame:
     )
 
 
+def is_fatal_line(line: str) -> bool:
+    """Whether one log line reports a fatal error.
+
+    Split out of find_fatal_errors so the runner can apply the same judgement
+    to a line as it streams past, without holding the whole log to scan it
+    afterwards - a six-hour solve writes more log than is worth keeping in
+    memory, and a run killed by a timeout never reaches the afterwards.
+    """
+    return any(pattern in line for pattern in FATAL_PATTERNS) and not any(
+        benign in line for benign in BENIGN_PATTERNS
+    )
+
+
 def find_fatal_errors(text: str) -> list[str]:
     """OpenFOAM often exits 0 on partial failure. Scan the log too.
 
@@ -198,9 +211,4 @@ def find_fatal_errors(text: str) -> list[str]:
     every successful run gets switched off, which costs more than the checks
     it was protecting.
     """
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if any(pattern in line for pattern in FATAL_PATTERNS)
-        and not any(benign in line for benign in BENIGN_PATTERNS)
-    ]
+    return [line.strip() for line in text.splitlines() if is_fatal_line(line)]

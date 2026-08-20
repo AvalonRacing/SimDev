@@ -9,7 +9,22 @@ solvers
         solver          GAMG;
         smoother        GaussSeidel;
         tolerance       1e-07;
-        relTol          0.05;
+        relTol          {{ spec.solve.p_rel_tol }};
+
+        // The mesh is static, so the coarse hierarchy is built once and
+        // reused. This is already OpenFOAM's default; it is written down so
+        // the case says what it relies on.
+        cacheAgglomeration      yes;
+        agglomerator            faceAreaPair;
+        mergeLevels             1;
+        nPreSweeps              0;
+        nPostSweeps             2;
+        nFinestSweeps           2;
+
+        // Where the ladder stops. See solve.gamg_coarsest_cells - the default
+        // of 10 keeps agglomerating long past the point where a level carries
+        // enough work to pay for the global reduction it costs.
+        nCellsInCoarsestLevel   {{ spec.solve.gamg_coarsest_cells }};
     }
 
     "(U|k|omega)"
@@ -24,7 +39,7 @@ solvers
 SIMPLE
 {
     consistent          yes;
-    nNonOrthogonalCorrectors 1;
+    nNonOrthogonalCorrectors {{ spec.solve.n_non_orth_correctors }};
 
     residualControl
     {

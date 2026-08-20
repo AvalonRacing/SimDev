@@ -147,7 +147,41 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
             "surface_refinement_min": 6,
             "surface_refinement_max": 7,
         },
-        "solve": {"max_iterations": 5000, "n_ranks": 40},
+        # 2000 iterations. At the measured 14.78 s/iter this is ~8.6 h
+        # wall clock, not the 5 h that was hoped for - see the handbook.
+        #
+        # WHY 2000 AND NOT 5000. The first production solve reached a
+        # stationary mean well before iteration 3000 and then oscillated about
+        # it - a limit cycle, which is the honest answer for steady RANS on a
+        # massively separated cornering open-wheel car. Iterations past that
+        # buy a different point on the same cycle, not a better answer. Read
+        # the coefficients as time-averages over plateau_window.
+        #
+        # THE PRESSURE SETTINGS STAY AT THEIR DEFAULTS, AND THAT IS A MEASURED
+        # RESULT, NOT AN OVERSIGHT. Do not "optimise" them again without
+        # reading docs/handbook.md, "Make the solve faster" - all of this was
+        # tried on this exact mesh and the numbers are recorded there.
+        #
+        # n_non_orth_correctors = 0 DIVERGES on this mesh. It is the obvious
+        # saving - the corrector solve costs more than the solve it corrects -
+        # and it kills the run: SIGFPE at iteration 29 with GAMG's default
+        # coarsest level and at iteration 39 with 1000. Local continuity error
+        # at iteration 20 goes from 9.5e-4 with the corrector to 1.3e-2
+        # without. 71.7 degrees of non-orthogonality over 68 severely
+        # non-orthogonal faces is more than `limited corrected 0.33` can
+        # absorb.
+        #
+        # gamg_coarsest_cells = 1000 measured 14.77 s/iter against 14.78 at
+        # the default of 10 - no effect. The mechanism is real (agglomeration
+        # stops at nProcs x this value, so the default builds coarse levels
+        # down to 400 cells total) but the reductions it saves are not what
+        # this case is waiting on.
+        "solve": {
+            "max_iterations": 2000,
+            "n_ranks": 40,
+            # Never write only at the end on a run this long.
+            "write_interval": 500,
+        },
     },
 }
 
