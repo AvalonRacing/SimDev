@@ -60,12 +60,74 @@ self-contradictory (10 -> 20 threads gained nothing, 20 -> 40 gained 1.8x,
 pinned and unpinned runs disagreed). Nothing above rests on it. The claim rests
 on the two OpenFOAM runs, which are clean and reproducible.
 
-**Expected upside: ~2x**, if native Linux recovers the second socket's memory
-bandwidth. That is an inference from the mechanism, not a measurement, and it is
+**Expected upside: see section 1b - the earlier ~2x estimate was made before
+the bandwidth was measured and before the DIMM population was known.** That is an inference from the mechanism, not a measurement, and it is
 the main thing the migration is buying. It turns a 20 M-cell 5000-iteration
 solve from ~59 h into ~30 h. It does **not** on its own reach a 4-5 h target at
 20 M cells; the iteration count has to be attacked as well.
 
+## 1b. STOP - read this before migrating. It is a memory-bandwidth problem,
+##      and the OS is only part of it.
+
+Measured 2026-08-20 with a STREAM triad (1.9 GB working set, far out of cache):
+
+```
+ 1 threads : 17.5 GB/s      8 threads : 28.9 GB/s
+ 2 threads : 24.5 GB/s     20 threads : 27.8 GB/s
+ 4 threads : 28.0 GB/s     40 threads : 28.4 GB/s   <- saturated at 4 threads
+```
+
+**~28 GB/s, saturating at four threads.** That is the whole explanation for why
+10, 20 and 40 ranks all solve at 15.3-15.5 s/iter: the solver is memory bound
+and the bandwidth ceiling is reached long before 10 ranks. It also explains why
+meshing is flat (939 / 870 / 876 s at 10 / 20 / 40 ranks), and why a pure-ALU
+CPU-burn test still scaled 17.5x - that test never touches memory.
+
+Ruled out by measurement, so do not re-chase them:
+
+- **MPI transport** - `/dev/shm` is 50 GB and the `vader` shared-memory BTL is
+  present. Not a TCP-fallback problem.
+- **Hugepages** - THP is `[madvise]` and `AnonHugePages` is 0, but forcing
+  `always` changed nothing (27.8 / 28.4 / 28.3 GB/s) and AnonHugePages stayed 0.
+- **CPU capacity** - pure-ALU work scales 17.5x across 40 threads.
+- **NUMA placement alone** - real (WSL flattens 2 nodes into 1), but far too
+  small to explain a 6x shortfall on its own.
+
+### THE HARDWARE IS HALF THE PROBLEM, AND THE CHEAPER HALF TO FIX
+
+```
+CPU0-DIMM1  32 GB      CPU1-DIMM1  32 GB
+CPU0-DIMM12 32 GB      CPU1-DIMM12 32 GB      4 DIMMs of 12 slots, 2666 MT/s
+```
+
+A Xeon Gold 6148 has **six memory channels per socket**. Two are populated per
+socket - **4 of 12 channels**. At 21.3 GB/s per DDR4-2666 channel that caps the
+machine at ~85 GB/s theoretical, against ~256 GB/s fully populated. A real
+STREAM on this DIMM layout should still reach ~60-70 GB/s on bare metal, so:
+
+| | bandwidth | note |
+|---|---|---|
+| now (WSL2, 4 channels) | **28 GB/s** | measured |
+| native Linux, 4 channels | ~60-70 GB/s | inferred, ~2.3x |
+| native Linux, 12 channels | ~190 GB/s | inferred, ~7x |
+
+The last two rows are **inferences from the channel count and normal STREAM
+efficiency, not measurements.** Verify by running the same STREAM binary from a
+live USB before buying anything.
+
+**Populating the other eight slots is probably the highest-leverage single
+change available, and it is independent of the operating system.** Eight more
+matched 32 GB DDR4-2666 ECC RDIMMs fills all twelve channels. Do not mix
+capacities across channels if it can be avoided - interleaving wants identical
+DIMMs.
+
+Sequence worth following, cheapest and least destructive first:
+
+1. Boot a Linux live USB, run the same STREAM triad. This costs nothing and
+   separates 'WSL is slow' from 'this machine is slow'.
+2. If bare metal gives ~60-70 GB/s, the OS is worth ~2.3x - migrate.
+3. Populate the remaining channels either way. On the numbers above it is worth
+   more than the migration is.
 ## 2. Hardware, and the three gotchas
 
 ```
