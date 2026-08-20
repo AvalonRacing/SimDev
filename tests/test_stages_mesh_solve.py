@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,17 @@ from simdev.stages.prepare import prepare
 from simdev.stages.solve import solve
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Verbatim from renumberMesh on the production car mesh, 40 ranks. The band
+# is printed once for the mesh read and once for the mesh written.
+RENUMBER_LOG = '''Reading mesh to determine current cell order
+    band           : 174038
+    profile        : 5.8097757e+10
+Writing mesh to "constant"
+    band           : 7429
+    profile        : 2.5359929e+10
+End
+'''
 
 CASE: dict = {
     "name": "ahmed",
@@ -95,8 +107,60 @@ def test_mesh_runs_the_expected_command_sequence(run_dir: Path) -> None:
         "surfaceFeatureExtract",
         "decomposePar",
         "snappyHexMesh",
+        "renumberMesh",
         "checkMesh",
     ]
+
+
+def test_renumber_runs_after_the_zero_dir_is_restored(run_dir: Path) -> None:
+    """renumberMesh renumbers the fields with the mesh, so it reads them.
+
+    Run before restore_zero_dir it would be reading the background mesh's
+    fields, which carry no patchField for the surfaces snappy just created -
+    the exact abort restore_zero_dir exists to prevent. The observable proof
+    that the ordering is right is that processor*/0 exists and is populated
+    by the time renumberMesh is called.
+    """
+    seen: list[bool] = []
+
+    class Watcher(RecordingRunner):
+        def run_parallel(self, argv, n_ranks, name=None, check=True):
+            if "renumberMesh" in argv:
+                seen.append((self.case_dir / "processor0" / "0" / "U").is_file())
+            return super().run_parallel(argv, n_ranks, name=name, check=check)
+
+    mesh(run_dir, runner=Watcher(run_dir, _mesh_logs()))
+    assert seen == [True]
+
+
+def test_renumber_overwrites_in_place(run_dir: Path) -> None:
+    """Without -overwrite renumberMesh writes a new time directory and
+    leaves constant/polyMesh untouched, so the solve reads the old ordering
+    and the whole stage is a no-op that costs meshing time."""
+    runner = RecordingRunner(run_dir, _mesh_logs())
+    mesh(run_dir, runner=runner)
+    call = next(c for c in runner.calls if "renumberMesh" in c)
+    assert "-overwrite" in call
+    assert call[0] == "mpirun"
+
+
+def test_renumber_can_be_turned_off(run_dir: Path) -> None:
+    spec_path = run_dir / "caseSpec.json"
+    payload = json.loads(spec_path.read_text(encoding="utf-8"))
+    payload["spec"]["mesh"]["renumber"] = False
+    spec_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    runner = RecordingRunner(run_dir, _mesh_logs())
+    mesh(run_dir, force=True, runner=runner)
+    assert not any("renumberMesh" in c for c in runner.calls)
+
+
+def test_mesh_records_the_band_renumbering_achieved(run_dir: Path) -> None:
+    logs = _mesh_logs()
+    logs["renumberMesh"] = RENUMBER_LOG
+    mesh(run_dir, runner=RecordingRunner(run_dir, logs))
+    detail = read_status(run_dir, "mesh").detail
+    assert detail["renumber_band"] == {"before": 174038, "after": 7429}
 
 
 def test_mesh_uses_the_esi_feature_extraction_utility(run_dir: Path) -> None:

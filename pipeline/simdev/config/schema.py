@@ -224,6 +224,31 @@ class MeshConfig(BaseModel):
     # whole mesh is created inside a ball a few tenths of a metre across in a
     # 25 m domain. See the note in the template.
     max_load_unbalance: float = Field(default=0.10, ge=0.0)
+    # Whether to run renumberMesh after snappy. Costs no resolution anywhere
+    # and changes no physics: it relabels cells, and the discrete system is
+    # the same one either way.
+    #
+    # snappy emits cells in the order its octree refinement created them,
+    # which bears no relation to adjacency. That decides the locality of
+    # every gather in the linear solver, because lduMatrix addresses psi
+    # indirectly through lowerAddr/upperAddr - the operation this solve is
+    # made of. Measured on the production car mesh (6.93 M cells, 40 ranks,
+    # same initial field, back to back):
+    #
+    #   matrix band   174,038 -> 7,429      profile 5.81e10 -> 2.54e10
+    #   solve rate    15.10   -> 13.65 s/iter    -9.6%
+    #
+    # At the old band a gather reached ~1.4 MB away, far outside any cache;
+    # at the new one ~59 kB, inside L2. Over a 2000-iteration production run
+    # that is close to an hour.
+    #
+    # It is not free of consequence for the *iteration path*: Gauss-Seidel
+    # sweeps in index order and GAMG agglomerates from the addressing, so a
+    # renumbered run takes a different route to the same fixed point. Cd at
+    # iteration 30 of an unconverged run moved 1.0%, well inside this case's
+    # own limit cycle. Turn this off to reproduce a pre-renumbering run
+    # iteration for iteration, not because it changes an answer.
+    renumber: bool = True
     # These two are snappy's *construction* limits, rendered straight into
     # meshQualityControls. They are no longer the gate's acceptance criteria:
     # gating a 21 M-face mesh on its single worst face fails every production

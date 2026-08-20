@@ -5,7 +5,7 @@ from pathlib import Path
 
 from simdev.gates.base import GateResult
 from simdev.gates.mesh_quality import check_mesh_quality
-from simdev.run.parsers import parse_check_mesh, parse_layer_summary
+from simdev.run.parsers import parse_check_mesh, parse_layer_summary, parse_renumber_band
 from simdev.run.runner import Runner, StageError
 from simdev.geometry.roles import traits
 from simdev.run.status import StageStatus, read_status, should_skip, write_status
@@ -79,11 +79,32 @@ def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> Ga
     )
     restore_zero_dir(run_dir, spec.solve.n_ranks)
 
+    # After restore_zero_dir, never before it. renumberMesh renumbers the
+    # fields alongside the mesh, so it has to read them - and until the zero
+    # directory is re-seeded those are the *background* mesh's fields, with no
+    # patchField for the surfaces snappy just created. It would abort on
+    # exactly the "Cannot find patchField entry for body" that restore_zero_dir
+    # exists to prevent.
+    band = None
+    if spec.mesh.renumber:
+        renumber = runner.run_parallel(
+            ["renumberMesh", "-overwrite"], spec.solve.n_ranks, name="renumberMesh"
+        )
+        band = parse_renumber_band(renumber.log_path.read_text(encoding="utf-8"))
+
     check = runner.run_parallel(["checkMesh"], spec.solve.n_ranks, name="checkMesh")
 
     layers = parse_layer_summary(snappy.log_path.read_text(encoding="utf-8"))
     quality = parse_check_mesh(check.log_path.read_text(encoding="utf-8"))
     gate = check_mesh_quality(quality, layers, spec, _requested_layers(run_dir, spec))
+
+    detail = dict(gate.detail)
+    if band is not None:
+        # Recorded so a slow solve can be told from a badly ordered mesh
+        # without re-running anything. A band that barely moved means
+        # renumbering found nothing to fix; the solve rate then has another
+        # cause and this is not it.
+        detail["renumber_band"] = {"before": band[0], "after": band[1]}
 
     write_status(
         run_dir,
@@ -92,7 +113,7 @@ def mesh(run_dir: Path, force: bool = False, runner: Runner | None = None) -> Ga
             state="ok" if gate.passed else "gate_failed",
             input_hash=spec.spec_hash(),
             reasons=gate.reasons,
-            detail=dict(gate.detail),
+            detail=detail,
         ),
     )
 

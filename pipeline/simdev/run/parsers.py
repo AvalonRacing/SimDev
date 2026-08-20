@@ -23,6 +23,9 @@ _N_SKEW = re.compile(r"(\d+)\s+highly skew faces")
 _SKEWNESS = re.compile(r"Max skewness\s*=\s*([-\d.eE+]+)")
 _NEGATIVE_VOLUME = re.compile(r"Zero or negative cell volume", re.IGNORECASE)
 _LAYER_HEADER = re.compile(r"^\s*patch\s+faces\s+layers\b", re.IGNORECASE)
+# renumberMesh reports the matrix band once for the mesh it read and once for
+# the mesh it wrote, in that order, from the master rank only.
+_BAND = re.compile(r"^\s*band\s*:\s*(\d+)", re.MULTILINE)
 
 FATAL_PATTERNS = (
     "FOAM FATAL ERROR",
@@ -103,6 +106,21 @@ def parse_check_mesh(text: str) -> CheckMeshResult:
         n_severely_non_ortho=int(n_non_ortho.group(1)) if n_non_ortho else 0,
         n_highly_skew=int(n_skew.group(1)) if n_skew else 0,
     )
+
+
+def parse_renumber_band(text: str) -> tuple[int, int] | None:
+    """Matrix band before and after renumbering, from a renumberMesh log.
+
+    The band is how far apart the two cells sharing a face can be in the cell
+    ordering, so it bounds how far the linear solver's indirect gathers reach
+    through memory. Returns None when the log does not carry both numbers -
+    a renumberMesh that failed, or one whose output was not captured - rather
+    than guessing, because the pair is only meaningful as a ratio.
+    """
+    bands = _BAND.findall(text)
+    if len(bands) < 2:
+        return None
+    return int(bands[0]), int(bands[1])
 
 
 def parse_layer_summary(text: str) -> dict[str, LayerInfo]:
