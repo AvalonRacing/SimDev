@@ -346,17 +346,59 @@ template loop over the result.
 
 ### Tune the mesh near a surface or in the volume
 
-Four knobs, and the interaction between them is the part that bites.
+Five knobs, and the interaction between them is the part that bites.
 
-**Volume refinement** — `domain.refinement_regions`, a list of boxes declared
-in *body lengths off the geometry bounding box*, with levels relative to
-`base_cell_size`. Regions track the model, so they survive a change of domain
-or resolution profile. They are clipped to the domain, because a region that
-runs past the boundary still refines every background cell it crosses.
+**Volume refinement, as a box** — `domain.refinement_regions`, a list of boxes
+declared in *body lengths off the geometry bounding box*, with levels relative
+to `base_cell_size`. Regions track the model, so they survive a change of
+domain or resolution profile. They are clipped to the domain, because a region
+that runs past the boundary still refines every background cell it crosses.
 
 Surface refinement only thickens the mesh against the wall. Wakes and
 separations live in the volume: adding a wake box to the Ahmed case moved Cd
 by 16% and Cl by 44%.
+
+**Volume refinement, as a distance** — `domain.refinement_shells`, a list of
+`{distance, level}` pairs. Distance is in body lengths like everything else;
+level is absolute like a region's. snappy refines every cell within `distance`
+of the vehicle to at least `level`.
+
+Use a shell rather than a box whenever the refined volume should be the shape
+of the *car* instead of the shape of a box drawn round it. On the RC car that
+is not a preference, it is the only thing that works: a cornering wake follows
+the curve of the path and leaves any axis-aligned box, and the car is posed at
+a body-slip angle besides, so a box big enough to contain the near field
+spends most of its cells in clean air. A shell has no orientation to get
+wrong, which is why the same three lines are correct for the cornering state
+and the straight state.
+
+The other thing a shell buys is the flow *through* the car. Distance is to the
+nearest surface of any part, so the gaps between body, chassis, wishbones and
+rims fall inside the innermost shell automatically. A box refines the air
+around the car; a shell refines the air in it.
+
+Two rules, both enforced:
+
+- **Shells must get coarser with distance.** snappy applies the first shell
+  whose distance contains a cell, so an outer shell finer than an inner one
+  simply never applies. It is not an error snappy reports — it meshes happily
+  and ignores you — so `validate()` rejects it.
+- **The order in the case file does not matter.** `refinement_shells()` sorts
+  them nearest-first before rendering, which is the order snappy needs.
+
+Mechanically, `prepare` writes one extra surface, `constant/triSurface/
+vehicle.stl`, that is every wall patch concatenated. It appears in snappy's
+`geometry` and **never** in `refinementSurfaces`, so it creates no patch,
+carries no boundary condition, is never snapped to and never enters force
+integration — it exists only as something to measure distance from. One
+combined surface means snappy builds one distance field rather than fifteen.
+The MRF sleeves are left out: they are closed volumes *inside* the tyres, and
+including them would drag a shell of fine cells into solid rubber.
+
+One consequence worth knowing: a shell thicker than the ride height refines
+the road under the car, so `ground_cell_size()` counts shells as well as
+boxes. Miss that and the ground's prism stack gets budgeted against a
+background cell that does not exist anywhere near the vehicle.
 
 **Per-patch surface refinement** — `refinement_min` / `refinement_max` on a
 patch, falling back to the case-wide levels. One level cannot suit surfaces of
@@ -365,6 +407,32 @@ across with 39 faces.
 
 **Per-patch layer cap** — `n_layers` on a patch. Applied *after* the
 fit calculation, so it can only ever ask for fewer.
+
+**The background these levels count from** — `mesh.base_cell_size`. Every
+refinement level is a halving of it, so it is not an independent knob: change
+it and every level in every profile and every per-patch override has to move
+with it, or the surfaces silently change resolution while still being called
+level 7.
+
+The car profiles run a **96 mm** background. It was 24 mm, and the reason for
+the change is what that cost out in the domain: the first production mesh
+spent 1,818,230 cells — a quarter of the whole mesh — on uniform 24 mm
+background, most of it in clean air metres from the car, while levels 1 and 2
+between the far field and the body held 3,881 and 18,731 cells between them.
+At 96 mm the same volume is about 28,000 cells.
+
+**Re-base only by powers of two, and check the metres afterwards.** 96 = 24×4,
+so every level moved by +2 and every absolute size is unchanged
+(0.096 / 2⁷ = 0.024 / 2⁵ = 0.75 mm). A factor like 3× cannot be absorbed by
+any integer level and would move every derived size, the layer budget and
+`max_layer_cell_ratio` with it. `tests/test_cell_sizes.py` pins the resulting
+cell size **in metres** for every patch and every profile, precisely so the
+next re-basing is arithmetic rather than an act of care — if it misses a
+patch, the suite fails instead of the physics quietly changing.
+
+What it costs: the ladder is now seven levels deep, and `nCellsBetweenLevels
+3` spends buffer cells on every rung, so the far-field saving is not banked in
+full.
 
 **A case-wide refinement ceiling** — `mesh.refinement_cap`, applied in
 `patch_refinement()` and therefore to per-patch levels as well as case-wide
@@ -387,6 +455,102 @@ function, and a wall function assumes its first cell sits in the log layer. A
 wall without layers is a turbulence model being evaluated where it is not
 valid. See `docs/validation-ahmed.md` §3 for a case where the right answer was
 still to decline them.
+
+**Where layer settings have to live.** `n_layers`, `first_layer_thickness`,
+`expansion_ratio` and `max_layer_cell_ratio` cannot be set in a resolution
+profile: the wall profile merges *after* it (see the merge order in §6), so
+the generic `low_y_plus` numbers would overwrite them without a word. Put them
+in the case file, which is also their right owner — the first layer follows
+from that vehicle's Reynolds number, and `WALL_PROFILES` is sized for nothing
+in particular. `cases/car/config.yaml` carries a worked example.
+
+The stack is graded against the cell it hands off to, not just against y⁺.
+Getting the first layer right and then stopping is what leaves a 61 µm prism
+against a 414 µm hex. Two numbers are worth computing before a production
+mesh: the jump from the last layer to the remaining cell height (aim for
+≲ 3×), and the y⁺ at the *top* of the stack (aim to cover the buffer layer,
+y⁺ ≈ 20, so the hexes take over in the log layer).
+
+**A sized stack is not an inserted stack, and the gate measures the second.**
+Everything above is arithmetic on the spec; snappy then has to build it
+against its mesh-quality limits, and that is where a well-sized stack quietly
+becomes a 1.4-layer one. The diagnosis lives in the per-iteration trace in
+`log.snappyHexMesh`, not in the layer table at the end:
+
+```
+Added 4591404 out of 4971498 cells (92.4%)   <- iteration 0, stack fits
+Added 2983865 out of 4971498 cells (60.0%)   <- iteration 1, quality took it back
+```
+
+The tell is that the extrusion percentage barely moves (89.7% → 86.7%) while
+the cell count halves: faces are still being extruded, so the layers are being
+*squeezed*, not dropped, and no amount of re-sizing the stack will help.
+`meshQualityControls/relaxed` with `nRelaxedIter` is the fix — snappy's design
+is to try the strict limits and fall back, and with no `relaxed` block there is
+nothing to fall back to.
+
+Note the coupling this exposes, because it is easy to make worse by trying to
+be careful: `spec.mesh.max_non_ortho` and `max_skewness` are rendered into
+snappy's `meshQualityControls` as well as being the mesh gate's thresholds. So
+they are the *mesher's construction constraints* and the *gate's acceptance
+criteria* at once, and tightening the gate makes snappy build worse layers,
+which then fails the gate. Decoupling them is worth doing.
+
+### Make meshing faster without coarsening the mesh
+
+snappy's cost is not proportional to the cells it produces. It is proportional
+to how much geometry querying each refinement iteration does and to how evenly
+that work spreads over the ranks — which is why this case meshes slowly at a
+cell count that looks modest. Nearly every one of its 6.6 M cells is created
+inside a ball a few tenths of a metre across, in a 25.7 m³ domain whose
+background is only ~28 k cells.
+
+Two settings exist for this, and neither changes the resolution anywhere.
+
+**`domain.shell_surface_tolerance`** simplifies the combined vehicle surface
+that the refinement shells measure distance from. snappy answers a
+distance-mode region from an octree over that surface's triangles and rebuilds
+it on every rank each time it redistributes the mesh mid-refinement, so the
+triangle count is a per-iteration cost. The surface arrives as the CAD
+tessellation — sized by `geometry.tessellation` for surfaces that get *snapped
+to* — and this one never is: it is not in `refinementSurfaces`, creates no
+patch, and never enters force integration. On the real car, 2 mm takes it from
+598,796 triangles to 146,450.
+
+The tolerance is not free to raise, and the constraint that bites is not the
+one you would expect. Displacement is bounded by the grid, so the refinement
+boundary cannot shift further than the tolerance — 2 mm against a 53 mm
+innermost shell is nothing. What actually limits it is that a feature *thinner*
+than the tolerance can collapse out of the surface entirely, and a suspension
+link that is not in the distance field pulls no refinement around itself —
+losing exactly the flow between body, chassis and wishbones that the innermost
+shell was added for. Measured on the car: at 2 mm the worst part keeps 97.9% of
+its area, at 3 mm 93.6%, at 5 mm 81.5%. `prepare` measures retention per part
+on every run and warns below 95%, because whether a given feature collapses
+depends on where the grid falls across it and cannot be settled by arithmetic.
+The before/after counts land in the prepare record under `shell_surface`.
+
+**`mesh.max_load_unbalance`** decides how often snappy redistributes the mesh
+between ranks during refinement. `decomposePar` splits the *background* mesh,
+which is uniform, so the ranks start with an equal share of a domain in which
+the refinement is then poured into that small ball: a handful of ranks create
+essentially the whole mesh while the rest hold empty tunnel. It renders
+explicitly at the tutorial value of 0.10 rather than being left out, so the
+policy is a property of the case and not of whichever build ran it. Lowering it
+rebalances more often — worth measuring on this case, where the imbalance is
+extreme.
+
+Related trap: `maxLocalCells` is a **silent refinement stop**, not an error. A
+rank that hits it stops refining and snappy carries on, so a badly unbalanced
+run can return a mesh coarser than the one that was asked for without saying
+so.
+
+Before touching either, get the phase breakdown — the three phases respond to
+different knobs entirely:
+
+```
+grep -nE "Refinement phase|Snapping phase|Layer addition phase|ExecutionTime" logs/log.snappyHexMesh
+```
 
 ### Add a patch role
 
@@ -427,11 +591,69 @@ Two consequences worth knowing:
 - **When the CAD frame and the tunnel disagree about which way the car faces,
   the tunnel is reversed** (`flow.direction`), not the car. See below.
 - **Tyres are expected to cross z = 0.** A loaded tyre is modelled deflected
-  into the road and the part below the plane is the contact patch;
-  snappyHexMesh clips it against the ground and what remains is a flat
-  footprint of the right size. Bodywork below the road is *reported* rather
-  than rejected — at a big enough roll or dive a splitter really does touch
-  the road, and that is a condition to simulate.
+  into the road and the part below the plane is the contact patch. It is
+  squared off there before meshing — see below. Bodywork below the road is
+  *reported* rather than rejected, and is left alone for snappyHexMesh to clip
+  — at a big enough roll or dive a splitter really does touch the road, and
+  that is a condition to simulate.
+
+### The tyre contact patch
+
+The one place the pipeline changes the shape of the CAD, and the exception
+that proves the rule above.
+
+A tyre drawn deflected into the road meets it *tangentially*, so the wedge
+between tread and tarmac closes to zero angle. Left alone, that wedge is
+filled with sliver cells: they fail `checkMesh` on skewness, they refuse
+layers, and where they do mesh they plant a spurious separation line right
+where the wheel wake is born — on an open-wheel car, one of the largest single
+contributions to drag.
+
+So `prepare` cuts each `tyre` patch on a horizontal plane just above the road
+and extrudes the resulting cross-section straight down through it. The
+tangential wedge becomes a vertical wall meeting the ground at ninety degrees,
+and the footprint snappy resolves is the real contact patch rather than
+whatever the clipping happened to leave.
+
+```yaml
+geometry:
+  contact_patch:
+    enabled: true
+    cut_height: 0.0005        # m above the road; the height of the step
+    depth_below_road: 0.002   # m the wall runs past z = 0
+```
+
+**`cut_height` is the number to think about.** It is the height of the vertical
+step, so it has to be something snappy can resolve: a step well under one
+surface cell gets smeared back into the ramp you were trying to get rid of.
+`prepare` warns, per patch, when it is smaller than that patch's own surface
+cell. Raising it costs a little rolling radius and buys a step the mesh can
+actually hold.
+
+`depth_below_road` exists so the wall ends *past* `z = 0` rather than on it. A
+face coplanar with the `ground` patch is its own class of snapping failure;
+running the wall below and letting snappy clip it keeps the intersection a
+clean edge. Nothing below the road is simulated — the background mesh starts
+at `z = 0` — so the flat cap down there is only holding the STL closed.
+
+Three things about the ordering, all of which have a wrong answer that looks
+fine:
+
+- The cut runs **last**, after every check and measurement. Rolling radii,
+  ride height and the reported contact depth all describe the CAD as drawn.
+- In particular the rolling radius **must** be measured first. The extruded
+  corners sit further from the wheel axis than the tread does, so a radius
+  taken off the cut surface reads several millimetres high and drives every
+  wheel too fast.
+- A tyre that does not reach the road is left alone and still trips the
+  "the car is floating" warning. Inventing a footprint for it would hide the
+  fault.
+
+What the cut produced is recorded per tyre in `status/prepare.json` under
+`contact_patches` — footprint area, the depth the CAD drew, and the number of
+separate loops (a treaded tyre has more than one). The area is worth a glance
+against the load the tyre is carrying; neither it nor the depth is recoverable
+from the written STL, because the written STL is the one already squared off.
 
 **Attitude is never failed on.** An RC car spends most of its cornering life
 in heavy understeer, so large steer and body-slip angles are the normal
@@ -751,7 +973,7 @@ a log.
 |---|---|---|
 | Validation error at `prepare` | The message — they name the two things that disagree | Config edited without its partner (patch set vs mode, layer thickness vs wall treatment) |
 | snappyHexMesh leaks into the body | `check_geometry` warnings | Non-watertight STL |
-| Mesh gate fails on layer coverage | `logs/log.snappyHexMesh` layer table | Thin trailing edges; reduce `first_layer_thickness` or `expansionRatio`, or relax `minThickness` |
+| Mesh gate fails on layer coverage | `logs/log.snappyHexMesh` "Added N out of M cells" per iteration | **Read the iteration trace before touching the stack sizing.** If iteration 0 places most of the cells and a later one collapses, the geometry accepted the stack and mesh-quality relaxation took it away — that is `meshQualityControls/relaxed` and `nRelaxedIter`, not the layer numbers. If extrusion percentage is low from the start, it really is the geometry: thin trailing edges, `first_layer_thickness`, `expansionRatio`, `minThickness` |
 | Mesh gate fails on non-orthogonality | `logs/log.checkMesh` | Too-aggressive refinement jumps; raise `nCellsBetweenLevels` |
 | Mesh gate fails although `max_skewness` was raised | `mesh.trust_check_mesh_verdict` | checkMesh judges skewness against its own hardcoded limit of 4 and that verdict gates too. The spec's number can only tighten unless the flag is off — see §6 |
 | Solve diverges immediately | `logs/log.simpleFoam` | Usually a BC or a bad cell; check `checkMesh` passed and `locationInMesh` is actually in the fluid |
@@ -801,9 +1023,11 @@ compile; `simpleFoam` runs and writes coefficients.
 
 ### Not verified, in the order it will matter
 
-1. **No production-resolution run has ever been attempted.** The `car` profile
+1. **No production-resolution run has ever been *solved*.** The `car` profile
    is 1.82 M background cells before refinement — an overnight job. Everything
-   above was measured on a mesh nobody should solve on.
+   in "Verified" above was measured on a mesh nobody should solve on. The mesh
+   half is now being exercised at production settings (see the prism-stack note
+   below); the solve half still is not.
 2. **`low_y_plus` has never been run at a resolution where it means anything.**
    The wall-profile machinery is unit tested; the physics path is not. The
    `car` and `car_dev` profiles are sized on paper, not measured.
@@ -816,7 +1040,8 @@ compile; `simpleFoam` runs and writes coefficients.
 | Thing | State |
 |---|---|
 | `a_ref_full = 0.02 m²` | Declared by the user. Nothing checks it against the geometry — the projected-area computation was removed, and it now drives the blockage check too |
-| `TIre_RR.step` | Filename differs from the patch by capitalisation. Accepted with a warning; a rename makes it exact |
+| ~~`TIre_RR.step`~~ | Fixed. The export is now `Tire_RR.step` and matches the patch exactly |
+| Ground layers far from the car | `ground` is a blockMesh patch at the 96 mm background size, so its 450 µm stack hands off to a 96 mm cell out in the far field. Harmless where it happens (still air over bare track) and well graded under the car, where the innermost refinement shell — thicker than the ride height — takes the floor down with it. Only worth fixing if a floor-refinement region is ever added |
 | CAD attitude | A heavy-understeer pose (10° body slip, 14–22° steer). Intentional; the user plans to revisit it for later driving states |
 | `car_smoke` mesh limits | `trust_check_mesh_verdict: false`, skewness 20, non-ortho 75. Almost no quality net, by design |
 
@@ -825,7 +1050,7 @@ compile; `simpleFoam` runs and writes coefficients.
 | Deferred | Already provided for |
 |---|---|
 | Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw`, `CmRoll`; `run/parsers.py` reads only Cd and Cl |
-| Curved wake refinement for cornering | `refinement_regions` are axis-aligned boxes; a cornering wake leaves them, and the validator warns |
+| Curved **far**-wake refinement for cornering | `domain.refinement_shells` now cover the near field and the flow through the car, and they follow any attitude — but they follow the *car*, not the *path*, so past the outermost shell the cornering far wake is still at background size. `refinement_regions` are axis-aligned boxes and a cornering wake leaves them. The validator says so on every run |
 | Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
 | Full plane-cut image suite | `post` exists with a minimal set |
 | Rim pumping while cornering | Wheel MRF zones are meshed but carry the corner frame; needs a sliding mesh to do properly |

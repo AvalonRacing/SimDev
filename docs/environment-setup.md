@@ -17,8 +17,26 @@ Reboot when prompted, then create your Linux user.
 ```ini
 [wsl2]
 memory=100GB
-processors=40
+processors=80
 ```
+
+**`processors=` counts logical processors, not physical cores**, and getting
+this wrong costs half the machine silently. On this host (dual Xeon Gold 6148,
+40 physical cores / 80 threads), `processors=40` handed the VM 40 logical CPUs
+which the hypervisor presented as **20 cores × 2 threads**. Open MPI allocates
+slots by *cores*, so `mpirun -n 40` failed with "not enough slots" and nothing
+else in the stack complained — `nproc` still cheerfully reported 40.
+
+Set it to the thread count (80) and check the topology, not `nproc`:
+
+```bash
+lscpu | grep -E "^CPU\(s\)|Core\(s\) per socket|Thread\(s\) per core"
+# CPU(s): 80   Core(s) per socket: 40   Thread(s) per core: 2
+mpirun -n 40 hostname | wc -l   # must print 40
+```
+
+This is not a licence to run 80 ranks — see §5. The setting governs how many
+CPUs the VM can see; `n_ranks` governs how many ranks you launch on them.
 
 Then relocate the distro:
 
@@ -78,7 +96,15 @@ Run cases under `~/runs` on the ext4 filesystem. **Never** under `/mnt/c` or
 ## 5. Core count
 
 Use 40 ranks maximum (physical cores). OpenFOAM is memory-bandwidth bound;
-the 80 logical threads reduce throughput.
+the 80 logical threads reduce throughput. `validate()` enforces this as
+`MAX_PHYSICAL_CORES = 40`.
+
+Keep this separate from the `processors=80` in §2. Two different numbers:
+
+| Setting | Value | Means |
+|---|---|---|
+| `.wslconfig processors` | 80 | How many logical CPUs the VM may see. Below 80, Open MPI counts only half the cores and refuses 40 ranks |
+| `solve.n_ranks` | 40 | How many ranks actually launch — one per physical core, never one per thread |
 
 ## 6. The development loop
 
