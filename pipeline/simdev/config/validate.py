@@ -85,6 +85,22 @@ def validate(spec: CaseSpec) -> list[str]:
                 "curve of the path and will leave them. Expect the far wake "
                 "to be resolved at the background cell size"
             )
+        if not spec.domain.refinement_shells:
+            warnings.append(
+                "no domain.refinement_shells: nothing refines the volume "
+                "around the car, so the near field and the flow through the "
+                "bodywork sit at the background cell size a cell or two off "
+                "the wall. Shells are measured from the vehicle surface, so "
+                "unlike a box they follow a cornering attitude"
+            )
+        else:
+            reach = max(s.distance for s in spec.domain.refinement_shells)
+            warnings.append(
+                f"refinement shells reach {reach:.2f} body lengths from the "
+                "car. Beyond that the cornering far wake is still at the "
+                "background cell size: shells follow the car, not the path, "
+                "and no curved wake region exists yet"
+            )
     elif spec.domain.kind == "annulus":
         errors.append(
             f"domain.kind is 'annulus' but mode is '{spec.physics.mode.value}'; "
@@ -206,6 +222,59 @@ def validate(spec: CaseSpec) -> list[str]:
             f"{spec.mesh.surface_refinement_min} > max "
             f"{spec.mesh.surface_refinement_max}"
         )
+
+    # --- refinement shells -----------------------------------------------
+    # snappy applies the first shell whose distance contains the cell, so a
+    # shell further out than a finer one can never take effect. Written the
+    # wrong way round it is not an error snappy reports: it meshes happily and
+    # quietly ignores the level you asked for.
+    shells = sorted(spec.domain.refinement_shells, key=lambda s: s.distance)
+    for nearer, further in zip(shells, shells[1:]):
+        if further.level >= nearer.level:
+            errors.append(
+                f"refinement shell at {further.distance} body lengths asks for "
+                f"level {further.level}, which is not coarser than the "
+                f"level {nearer.level} shell at {nearer.distance}. Shells must "
+                "get coarser with distance, or the outer one never applies"
+            )
+
+    for shell in shells:
+        if shell.level > spec.mesh.surface_refinement_max:
+            warnings.append(
+                f"refinement shell at {shell.distance} body lengths asks for "
+                f"level {shell.level}, finer than the case-wide surface "
+                f"refinement of {spec.mesh.surface_refinement_max}. The volume "
+                "away from the wall would be finer than the wall itself"
+            )
+
+    # --- MRF sleeve interference -----------------------------------------
+    # The repair only works if snappy cannot resolve the two surfaces as one,
+    # which means the interference has to be worth several cells on the
+    # sleeve's own patch. A tenth of a cell moves the coincidence rather than
+    # removing it, and nothing downstream would say so.
+    mrf = spec.geometry.mrf_interference
+    if mrf.enabled:
+        for patch in spec.geometry.patches:
+            if patch.role is not PatchRole.MRF_ZONE:
+                continue
+            cell = spec.surface_cell_size_for(patch)
+            if mrf.interference < 2.0 * cell:
+                warnings.append(
+                    f"geometry.mrf_interference.interference is "
+                    f"{mrf.interference * 1e3:.2f} mm against a "
+                    f"{cell * 1e3:.2f} mm cell on '{patch.name}'. A sleeve "
+                    "pushed less than about two cells into the tyre is still "
+                    "effectively coincident with it, and the faceZone will "
+                    "still come out multiply connected"
+                )
+                break
+        if mrf.interference <= mrf.min_clearance:
+            errors.append(
+                f"geometry.mrf_interference.interference "
+                f"({mrf.interference * 1e3:.2f} mm) is not larger than "
+                f"min_clearance ({mrf.min_clearance * 1e3:.2f} mm); a sleeve "
+                "would be moved by less than the gap that triggered the move"
+            )
 
     # --- parallel --------------------------------------------------------
     if spec.solve.n_ranks > MAX_PHYSICAL_CORES:

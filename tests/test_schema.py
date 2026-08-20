@@ -143,6 +143,18 @@ def test_the_cap_reaches_the_case_wide_surface_cell() -> None:
 
 
 def test_the_smoke_profile_caps_refinement() -> None:
+    """The cap must actually bind, whatever the background happens to be.
+
+    Asserting the cap's raw *number* pins it to one choice of base_cell_size
+    and breaks on any re-basing while telling you nothing about whether the
+    profile is still cheap. What matters is that a cap is set and that it sits
+    at or below the profile's own surface refinement, so per-patch levels -
+    which otherwise override the profile - are overridden in turn. That is the
+    whole reason the cap exists. The absolute cell size it produces is pinned
+    in tests/test_cell_sizes.py.
+    """
     from simdev.config.profiles import RESOLUTION_PROFILES
 
-    assert RESOLUTION_PROFILES["car_smoke"]["mesh"]["refinement_cap"] == 2
+    mesh = RESOLUTION_PROFILES["car_smoke"]["mesh"]
+    assert mesh["refinement_cap"] is not None
+    assert mesh["refinement_cap"] <= mesh["surface_refinement_max"]

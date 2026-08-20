@@ -289,7 +289,13 @@ def test_tyres_may_cross_the_road_plane(sunken_car) -> None:
 
 
 def test_the_car_is_left_exactly_where_the_cad_put_it(sunken_car) -> None:
-    result = sunken_car("asis")
+    """No rotation, no translation, no ground snapping - on any part.
+
+    Run with the contact patch off, so this measures placement alone. The one
+    thing the pipeline is allowed to change about the geometry is the tyre at
+    the road, and it gets its own tests below.
+    """
+    result = sunken_car("asis", **{"geometry.contact_patch.enabled": False})
 
     surfaces = result.run_dir / "constant" / "triSurface"
     body = load_surface(surfaces / "Body.stl")
@@ -298,6 +304,51 @@ def test_the_car_is_left_exactly_where_the_cad_put_it(sunken_car) -> None:
     # Authored at 30..130 mm and -1.4..64.6 mm; nothing has moved.
     assert float(body.bounds[0][2]) == pytest.approx(0.030, abs=1e-6)
     assert float(tyre.bounds[0][2]) == pytest.approx(-0.0014, abs=1e-6)
+
+
+def test_the_contact_patch_squares_the_tyre_off_at_the_road(sunken_car) -> None:
+    """The tyre is cut just above z = 0 and extruded down through it."""
+    result = sunken_car("squared")
+
+    surfaces = result.run_dir / "constant" / "triSurface"
+    tyre = load_surface(surfaces / "Tire_FL.stl")
+    settings = result.spec.geometry.contact_patch
+
+    assert float(tyre.bounds[0][2]) == pytest.approx(
+        -settings.depth_below_road, abs=1e-6
+    )
+    # Authored at 64.6 mm; the top of the tyre is untouched.
+    assert float(tyre.bounds[1][2]) == pytest.approx(0.0646, abs=1e-4)
+
+    recorded = result.contact_patches["Tire_FL"]
+    assert recorded.area > 0.0
+    assert recorded.depth == pytest.approx(0.0014 + settings.cut_height, abs=1e-6)
+
+
+def test_only_the_tyres_are_squared_off(sunken_car) -> None:
+    """A splitter on the tarmac is a condition to simulate, not a defect.
+
+    Squaring bodywork off at the road would change the shape being tested;
+    snappyHexMesh clips it instead, exactly as before.
+    """
+    result = sunken_car("bodyonly")
+
+    body = load_surface(result.run_dir / "constant" / "triSurface" / "Body.stl")
+
+    assert float(body.bounds[0][2]) == pytest.approx(0.030, abs=1e-6)
+    assert set(result.contact_patches) == {"Tire_FL"}
+
+
+def test_the_rolling_radius_is_measured_before_the_tyre_is_cut(sunken_car) -> None:
+    """The extruded corners sit further from the axis than the tread does.
+
+    Measured off the cut surface the rolling radius reads millimetres high and
+    drives the wheel too fast, so the measurement has to happen first. The
+    tyre is authored 33 mm in radius, centred 31.6 mm off the road.
+    """
+    result = sunken_car("radius")
+
+    assert result.wheels["FL"].radius == pytest.approx(0.033, rel=1e-2)
 
 
 def test_a_non_tyre_part_through_the_road_is_reported(tmp_path: Path) -> None:

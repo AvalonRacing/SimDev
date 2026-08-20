@@ -116,6 +116,35 @@ class RefinementRegion(BaseModel):
     height: float = Field(gt=0.0)
 
 
+class RefinementShell(BaseModel):
+    """A shell of refinement at a distance from the vehicle's own surfaces.
+
+    Where a RefinementRegion is a box you place, a shell is a distance you
+    declare: snappy refines every cell within `distance` of the vehicle to at
+    least `level`, so the refined volume is the shape of the car rather than
+    the shape of a box someone drew round it.
+
+    That difference is what makes it work on this case at all. A cornering
+    wake follows the curve of the path and leaves any axis-aligned box, and
+    the car is posed at a body-slip angle besides, so a box sized to contain
+    the near field spends most of its cells in clean air. A shell has no
+    orientation to get wrong, and it costs nothing to switch a case between
+    the straight and cornering states.
+
+    The other thing it buys is the flow *through* the car. Distance is
+    measured to the nearest surface of any part, so the gaps between body,
+    chassis, wishbones and rims are inside the innermost shell automatically -
+    the internal airflow that surface refinement alone leaves at background
+    size once you are a cell or two off the wall.
+
+    `distance` is in body lengths, like every other length in DomainConfig.
+    `level` is absolute, like RefinementRegion.level.
+    """
+
+    distance: float = Field(gt=0.0)
+    level: int = Field(ge=1)
+
+
 class DomainConfig(BaseModel):
     """Extents are in body lengths for both domain kinds.
 
@@ -134,6 +163,35 @@ class DomainConfig(BaseModel):
     height_lengths: float = 3.0
     max_blockage: float = 0.01
     refinement_regions: list[RefinementRegion] = Field(default_factory=list)
+    # Ordered coarse-to-fine or fine-to-coarse as you like; validate() checks
+    # that they are consistent rather than trusting the order.
+    refinement_shells: list[RefinementShell] = Field(default_factory=list)
+    # Grid size, in metres, for simplifying the combined surface the shells
+    # measure their distance from. 0 leaves it exactly as the CAD tessellated
+    # it, which is the default because it changes what a case meshes to.
+    #
+    # This is the one surface in the case that can be simplified without
+    # coarsening anything: it is never snapped to, never becomes a patch and
+    # never enters force integration - it exists only to be measured from. The
+    # walls snappy actually meshes against are untouched.
+    #
+    # WHAT IT BUYS. snappy answers a distance-mode region from an octree over
+    # this surface's triangles, and rebuilds it on every rank each time the
+    # mesh is redistributed mid-refinement. On the real car the combined
+    # surface is 598,654 triangles; at 2 mm it is 146,598, and every part
+    # keeps at least 97.9% of its area - the suspension, which is the thin-
+    # feature risk, keeps exactly that.
+    #
+    # HOW TO SIZE IT. Two constraints, and the second is the one that bites.
+    # The refinement boundary can shift by up to this distance, so it wants to
+    # be small against the innermost shell (2 mm against 53 mm on the car).
+    # And a feature thinner than the tolerance MAY collapse out of the surface
+    # entirely, depending on where the grid falls across it - at 5 mm the
+    # car's suspension loses 18.5% of its area to links disappearing, and a
+    # link that is not in the distance field pulls no refinement around
+    # itself. prepare measures the retained area per part and warns, because
+    # that second constraint cannot be checked by arithmetic.
+    shell_surface_tolerance: float = Field(default=0.0, ge=0.0)
     # Arc segments per 90 degrees of sector. blockMesh draws block edges as
     # circular arcs, but snappy's background cells are still hexes, so a
     # sector spanned by too few segments has visibly faceted radial walls.
@@ -156,8 +214,56 @@ class MeshConfig(BaseModel):
     first_layer_thickness: float = Field(gt=0.0)
     expansion_ratio: float = Field(default=1.2, ge=1.0)
     min_layer_coverage: float = 0.7
+    # Rendered straight into castellatedMeshControls. Costs no resolution
+    # anywhere: it buys meshing *time* by deciding how often snappy
+    # redistributes the mesh between ranks during refinement.
+    #
+    # 0.10 is the OpenFOAM tutorial value and a safe default. Lower it on a
+    # case whose refinement is concentrated in a small part of the domain -
+    # which is every external-aero case, and this one especially, where the
+    # whole mesh is created inside a ball a few tenths of a metre across in a
+    # 25 m domain. See the note in the template.
+    max_load_unbalance: float = Field(default=0.10, ge=0.0)
+    # These two are snappy's *construction* limits, rendered straight into
+    # meshQualityControls. They are no longer the gate's acceptance criteria:
+    # gating a 21 M-face mesh on its single worst face fails every production
+    # mesh ever built, and tightening the number here only made snappy build
+    # worse layers trying to satisfy it. What the gate judges is below.
     max_non_ortho: float = 70.0
     max_skewness: float = 4.0
+    # Acceptance criteria, which ask how *much* of the mesh is affected rather
+    # than how bad one face is.
+    #
+    # The average non-orthogonality is what governs the accuracy of the
+    # non-orthogonal correction, and it is the number to watch: a real
+    # production mesh runs under 10 while its worst face sits near 70.
+    max_mean_non_ortho: float = 25.0
+    # Fraction of all faces allowed to exceed checkMesh's own severe limits
+    # (70 degrees non-orthogonality, skewness 4 internal / 20 boundary).
+    # 0.1% of 21 M faces is 21,000 - far above the 58 and 27 a good mesh has,
+    # and far below the tens of thousands a genuinely broken one has.
+    max_bad_face_fraction: float = Field(default=1.0e-3, ge=0.0, le=1.0)
+    # Layer iterations that run under the strict limits above before snappy
+    # falls back to the `relaxed` sub-dictionary.
+    #
+    # 1, NOT 0, AND THE DIFFERENCE WAS MEASURED. snappyLayerDriver selects the
+    # dictionary as `iteration < nRelaxedIter ? strict : relaxed`, so 0 puts
+    # the relaxed limits in force for iteration 0 - the iteration that decides
+    # which faces get extruded at all. That sounds like what you want, and on
+    # this case it is not: the relaxed block sets minVol, minTetQuality and
+    # minDeterminant to ~1e-30, and with those in force from the start snappy
+    # successfully extrudes the full 40 um stack across the whole 18.8 m2 of
+    # far-field track, where the background cell is 96 mm wide. That is an
+    # aspect ratio of ~4800 (measured: 5547, and checkMesh counts 6,430 cells
+    # over its limit) on layers that resolve nothing - the ground more than a
+    # car length away carries still air over bare tarmac.
+    #
+    # At 1 the strict limits govern iteration 0, those slivers are refused,
+    # and 96% of the ground keeps its unlayered 48 mm cell at aspect ratio 2,
+    # which is the right answer for it. The 0.8% of ground under the car is
+    # refined by the shells and is layered either way - 21 um against 24 um,
+    # i.e. unchanged where it matters.
+    n_relaxed_iter: int = Field(default=1, ge=0)
     # Fraction of the surface cell the whole prism stack may occupy. Also
     # rendered as snappy's own maxFaceThicknessRatio, so the pipeline's limit
     # and snappy's truncation threshold can never disagree.
@@ -206,6 +312,21 @@ class ForcesConfig(BaseModel):
 class SolveConfig(BaseModel):
     max_iterations: int = Field(gt=0)
     n_ranks: int = Field(gt=0)
+    # How often the solver writes a full field set, in iterations.
+    #
+    # None means 'only at max_iterations', which is what this used to do
+    # unconditionally - and it cost a 12-hour production solve its entire
+    # flow field. simpleFoam writes on reaching endTime or on satisfying
+    # residualControl; a run stopped any other way (a timeout, a full disk, a
+    # walked-over ssh session) writes nothing at all, and 3,012 iterations of
+    # a 5,000-iteration case left behind force histories, residuals, and not
+    # one cell of U or p to look at.
+    #
+    # Set it on any run long enough that losing it would hurt. purgeWrite in
+    # the template keeps only the most recent writes, so the cost is bounded
+    # disk rather than growing disk, and the newest write doubles as a
+    # restart point.
+    write_interval: int | None = Field(default=None, gt=0)
     plateau_window: int = 200
     plateau_tol: float = 0.002
     residual_tol: float = 1.0e-4
@@ -273,6 +394,67 @@ class TessellationConfig(BaseModel):
     curvature_segments: int = Field(default=24, ge=6)
 
 
+class ContactPatchConfig(BaseModel):
+    """How the tyres are joined to the road, in metres.
+
+    A loaded tyre is drawn deflected into the road, so tread and ground meet
+    tangentially and the wedge between them closes to zero angle. Left alone
+    that wedge is filled with sliver cells that fail on skewness, refuse
+    layers, and separate the flow in the wrong place.
+
+    So the tyre is cut on a horizontal plane just above the road and the
+    cross-section is extruded straight down through it: a vertical wall
+    meeting the ground at ninety degrees, and a footprint of the right size.
+
+    `cut_height` is the one number to think about. It is the height of the
+    vertical step, so it wants to be something snappyHexMesh can resolve -
+    a step well under one surface cell gets smeared back into a ramp and buys
+    nothing. prepare() warns when it is smaller than the tyre's own surface
+    cell.
+
+    `depth_below_road` exists so the extrusion ends *past* z = 0 rather than
+    on it. A face coplanar with the ground patch is its own class of snapping
+    failure; running the wall below and letting snappy clip it keeps the
+    intersection a clean edge. Nothing simulates the part below the road.
+    """
+
+    enabled: bool = True
+    cut_height: float = Field(default=0.0005, gt=0.0)
+    depth_below_road: float = Field(default=0.002, gt=0.0)
+
+
+class MrfInterferenceConfig(BaseModel):
+    """Keeping the MRF sleeve off the tyre's surface, in metres.
+
+    A sleeve is drawn to the same nominal diameter as the tyre bore, so CAD
+    puts the two surfaces in exactly the same place. For snappyHexMesh that is
+    degenerate: a faceZone lying on a wall produces baffles, faceZones that
+    come back "multiply connected", non-manifold points and intermittently a
+    reversed face. Measured on this car at 0.05 mm over three quarters of the
+    sleeve.
+
+    So when the gap is under `min_clearance` the sleeve is pushed
+    `interference` into the tyre - deliberately intersecting rather than
+    touching, because where it is buried in tyre material there are no fluid
+    cells and therefore no zone boundary at all. The cellZone ends up bounded
+    by the tyre's own wall, which is what should have bounded it.
+
+    Never the other way round. Shrinking the sleeve clear of the tyre would
+    leave the zone short of the air it exists to rotate, and a near miss is as
+    fragile as a hit.
+    """
+
+    enabled: bool = True
+    # Gap below which sleeve and tyre count as the same surface. Generous
+    # against the ~0 of a real coincidence and the millimetres of a sleeve
+    # with genuine clearance, so it does not have to be precise.
+    min_clearance: float = Field(default=0.001, gt=0.0)
+    # How far into the tyre it is pushed. Wants to be a few surface cells so
+    # snappy cannot resolve the two surfaces as one; validate() checks it
+    # against the sleeve's own cell size.
+    interference: float = Field(default=0.002, gt=0.0)
+
+
 class GeometryConfig(BaseModel):
     """Where the surfaces come from.
 
@@ -286,6 +468,14 @@ class GeometryConfig(BaseModel):
     This is deliberate and worth keeping. Every transform the pipeline is
     allowed to apply is a place where the simulated car can differ from the
     drawn one, and the difference is invisible in the result.
+
+    The one exception is `contact_patch`, and it is an exception rather than a
+    hole in the rule: it changes the tyres near the road, where the CAD's own
+    shape is a modelling artefact (a rigid tyre pushed through a rigid road)
+    rather than something to reproduce. It is bounded to a fraction of a
+    millimetre above z = 0, it happens *after* every measurement and check, so
+    rolling radii and ride height still come from the CAD as drawn, and what
+    it did is recorded per tyre in status/prepare.json.
     """
 
     kind: Literal["ahmed", "stl", "step"]
@@ -293,6 +483,10 @@ class GeometryConfig(BaseModel):
     source_dir: str | None = None
     scale: float = Field(default=1.0, gt=0.0)
     tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
+    contact_patch: ContactPatchConfig = Field(default_factory=ContactPatchConfig)
+    mrf_interference: MrfInterferenceConfig = Field(
+        default_factory=MrfInterferenceConfig
+    )
     # A declared property of the CAD, not of the flow.
     #
     # half_model used to be derived from flow symmetry alone, which forced a

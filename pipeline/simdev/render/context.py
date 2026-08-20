@@ -29,6 +29,16 @@ C_MU = 0.09
 # runs and is inherited by every cell snappy splits out of the background.
 CORNER_ZONE = "all"
 
+# The combined vehicle surface that refinement shells measure distance from.
+#
+# It is deliberately NOT one of the patches. It appears in snappy's `geometry`
+# so distances can be taken against it, and never in `refinementSurfaces`, so
+# it creates no boundary patch, carries no boundary condition, is never
+# snapped to and never enters force integration. It exists only as a distance
+# field, and one combined surface means snappy computes one rather than
+# fifteen.
+VEHICLE_SURFACE = "vehicle"
+
 WALL_FUNCTIONS: dict[WallTreatment, dict[str, str]] = {
     WallTreatment.HIGH_Y_PLUS: {
         "nut": "nutkWallFunction",
@@ -118,15 +128,43 @@ def refinement_boxes(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
     return boxes
 
 
+def refinement_shells(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
+    """Resolve each shell to an absolute distance in metres, finest first.
+
+    snappy reads `levels` as a list of (distance, level) pairs and applies the
+    first one whose distance contains the cell, so the order is not cosmetic:
+    listed coarse-first, the outermost shell would swallow everything inside
+    it and the fine shells would never apply. Sorting here rather than trusting
+    the case file means a shell list written in either order behaves the same.
+    """
+    length = domain.geom_length
+    shells = [
+        {"distance": shell.distance * length, "level": shell.level}
+        for shell in spec.domain.refinement_shells
+    ]
+    return sorted(shells, key=lambda s: s["distance"])
+
+
 def ground_cell_size(spec: CaseSpec, domain: DomainBox) -> float:
-    """Background cell size at the ground plane.
+    """Background cell size at the ground plane, under the car.
 
     The ground is a blockMesh patch, so it never appears in refinementSurfaces
     and snappy never surface-refines it. Its cell is the background cell,
-    divided down only where a refinement region reaches the floor - which the
-    wake box does, since it starts at z_min. Sizing the ground's prism stack
-    against the coarser unrefined cell would ask for more layers than fit
-    under the wake.
+    divided down only where volume refinement reaches the floor. Sizing the
+    ground's prism stack against the coarser unrefined cell would ask for more
+    layers than fit under the car.
+
+    Two things reach the floor, and both have to count:
+
+    - a refinement *region*, when its box starts at z_min - which the wake box
+      does;
+    - a refinement *shell*, whenever it is thicker than the ride height, which
+      any useful near-field shell is. The car sits ~10 mm off the road and the
+      innermost shell is tens of millimetres, so the ground under the car is
+      refined to that shell's level whether or not anybody drew a box there.
+
+    Missing the second is how the ground ends up asking for a stack sized
+    against a 96 mm cell that does not exist anywhere near the vehicle.
     """
     level = 0
     for region, box in zip(
@@ -134,6 +172,12 @@ def ground_cell_size(spec: CaseSpec, domain: DomainBox) -> float:
     ):
         if box["min"][2] <= domain.z_min + 1e-12:
             level = max(level, region.level)
+
+    ride_height = max(0.0, domain.geom_min[2] - domain.z_min)
+    for shell in refinement_shells(spec, domain):
+        if shell["distance"] >= ride_height:
+            level = max(level, shell["level"])
+
     return spec.mesh.base_cell_size / 2**level
 
 
@@ -563,6 +607,13 @@ def build_context(
         "geometry_files": {n: Path(p).name for n, p in geometry_files.items()},
         "refined_patches": refined_patches,
         "refinement_boxes": refinement_boxes(spec, domain),
+        "refinement_shells": refinement_shells(spec, domain),
+        # The combined vehicle surface the shells measure distance from. Named
+        # here rather than in the template so there is one spelling of it, and
+        # empty when no shells are declared so no unused surface is loaded.
+        "shell_surface": (
+            VEHICLE_SURFACE if spec.domain.refinement_shells else ""
+        ),
         "layer_patches": layer_patches(spec, domain),
         "wall_patches": wall_patches,
         "force_patches": [

@@ -89,12 +89,77 @@ def test_mesh_gate_fails_on_negative_volumes() -> None:
 
 
 def test_mesh_gate_fails_on_excessive_non_orthogonality() -> None:
+    """A mesh whose *average* non-orthogonality is high is genuinely bad."""
     spec = _spec()
-    bad = CheckMeshResult(1000, 85.0, 3.0, False, [])
+    bad = CheckMeshResult(
+        1000, 85.0, 3.0, False, [], n_faces=6000, mean_non_ortho=40.0
+    )
     n = spec.mesh.n_layers
     result = check_mesh_quality(bad, _layers(n), spec, _requested(spec, n))
     assert result.passed is False
     assert any("orthogonal" in r for r in result.reasons)
+
+
+def test_mesh_gate_tolerates_a_handful_of_bad_faces_in_a_large_mesh() -> None:
+    """The production mesh's real numbers: 58 non-ortho and 27 skew faces out
+    of 21.1 M, average non-orthogonality 9.6. checkMesh itself passes the
+    non-orthogonality check on it. Gating on the single worst face makes a
+    mesh of this size unpassable for no physical reason."""
+    spec = _spec({"mesh": {"trust_check_mesh_verdict": False}})
+    n = spec.mesh.n_layers
+    production = CheckMeshResult(
+        n_cells=6624853,
+        max_non_ortho=71.47,
+        max_skewness=6.73,
+        has_negative_volumes=False,
+        failed_checks=[],
+        n_faces=21080791,
+        mean_non_ortho=9.58,
+        n_severely_non_ortho=58,
+        n_highly_skew=27,
+    )
+    result = check_mesh_quality(production, _layers(n), spec, _requested(spec, n))
+    assert result.passed is True, result.reasons
+
+
+def test_mesh_gate_fails_when_bad_faces_are_a_real_fraction() -> None:
+    """Same maxima as the production mesh, but 2% of faces are severely
+    non-orthogonal rather than 0.0003%."""
+    spec = _spec({"mesh": {"trust_check_mesh_verdict": False}})
+    n = spec.mesh.n_layers
+    bad = CheckMeshResult(
+        n_cells=1000000,
+        max_non_ortho=71.47,
+        max_skewness=3.0,
+        has_negative_volumes=False,
+        failed_checks=[],
+        n_faces=1000000,
+        mean_non_ortho=12.0,
+        n_severely_non_ortho=20000,
+        n_highly_skew=0,
+    )
+    result = check_mesh_quality(bad, _layers(n), spec, _requested(spec, n))
+    assert result.passed is False
+    assert any("orthogonal" in r for r in result.reasons)
+
+
+def test_mesh_gate_fails_when_skew_faces_are_a_real_fraction() -> None:
+    spec = _spec({"mesh": {"trust_check_mesh_verdict": False}})
+    n = spec.mesh.n_layers
+    bad = CheckMeshResult(
+        n_cells=1000000,
+        max_non_ortho=60.0,
+        max_skewness=8.0,
+        has_negative_volumes=False,
+        failed_checks=[],
+        n_faces=1000000,
+        mean_non_ortho=9.0,
+        n_severely_non_ortho=0,
+        n_highly_skew=50000,
+    )
+    result = check_mesh_quality(bad, _layers(n), spec, _requested(spec, n))
+    assert result.passed is False
+    assert any("skew" in r for r in result.reasons)
 
 
 def test_mesh_gate_fails_on_collapsed_layers() -> None:
@@ -269,6 +334,52 @@ def test_the_spec_threshold_still_bites_when_not_trusting_check_mesh() -> None:
     assert not gate.passed
     assert any("max skewness 4.55 exceeds 3.00" in r for r in gate.reasons)
 
+
+def test_check_mesh_skew_verdict_yields_to_the_extent_criteria() -> None:
+    """The production case: 27 skew faces of 21.1 M, and checkMesh fails it.
+
+    checkMesh judges skewness against a hardcoded 4 and reports a failed check
+    for a single bad face, so on any production mesh its verdict is the worst
+    face by another route - exactly what the extent criteria were introduced
+    to stop gating on. Where the gate has a denominator it is the authority,
+    and checkMesh's verdict on the two quantities the spec owns is recorded
+    rather than fatal.
+    """
+    spec = _mesh_spec(trust_check_mesh_verdict=True)
+    result = _check_result(
+        n_cells=6_624_853,
+        n_faces=21_080_791,
+        max_non_ortho=71.47,
+        mean_non_ortho=9.58,
+        max_skewness=6.73,
+        n_severely_non_ortho=58,
+        n_highly_skew=27,
+        failed_checks=[
+            "Max skewness = 6.731082, 27 highly skew faces detected which "
+            "may impair the quality of the results",
+        ],
+    )
+    gate = check_mesh_quality(result, {}, spec, {})
+    assert gate.passed, gate.reasons
+    assert any("checkMesh reported" in r for r in gate.reasons)
+
+
+def test_check_mesh_structural_verdict_still_gates_a_large_mesh() -> None:
+    """Demotion is only ever for the two quantities the spec measures itself."""
+    spec = _mesh_spec(trust_check_mesh_verdict=True)
+    result = _check_result(
+        n_faces=21_080_791,
+        mean_non_ortho=9.58,
+        n_severely_non_ortho=58,
+        n_highly_skew=27,
+        failed_checks=[
+            "Max skewness = 6.731082, 27 highly skew faces detected",
+            "Number of not closed cells: 3",
+        ],
+    )
+    gate = check_mesh_quality(result, {}, spec, {})
+    assert not gate.passed
+    assert any("not closed cells" in r for r in gate.reasons)
 
 def test_structural_failures_gate_whatever_the_case_says() -> None:
     """A blanket mute would let a smoke profile sail past a broken mesh."""

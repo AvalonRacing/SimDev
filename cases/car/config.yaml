@@ -87,6 +87,82 @@ physics:
   yaw_deg: 0.0
   wheel_rotation: spinning
 
+# The prism stack, owned by the case rather than the wall profile.
+#
+# It has to live here. resolve() merges WALL_PROFILES *after*
+# RESOLUTION_PROFILES, so these four values in the `car` profile would be
+# silently overwritten by the generic low_y_plus numbers. The case is the last
+# layer before overrides, and it is also the right owner on the merits: the
+# first layer follows from *this car's* Reynolds number, and the generic
+# low_y_plus stack is sized for nothing in particular.
+#
+# The numbers come from u_tau = 0.70 m/s at 15 m/s over a 0.44 m car
+# (Cf = 0.058 Re^-0.2, Re = 4.4e5), against the 0.75 mm surface cell that
+# base_cell_size 96 mm at level 7 produces. (It was 24 mm at level 5 when
+# these numbers were derived; the x4 re-basing left the 0.75 mm untouched,
+# which is the whole point of having done it by a power of two.)
+#
+# WHAT WAS WRONG WITH THE GENERIC STACK. 18 layers of 20 um at ER 1.15 want
+# 1.52 mm and the budget is a fraction of a 0.75 mm cell, so 9 got inserted
+# and the case carried eleven truncation warnings. Worse than the warnings:
+# the ninth layer was 61 um and the hex above it 414 um, a 6.8x jump in the
+# one place the mesh is meant to be graded. Two thirds of the whole mesh was
+# prism cells buying that.
+#
+# WHY THESE NUMBERS. Widening ER to 1.25 lets six layers span what nine
+# spanned and land far closer to the cell they hand off to: last layer 122 um
+# into 300 um of remaining cell, a 2.5x jump. Doubling the first layer to
+# 40 um moves y+ from 0.46 to 0.93 - still wall-resolved with 5x of margin on
+# the 0-5 gate, and it stops spending resolution below y+ 1 where there is
+# nothing left to resolve. The stack now reaches y+ 21, so it covers the
+# viscous sublayer and the buffer layer and hands off to the hexes in the log
+# layer, which is the point of a low-Re mesh. It is also ~2.9 M cells cheaper.
+#
+# n_layers is 6 rather than a larger request that gets clamped, so the stack
+# is identical on car_smoke, car_dev and car. A request that resolves to a
+# different count per profile changes the near-wall physics when you change
+# resolution, which is exactly what scripts/mesh_independence.py pins
+# n_layers to avoid.
+#
+# ER 1.25 is the practical ceiling. Past ~1.3 the truncation error across the
+# stack starts to matter, and it buys little: the span from 40 um to a 750 um
+# cell is fixed, and only the cell size can close it further.
+mesh:
+  # WHY THIS CASE OWNS A LOWER FLOOR THAN THE 0.7 DEFAULT.
+  #
+  # 0.7 is sized for a body like the Ahmed: one large, smooth, well-resolved
+  # surface where a prism stack goes in cleanly. This car is 24% suspension
+  # and tyre by wetted area, and a 4-6 mm suspension link is 6-8 cells across
+  # at 0.75 mm. snappy cannot build a medial axis it trusts on a feature that
+  # thin, and the stack collapses to ~1.5 of 6 layers there whatever it is
+  # asked for.
+  #
+  # IT IS NOT REACHABLE BY REFINING, WHICH IS THE POINT. Refining the tyres
+  # one level (6 -> 7) moved them 1.46 -> 3.1 layers, the single largest
+  # response any knob produced. The same jump on the suspension lands near
+  # 3.1 of 6, i.e. 52% - still under 0.7, for four times the cells. A
+  # threshold no affordable mesh can meet does not gate anything, it just
+  # stops every run.
+  #
+  # WHAT ACTUALLY GUARDS THE NEAR-WALL PHYSICS IS THE Y+ GATE, and it is not
+  # relaxed: post.yplus_max stays at 5 and every force-bearing patch is
+  # measured against it. On the mesh this number was set for, all eleven come
+  # in at 1.96-4.90, wall-resolved throughout. Coverage is still recorded per
+  # patch in status/mesh.json either way, so the shortfall stays visible.
+  #
+  # 0.2 rather than off: it still fires if snappy extrudes essentially
+  # nothing, which is a real failure mode and the one worth catching.
+  min_layer_coverage: 0.2
+  n_layers: 6
+  first_layer_thickness: 4.0e-05
+  expansion_ratio: 1.25
+  # Raised from the 0.5 default, which is also snappy's own
+  # maxFaceThicknessRatio - the schema renders this straight into it so the
+  # two can never disagree. 0.5 caps the stack at 375 um and rejects the sixth
+  # layer by 75 um; 0.65 admits six (450 um) and still refuses seven (603 um),
+  # so the limit continues to bite rather than being switched off.
+  max_layer_cell_ratio: 0.65
+
 domain:
   upstream_lengths: 5.0
   downstream_lengths: 10.0
@@ -100,6 +176,63 @@ domain:
   # Curved regions are on the list; until then the far wake sits at the
   # background cell size and the validator warns about it.
   refinement_regions: []
+
+  # Refinement measured from the vehicle's own surface instead, which is what
+  # a box cannot do here: it needs no orientation, so it is equally right for
+  # the cornering state, the straight state and the body-slip attitude the CAD
+  # is posed at.
+  #
+  # WHY THIS EXISTS. Before it, the first production mesh went from 96 mm
+  # background straight to 0.75 mm on the wall with almost nothing in between:
+  # levels 1 and 2 held 3,881 and 18,731 cells out of 7.4 M. Surface
+  # refinement only thickens the mesh next to the wall, so a cell or two off
+  # the bodywork the flow was being resolved at background size - including
+  # the flow *through* the car, between body, chassis and wishbones, which is
+  # where a fair part of the drag is made.
+  #
+  # Distances are body lengths (0.44 m), so 0.12 is 53 mm - about a tyre
+  # radius, and comfortably more than the ride height, which is why the road
+  # under the car is refined with it. Levels are absolute: 5 is 3 mm against
+  # the 0.75 mm on the wall itself.
+  #
+  # They must get coarser with distance. snappy applies the first shell that
+  # contains a cell, so an outer shell finer than an inner one silently never
+  # applies; validate() rejects that rather than letting it mesh.
+  #
+  # NOT A WAKE REGION. These follow the car, not the path, so past 0.9 body
+  # lengths the cornering far wake is still at background size. A curved wake
+  # region is the next piece of work and the validator keeps saying so.
+  refinement_shells:
+    - {distance: 0.12, level: 5}
+    - {distance: 0.35, level: 4}
+    - {distance: 0.90, level: 3}
+
+  # Meshing time, at no cost in resolution anywhere.
+  #
+  # The shells above are answered from an octree over the *combined* vehicle
+  # surface, which snappy rebuilds on every rank each time it redistributes
+  # the mesh mid-refinement. That surface is the CAD tessellation as exported:
+  # 598,654 triangles, sized by geometry.tessellation for surfaces that get
+  # snapped to. Nothing here is snapped to. It is measured from, and a
+  # distance only has to be right to a fraction of the cell it is deciding.
+  #
+  # 2 mm takes it to 146,598 triangles - a quarter - and the measured cost is
+  # nothing: Body 99.9% of its area retained, Wing 99.1%, tyres 99.8%,
+  # suspension 97.9%. The suspension is the number that matters, because 4 mm
+  # links are the thin features that a simplification can silently delete, and
+  # they are still there.
+  #
+  # WHY NOT COARSER. 3 mm keeps 93.6% of the suspension and 5 mm only 81.5%,
+  # which is links disappearing from the distance field altogether - and a
+  # link snappy cannot measure to pulls no refinement around itself, which is
+  # the flow *between* body, chassis and wishbones that the innermost shell
+  # was added for. prepare measures this per part on every run and warns below
+  # 95%, so a tolerance raised too far says so rather than quietly coarsening
+  # the mesh between the parts.
+  #
+  # It also bounds how far the refinement boundary can move: 2 mm against an
+  # innermost shell of 53 mm.
+  shell_surface_tolerance: 0.002
 
 forces:
   # Declared, not measured. The pipeline no longer computes a projected area
@@ -127,6 +260,48 @@ geometry:
     min_edge: 0.0004
     curvature_segments: 24
 
+  # Where the tyres meet the road. The tyre is cut on a horizontal plane this
+  # far above z = 0 and the cross-section is extruded straight down through
+  # it, so the tangential tread/road wedge becomes a vertical wall at ninety
+  # degrees. Handbook, "The tyre contact patch".
+  #
+  # WHY 1 mm AND NOT LESS. cut_height is the height of the step, so it has to
+  # be something snappy can resolve. The tyres run at refinement_max 5 on a
+  # 24 mm base cell, which is a 0.75 mm surface cell: at the 0.5 mm this
+  # started at, the step was two thirds of one cell and snappy would have
+  # smeared it back into the ramp the cut exists to remove. 1 mm gives it
+  # 1.3 cells to work with, and prepare stops warning.
+  #
+  # WHAT IT COSTS. The footprint is the chord of the tread at the cut plane,
+  # so raising the plane widens it: these tyres sit 0.7-1.4 mm into the road,
+  # and going from 0.5 mm to 1 mm takes the cut depth from 1.2-1.9 mm to
+  # 1.7-2.4 mm and the footprint about 19% longer than the drawn deflection
+  # implies. That is the trade being made - a slightly over-large contact
+  # patch that meshes, against an exact one that does not. Lowering it again
+  # only pays once the tyres are refined past level 5.
+  contact_patch:
+    cut_height: 0.001
+    depth_below_road: 0.002
+
+  # The MRF sleeves are drawn to the same nominal diameter as the tyre bore,
+  # so in the CAD the two surfaces are the same surface: measured gaps of
+  # 3-7 um over about three quarters of each sleeve.
+  #
+  # That is degenerate for snappyHexMesh. A faceZone lying on a wall gave all
+  # four zones "multiply connected (shared edge)", 381 non-manifold points,
+  # 12,062 baffles, max non-orthogonality above the gate, and an intermittent
+  # reversed face at the top of the front-right tyre. Deleting the sleeves
+  # made all of it go away, which is how it was pinned down - but they are not
+  # optional, so they are pushed into the tyre instead.
+  #
+  # WHY 3 mm. It has to be worth a couple of cells or snappy can still resolve
+  # the two surfaces as one, and the sleeves sit at level 6 - a 1.5 mm cell -
+  # so two cells is 3 mm. validate() checks exactly this and warned at the
+  # 2 mm default. It takes the sleeve from r = 27 mm to r = 30 mm, still 3 mm
+  # clear of the 33 mm tread, and prepare warns if it ever reaches it.
+  mrf_interference:
+    interference: 0.003
+
   # Not symmetric about y = 0, and posed at an attitude besides. Keeps the
   # model full and a_ref at its full value. Handbook 3.3.
   symmetric: false
@@ -137,24 +312,47 @@ geometry:
     - {name: Chassis, role: body}
     # A 42 mm chord on a 440 mm car: at the case-wide level the section stops
     # being an aerofoil.
-    - {name: Wing, role: body, refinement_min: 5, refinement_max: 5}
+    #
+    # LEVELS ARE COUNTED FROM A 96 mm BACKGROUND. Level 7 is 0.75 mm. They
+    # were two lower when the background was 24 mm; the re-basing moved every
+    # level by +2 and changed no absolute size. tests/test_cell_sizes.py pins
+    # the metres, so if you re-base again and miss a patch the suite fails.
+    - {name: Wing, role: body, refinement_min: 7, refinement_max: 7}
 
     # --- wheels --------------------------------------------------------
+    # PINNED TO ONE LEVEL, 7, RATHER THAN THE 6-7 RANGE THIS USED TO CARRY.
+    # A range lets snappy hold flat regions at the minimum and spend level 7
+    # only where curvature asks for it, and on a tyre most of the tread is
+    # flat: only 39-50% of tyre area came out in the finest cell bin, against
+    # 93% on Body and 77% on the suspension. The coarse half is a 1.5 mm cell,
+    # and the wall-adjacent cell height follows the local cell - 119-127 um
+    # there against 46-51 um on the fine half. That is what put area-weighted
+    # y+ at 5.0-5.3 on three of the four tyres, outside the 0-5 band that
+    # low_y_plus exists to hold, and it is the y+ gate's own failure.
+    #
+    # The layer budget does not change: surface_cell_size_for() sizes the
+    # stack against refinement_MAX, which was already 7, so the 6 layers at
+    # 450 um were always budgeted against a 0.75 mm cell. What changes is that
+    # the whole tyre now gets that cell instead of half of it.
+    #
+    # It also leaves the contact patch note below intact: cut_height 1 mm is
+    # sized against a 0.75 mm surface cell, which is now what the tread has
+    # everywhere rather than only where it curves.
     # Three surfaces per corner sharing one wheel id. The id pairs them;
     # nothing parses the names. Axis, centre and rolling radius are measured
     # from these surfaces for whichever driving state is selected.
-    - {name: Tire_FL, role: tyre, wheel: FL, refinement_min: 4, refinement_max: 5}
-    - {name: Tire_FR, role: tyre, wheel: FR, refinement_min: 4, refinement_max: 5}
-    - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 4, refinement_max: 5}
-    - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 4, refinement_max: 5}
+    - {name: Tire_FL, role: tyre, wheel: FL, refinement_min: 7, refinement_max: 7}
+    - {name: Tire_FR, role: tyre, wheel: FR, refinement_min: 7, refinement_max: 7}
+    - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 7, refinement_max: 7}
+    - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 7, refinement_max: 7}
 
     # Closed sleeves around the rims, which become cell zones rather than
     # walls so the rim and spokes pump air. Meshed but not rotated separately
     # in cornering - see handbook section 6.
-    - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 3, refinement_max: 4}
-    - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 3, refinement_max: 4}
-    - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 3, refinement_max: 4}
-    - {name: MRF_RR, role: mrfZone, wheel: RR, refinement_min: 3, refinement_max: 4}
+    - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 5, refinement_max: 6}
+    - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 5, refinement_max: 6}
+    - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 5, refinement_max: 6}
+    - {name: MRF_RR, role: mrfZone, wheel: RR, refinement_min: 5, refinement_max: 6}
 
     # --- suspension ----------------------------------------------------
     # Upright, upper and lower arms, tie rod and driveshaft as one part per
@@ -165,10 +363,10 @@ geometry:
     # Extra refinement for the same reason the Ahmed stilts get it: these are
     # 5 mm sections, and at the case-wide level snappy cannot build a medial
     # axis it trusts and the layers collapse.
-    - {name: SUS_FL, role: body, refinement_min: 5, refinement_max: 5}
-    - {name: SUS_FR, role: body, refinement_min: 5, refinement_max: 5}
-    - {name: SUS_RL, role: body, refinement_min: 5, refinement_max: 5}
-    - {name: SUS_RR, role: body, refinement_min: 5, refinement_max: 5}
+    - {name: SUS_FL, role: body, refinement_min: 7, refinement_max: 7}
+    - {name: SUS_FR, role: body, refinement_min: 7, refinement_max: 7}
+    - {name: SUS_RL, role: body, refinement_min: 7, refinement_max: 7}
+    - {name: SUS_RR, role: body, refinement_min: 7, refinement_max: 7}
 
     # --- domain boundaries ---------------------------------------------
     # No symmetry patch: asymmetric geometry, so the model is full.

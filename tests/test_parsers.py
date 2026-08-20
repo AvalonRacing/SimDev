@@ -45,6 +45,41 @@ def test_parse_check_mesh_reads_bad_metrics() -> None:
     assert result.max_skewness == pytest.approx(6.78)
 
 
+def test_parse_check_mesh_reads_the_face_count_not_the_internal_one() -> None:
+    result = parse_check_mesh(_log("checkMesh_production.log"))
+    assert result.n_faces == 21080791
+
+
+def test_parse_check_mesh_reads_average_non_orthogonality() -> None:
+    """The average is what governs solve accuracy; the max is one face."""
+    result = parse_check_mesh(_log("checkMesh_production.log"))
+    assert result.mean_non_ortho == pytest.approx(9.5751389)
+
+
+def test_parse_check_mesh_counts_severely_non_orthogonal_faces() -> None:
+    result = parse_check_mesh(_log("checkMesh_production.log"))
+    assert result.n_severely_non_ortho == 58
+
+
+def test_parse_check_mesh_counts_highly_skew_faces() -> None:
+    result = parse_check_mesh(_log("checkMesh_production.log"))
+    assert result.n_highly_skew == 27
+
+
+def test_parse_check_mesh_counts_are_zero_when_checkmesh_is_silent() -> None:
+    """A clean log names no counts, and absent must not read as unknown."""
+    result = parse_check_mesh(_log("checkMesh_ok.log"))
+    assert result.n_severely_non_ortho == 0
+    assert result.n_highly_skew == 0
+    assert result.mean_non_ortho == pytest.approx(8.12)
+
+
+def test_parse_check_mesh_counts_a_bad_mesh() -> None:
+    result = parse_check_mesh(_log("checkMesh_bad.log"))
+    assert result.n_severely_non_ortho == 1234
+    assert result.mean_non_ortho == pytest.approx(15.44)
+
+
 def test_parse_layer_summary_reads_every_patch() -> None:
     layers = parse_layer_summary(_log("snappy_layers.log"))
     assert set(layers) == {"body", "stilts", "ground"}

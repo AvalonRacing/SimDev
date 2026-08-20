@@ -8,6 +8,18 @@ import pandas as pd
 
 _CELLS = re.compile(r"^\s*cells:\s*(\d+)", re.MULTILINE)
 _NON_ORTHO = re.compile(r"Mesh non-orthogonality Max:\s*([-\d.eE+]+)")
+_MEAN_NON_ORTHO = re.compile(
+    r"Mesh non-orthogonality Max:\s*[-\d.eE+]+\s*average:\s*([-\d.eE+]+)"
+)
+# 'faces:' but not 'internal faces:', so the leading anchor matters.
+_FACES = re.compile(r"^\s*faces:\s*(\d+)", re.MULTILINE)
+# checkMesh names these counts only when there are any, so an absent match
+# means none - never unknown. Both are the quantity the gate actually judges:
+# a max is one face, a count is how much of the mesh is affected.
+_N_NON_ORTHO = re.compile(
+    r"Number of severely non-orthogonal[^:]*:\s*(\d+)"
+)
+_N_SKEW = re.compile(r"(\d+)\s+highly skew faces")
 _SKEWNESS = re.compile(r"Max skewness\s*=\s*([-\d.eE+]+)")
 _NEGATIVE_VOLUME = re.compile(r"Zero or negative cell volume", re.IGNORECASE)
 _LAYER_HEADER = re.compile(r"^\s*patch\s+faces\s+layers\b", re.IGNORECASE)
@@ -45,6 +57,13 @@ class CheckMeshResult:
     max_skewness: float
     has_negative_volumes: bool
     failed_checks: list[str]
+    # Everything below describes how *much* of the mesh is affected, rather
+    # than how bad its single worst face is. Defaulted so the many callers
+    # that build a result positionally keep working.
+    n_faces: int = 0
+    mean_non_ortho: float = float("nan")
+    n_severely_non_ortho: int = 0
+    n_highly_skew: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,12 +85,23 @@ def parse_check_mesh(text: str) -> CheckMeshResult:
         if "FAILED" in stripped or stripped.startswith("***"):
             failed.append(stripped.lstrip("* "))
 
+    faces = _FACES.search(text)
+    mean_non_ortho = _MEAN_NON_ORTHO.search(text)
+    n_non_ortho = _N_NON_ORTHO.search(text)
+    n_skew = _N_SKEW.search(text)
+
     return CheckMeshResult(
         n_cells=int(cells.group(1)) if cells else 0,
         max_non_ortho=float(non_ortho.group(1)) if non_ortho else float("nan"),
         max_skewness=float(skewness.group(1)) if skewness else float("nan"),
         has_negative_volumes=bool(_NEGATIVE_VOLUME.search(text)),
         failed_checks=failed,
+        n_faces=int(faces.group(1)) if faces else 0,
+        mean_non_ortho=(
+            float(mean_non_ortho.group(1)) if mean_non_ortho else float("nan")
+        ),
+        n_severely_non_ortho=int(n_non_ortho.group(1)) if n_non_ortho else 0,
+        n_highly_skew=int(n_skew.group(1)) if n_skew else 0,
     )
 
 

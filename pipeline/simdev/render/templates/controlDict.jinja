@@ -9,7 +9,10 @@ stopAt          endTime;
 endTime         {{ spec.solve.max_iterations }};
 deltaT          1;
 writeControl    runTime;
-writeInterval   {{ spec.solve.max_iterations }};
+// Falls back to max_iterations, i.e. write once at the end. Anything that
+// stops the run another way - a timeout above all - then leaves no fields
+// behind at all, so set solve.write_interval on long runs.
+writeInterval   {{ spec.solve.write_interval or spec.solve.max_iterations }};
 purgeWrite      2;
 writeFormat     binary;
 writePrecision  8;

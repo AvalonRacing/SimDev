@@ -23,6 +23,18 @@ geometry
         max             ({{ box.max[0] }} {{ box.max[1] }} {{ box.max[2] }});
     }
 {% endfor %}
+{% if shell_surface %}
+    // The whole vehicle as one surface, used ONLY to measure distance from
+    // for the refinement shells below. It is deliberately absent from
+    // refinementSurfaces, so it creates no patch, is never snapped to, and
+    // never enters force integration - adding it there would duplicate every
+    // wall in the model.
+    {{ shell_surface }}
+    {
+        type            triSurfaceMesh;
+        file            "{{ shell_surface }}.stl";
+    }
+{% endif %}
 }
 
 castellatedMeshControls
@@ -33,6 +45,26 @@ castellatedMeshControls
     nCellsBetweenLevels 3;
     resolveFeatureAngle 30;
     allowFreeStandingZoneFaces true;
+
+    // How far the per-rank cell counts may drift before snappy redistributes
+    // the mesh mid-refinement. Rendered explicitly because the balancing
+    // policy is a property of this case, not of whichever build runs it.
+    //
+    // It matters here far more than the value suggests. decomposePar splits
+    // the *background* mesh, which is uniform, so the 40 ranks start with an
+    // equal share of a domain in which the refinement is then poured into a
+    // ball a few tenths of a metre across: essentially every cell of the
+    // finished mesh is created by the handful of ranks that happen to own the
+    // car, while the rest hold empty tunnel and idle. Rebalancing is what
+    // spreads the next iteration's work back out, and how often it happens is
+    // this number.
+    //
+    // Related trap, which is why the value is not simply set as loose as
+    // possible: maxLocalCells is a SILENT refinement stop, not an error. A
+    // rank that hits it stops refining and snappy carries on, so a badly
+    // unbalanced run can quietly return a mesh coarser than the one that was
+    // asked for.
+    maxLoadUnbalance    {{ spec.mesh.max_load_unbalance }};
 
     features
     (
@@ -74,6 +106,27 @@ castellatedMeshControls
             levels          ((1.0 {{ box.level }}));
         }
 {% endfor %}
+{% if shell_surface and refinement_shells %}
+        // Shells of refinement at a distance from the vehicle itself, rather
+        // than inside a box someone drew round it. The refined volume is
+        // therefore the shape of the car: it needs no orientation, so it is
+        // correct for a cornering wake and a body-slip attitude alike, and it
+        // reaches into the gaps between body, chassis and suspension where a
+        // box only ever refines the air around them.
+        //
+        // Listed nearest-first because snappy applies the first entry whose
+        // distance contains the cell; coarsest-first, the outer shell would
+        // swallow the inner ones. context.refinement_shells sorts them.
+        {{ shell_surface }}
+        {
+            mode            distance;
+            levels          (
+{% for shell in refinement_shells %}
+                                ({{ "%.6f"|format(shell.distance) }} {{ shell.level }})
+{% endfor %}
+                            );
+        }
+{% endif %}
     }
 
     locationInMesh ({{ location_in_mesh[0] }} {{ location_in_mesh[1] }} {{ location_in_mesh[2] }});
@@ -115,10 +168,34 @@ addLayersControls
     nSmoothNormals      3;
     nSmoothThickness    10;
     maxFaceThicknessRatio {{ spec.mesh.max_layer_cell_ratio }};
-    maxThicknessToMedialRatio 0.3;
+    // snappy's default is 0.3, which caps the stack at 30% of the distance to
+    // the medial axis. On a 0.44 m car that is punitive: the suspension links
+    // are 4-6 mm sections, so their medial axis is ~2 mm from the surface and
+    // 0.3 leaves 0.6 mm of budget that the quality relaxation then eats into.
+    // 0.6 is the usual value for external aero with thin appendages.
+    maxThicknessToMedialRatio 0.6;
     minMedialAxisAngle  90;
     nBufferCellsNoExtrude 0;
     nLayerIter          50;
+    // Layer iterations that run under the strict meshQualityControls before
+    // snappy falls back to the `relaxed` sub-dictionary below.
+    //
+    // MEASURED AT PRODUCTION RESOLUTION, AND 0 IS THE WRONG ANSWER HERE.
+    // snappyLayerDriver selects the dictionary as
+    // `iteration < nRelaxedIter ? strict : relaxed`, so 0 puts the relaxed
+    // limits in force for iteration 0 - the iteration that decides which
+    // faces get extruded at all. The relaxed block sets minVol, minTetQuality
+    // and minDeterminant to ~1e-30, and with those in force from the start
+    // snappy extrudes the full 40 um stack over the whole 18.8 m2 of
+    // far-field track, where the background cell is 96 mm wide:
+    //
+    //   nRelaxedIter 1 -> ground 3.37 layers, max aspect ratio 79, OK
+    //   nRelaxedIter 0 -> ground 5.71 layers, max aspect ratio 3238, FAILED
+    //
+    // Those extra layers resolve nothing. The ground that matters is the 0.8%
+    // under the car, which the refinement shells reach and which is layered
+    // either way (21 um vs 24 um). The rest is still air over bare tarmac.
+    nRelaxedIter        {{ spec.mesh.n_relaxed_iter }};
 }
 
 meshQualityControls
@@ -135,6 +212,53 @@ meshQualityControls
     minFaceWeight       0.02;
     minVolRatio         0.01;
     minTriangleTwist    -1;
+
+    // The fallback snappy uses from nRelaxedIter onwards, for layer insertion
+    // only. It is not a second opinion on the finished mesh, which checkMesh
+    // and the mesh gate judge for themselves.
+    //
+    // maxNonOrtho AND maxSkewness STAY AT THE STRICT VALUES, and that was
+    // tested rather than assumed. The theory was that the layer driver answers
+    // a failed criterion by scaling layer DISPLACEMENT down rather than by
+    // rejecting the mesh, so a stricter limit here should cost thickness.
+    // Running the production mesh at 75/8 against 70/4, one variable changed:
+    //
+    //   Body, Chassis, Wing and all four SUS came out bit-for-bit identical
+    //   Tire_FL 3.09 vs 3.08 layers, i.e. inside run-to-run noise
+    //   severely non-orthogonal faces DOUBLED, 72 -> 144
+    //
+    // So it buys nothing on this geometry and costs mesh quality. The tyre
+    // improvement that arrived in the same session was the refinement change
+    // (refinement_min 6 -> 7), not this.
+    //
+    // WHAT RELAXING THE REST DID NOT DO, EITHER: buy layers. Tet-quality
+    // rejections fell from 104,773 to 25 and minDeterminant's 584,674 to 0,
+    // and layer coverage moved 59.37% -> 59.47%. Kept only because a steady
+    // finite-volume solve never uses the tet decomposition - but see
+    // nRelaxedIter above, because letting these apply from iteration 0 is
+    // exactly what plastered the far-field ground with sliver layers.
+    //
+    // Every key is written out even where it repeats the strict value, so
+    // this block does not depend on what snappy inherits for a missing one.
+    relaxed
+    {
+        // Judged by the gate: strict. See the note on this block.
+        maxNonOrtho         {{ spec.mesh.max_non_ortho }};
+        maxInternalSkewness {{ spec.mesh.max_skewness }};
+        maxBoundarySkewness 20;
+        maxConcave          80;
+
+        // Criteria a steady finite-volume solve never uses.
+        minVol              1e-30;
+        minTetQuality       1e-30;
+        minArea             1e-30;
+        minTwist            0.001;
+        minDeterminant      1e-06;
+        minFaceWeight       1e-06;
+        minVolRatio         0.001;
+        minTriangleTwist    -1;
+    }
+
     nSmoothScale        4;
     errorReduction      0.75;
 }

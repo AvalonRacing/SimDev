@@ -70,10 +70,27 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
     #
     # The car is ~0.44 m long against the Ahmed body's 1.044 m, and its
     # features are far smaller: a 42 mm wing chord, 4 mm suspension links,
-    # 66 mm tyres. 24 mm background cells with five levels of surface
-    # refinement give 0.75 mm on refined surfaces - about 56 cells across the
+    # 66 mm tyres. Refined surfaces sit at 0.75 mm - about 56 cells across the
     # wing chord and 5 across a control arm, which is the coarsest that still
     # resolves the appendages generating the downforce.
+    #
+    # THE BACKGROUND IS 96 mm AND THE LEVELS ARE COUNTED FROM THERE. It used
+    # to be 24 mm at level 5, which is the same 0.75 mm by a shorter ladder,
+    # and the reason for the change is what that cost out in the domain: the
+    # first production mesh spent 1,818,230 cells - a quarter of the whole
+    # mesh - on uniform 24 mm background, most of it in clean air metres from
+    # the car. 96 mm is the same volume in about 28k cells.
+    #
+    # Re-basing is exact rather than approximate, and it has to stay that way:
+    # 96 = 24 x 4, so every level moved by +2 and every absolute cell size is
+    # unchanged (0.096 / 2^7 == 0.024 / 2^5 == 0.75 mm). A factor that is not
+    # a power of two would move every derived size, the layer budget and
+    # max_layer_cell_ratio with it. tests/test_cell_sizes.py pins the absolute
+    # sizes in metres so the next re-basing cannot quietly miss a patch.
+    #
+    # What it costs: the ladder is now seven levels deep, and
+    # nCellsBetweenLevels 3 spends buffer cells on each rung, so the far-field
+    # saving is not banked in full.
     #
     # It runs low_y_plus, so the first layer is 20 um and 18 layers stack to
     # 0.79 mm. That does *not* fit inside half a 0.75 mm cell, and validate()
@@ -93,10 +110,12 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
     # is right to.
     "car_smoke": {
         "mesh": {
-            "base_cell_size": 0.05,
-            "surface_refinement_min": 1,
-            "surface_refinement_max": 2,
-            "refinement_cap": 2,
+            # 0.2 / 2^4 == 0.05 / 2^2 == 12.5 mm: the same smoke-test
+            # resolution on the same x4 re-basing as the other car profiles.
+            "base_cell_size": 0.2,
+            "surface_refinement_min": 3,
+            "surface_refinement_max": 4,
+            "refinement_cap": 4,
             # A mesh this coarse cannot avoid one bad cell where a tyre meets
             # the road, and checkMesh fails it at its own hardcoded skewness
             # limit of 4 no matter what max_skewness says. Since the point of
@@ -114,17 +133,19 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
     },
     "car_dev": {
         "mesh": {
-            "base_cell_size": 0.024,
-            "surface_refinement_min": 3,
-            "surface_refinement_max": 4,
+            # 0.096 / 2^6 == 0.024 / 2^4 == 1.5 mm.
+            "base_cell_size": 0.096,
+            "surface_refinement_min": 5,
+            "surface_refinement_max": 6,
         },
         "solve": {"max_iterations": 400, "n_ranks": 8, "plateau_window": 50},
     },
     "car": {
         "mesh": {
-            "base_cell_size": 0.024,
-            "surface_refinement_min": 4,
-            "surface_refinement_max": 5,
+            # 0.096 / 2^7 == 0.024 / 2^5 == 0.75 mm.
+            "base_cell_size": 0.096,
+            "surface_refinement_min": 6,
+            "surface_refinement_max": 7,
         },
         "solve": {"max_iterations": 5000, "n_ranks": 40},
     },

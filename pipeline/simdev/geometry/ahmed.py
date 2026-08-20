@@ -114,15 +114,24 @@ def frontal_area(params: AhmedParams) -> float:
     return params.width * params.height
 
 
+def build_ahmed_surfaces(params: AhmedParams) -> dict[str, trimesh.Trimesh]:
+    """The body's surfaces by patch name, built rather than imported.
+
+    Kept separate from writing them so prepare can treat this like any other
+    geometry source: load first, write once at the end.
+    """
+    surfaces = {"body": build_body(params)}
+    if params.include_stilts:
+        surfaces["stilts"] = build_stilts(params)
+    return surfaces
+
+
 def write_ahmed_stl(params: AhmedParams, out_dir: Path) -> dict[str, Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = {"body": out_dir / "body.stl"}
-    build_body(params).export(paths["body"])
-
-    if params.include_stilts:
-        paths["stilts"] = out_dir / "stilts.stl"
-        build_stilts(params).export(paths["stilts"])
-
+    paths = {}
+    for name, mesh in build_ahmed_surfaces(params).items():
+        paths[name] = out_dir / f"{name}.stl"
+        mesh.export(paths[name])
     return paths
