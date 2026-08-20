@@ -1,0 +1,12 @@
+cL Monitor
+cD Monitor
+Drag Monitor
+Lift Monitor
+Sideforce Monitor
+cL_Bodyshell Monitor
+cL_RW Monitor
+cD_Bodyshell Monitor
+cD_RW Monitor
+COP_x Monitor
+COP_y Monitor
+COP_z Monitor

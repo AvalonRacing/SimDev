@@ -1,0 +1,106 @@
+## This file contains parameter sets that can be used as preset for special simulations
+
+
+
+
+## >----------------------------------------------------------------------------------------------
+preset=skidpad
+## >----------------------------------------------------------------------------------------------
+
+## ------------
+## CAD-PARAMETERS
+## HA_damper_offset_left	= 1.71
+## HA_damper_offset_right	=-6.31
+## HA_sturz_offset_left		= 8.3
+## HA_sturz_offset_right	= 8.3
+## VA_damper_offset_left	= 1.04
+## VA_damper_offset_right	=-5.64
+## VA_sturz_offset_left		= 8.7
+## VA_sturz_offset_right	= 8.7
+## VA_steeringrack_offset	= 17.5
+## ------------
+
+## specify how many iterations should be calculated
+iterations=1000
+
+## specify other parameters which should be added in the case. e.g. rotation angle for a wing.
+## notation: list of parameters split with ';'. e.g. "parameters=angle1=10;angle2=20"
+parameters=wt_inner_delta=8.375; wt_outer_delta=30.0; car_rotation_point=[0.7343, 0.0, 0.0784];Steering_angle_FL=0.0;Steering_angle_FR=0.0;VA_Bodenabstand=0.2228
+
+## car velocity [m/s]
+u_inlet=16.11
+
+
+## specify which type of simulation should be started 0.0 -> half-car; 1.0 -> full car straight line; 2.0 -> full car cornering
+00-simstate=2.0
+
+## ----------------------------------------
+## cornering simulation parameters
+## ----------------------------------------
+
+## car positioning parameters
+
+## yaw angle [deg]
+ang_yaw=5.0
+
+## pitch angle [deg]
+ang_pitch=0.0
+
+## roll angle [deg]
+ang_roll=1.0
+
+## ----------------------------------------
+## windtunnel parameters
+## ----------------------------------------
+
+## corner radius the car drives on [m]
+wt_corner_radius=8.375
+
+## length of the windtunnel [m] default 45.0m
+wt_length=45.0
+
+## percentage of the windtunnel length that should be behind the car (default = 2/3)
+wt_farfield_ratio=2/3
+
+
+
+
+
+## >----------------------------------------------------------------------------------------------
+preset=straight_yaw_5
+## >----------------------------------------------------------------------------------------------
+
+## specify how many iterations should be calculated
+iterations=2000
+
+
+## specify other parameters which should be added in the case. e.g. rotation angle for a wing.
+## notation: list of parameters split with ';'. e.g. "parameters=angle1=10;angle2=20"
+parameters=empty=0
+
+## car velocity [m/s]
+u_inlet=16.11
+
+
+## specify which type of simulation should be started 0.0 -> half-car; 1.0 -> full car straight line; 2.0 -> full car cornering
+00-simstate=1.0
+
+
+## car positioning parameters
+
+## yaw angle [deg]
+ang_yaw=5.0
+
+## pitch angle [deg]
+ang_pitch=0.0
+
+## roll angle [deg]
+ang_roll=0.0
+
+## windtunnel is always the same
+
+
+
+
+
+## -----------------------------------------------------------------------------------------------

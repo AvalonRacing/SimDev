@@ -1,0 +1,59 @@
+#!/usr/bin/env zsh
+ 
+### Job name
+#SBATCH -J VmSim_$$JOBNAME$$
+### File / path where output will be written, the %J is the job id
+#SBATCH -o $$PATH$$repVmSim_$$JOBNAME$$_%J.txt
+
+### select hpc hpcwork?
+### !!! Comment this, if not working on hpcwork
+#SBATCH -C hpcwork
+
+### select the partition and project
+#SBATCH -p c23ms
+### Maybe want to comment this back in if working on an account
+#SBATCH --account=p0020102
+
+###SBATCH -A p0020102
+
+### Request the time you need for execution in minutes
+### The format for the parameter is: [hour:]minute,
+### that means for 80 minutes you could also use this: 1:20
+#SBATCH -t 210
+ 
+### Request vitual memory you need for your job in MB (default: 3800)
+#SBATCH --mem-per-cpu=3800
+ 
+### (ON) Specify your mail address
+#SBATCH --mail-user=$$EMAIL$$
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+ 
+### Request the number of compute slots you want to use per task
+###SBATCH --cpus-per-task=1
+
+### Specify number of tasks
+#SBATCH -n 240
+
+### Specify number of Nodes (one node has 48 cores, 24 per socket,  max recomm memory per node : 185 GB)
+#SBATCH --ntasks-per-node=48
+
+###SBATCH -x nrm[001-208]
+ 
+### load modules
+### there is no incompatibility between starccm and openmpi anymore
+### switch to intelmpi and use shm:ofa mpi fabric
+### module switch openmpi intelmpi
+### module switch intelmpi intelmpi/2019.7
+### module load TECHNICS starccm/$$VERSION$$
+### export I_MPI_FABRICS=shm:ofa
+ 
+### you need to set the LM_PROJECT environment variable with the PoD-key of your institute
+export LM_PROJECT=$$LICENCEKEY$$
+ 
+### licence
+export LICPATH=1999@flex.cd-adapco.com
+
+###SBATCH -x nrm[0-0210]
+### start non-interactive batch job
+starccm+ -np $SLURM_NTASKS -machinefile $R_SLURM_HOSTLISTFILE -batch VMesh_Sim.java -licpath $LICPATH -power $$PATH$$$$JOBNAME$$.sim

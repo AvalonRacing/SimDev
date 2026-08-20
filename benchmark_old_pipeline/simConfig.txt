@@ -1,0 +1,103 @@
+## README:
+## this is a config file which specifies important parameters used for the simulation
+## the keys in this file shouldn't be changed. Use '=' as delimiter and no whitespace
+
+## personal parameters:             Type in your personal parameters here
+eMail=julius.schaefer@rwth-aachen.de
+licenceKey=CO1bfIHv9TKg0RjddO0ASA
+
+StarVersion=18.04
+
+## -----------------------------------------------------------------------------------------------
+## simulation parameters:
+## -----------------------------------------------------------------------------------------------
+
+
+## specify if a preset from simPresets.txt should be used. insert name of preset or 'none' if no preset should be used.
+use_preset=none
+
+## specify if params from preset should be extended with the ones given in this simConfig.
+## note: already existing parameters from preset will be overwritten.
+## ! ONLY parameters given in 'parameters' will be used.
+## ! Parameters which require special setup steps in the simulation (like 'iterations') will NOT work.
+overwrite_params=false
+
+
+## specify if initial solution should be imported from another case
+## to take affect: SLURMshell_SeedingJobchain has to be called in the beginning.
+## valid values: true, false
+
+seeding=false
+
+## specify name of the seedfile which has to be located in the 'seeding' directory (gets created automatically while seedfile is exported)
+seedFileName=testSeedFile.csv
+
+
+## specify if additional geometry should be imported from '/Geometry' directory
+## valid values: true, false
+import_geometry=false
+
+## specify name of geometry parts to import. if you want to import multiple files: split them with ';'
+geometry_files=skidpad_suspension.stp
+
+## -----------------------------------------------------------------------------------------------
+
+## specify which colormap should be used: options: thermal, spectrum
+eval_colormap=spectrum
+
+## specify how many iterations should be calculated
+iterations=1000
+
+## specify over how many iterations the solution should be averaged (not used right now)
+avgIterations=300
+
+## specify other parameters which should be added in the case. e.g. rotation angle for a wing.
+## notation: list of parameters split with ';'. e.g. "parameters=angle1=10;angle2=20"
+parameters=test_parameter=0.0
+
+## specify name and origin of coordinate system which should be used to create detailed plane sections
+## name has to start with 'Eval__' if mesh and solution should be evaluated. Add 'EvalMesh' or 'EvalSol'
+## for analysing mesh or solution only
+## suffix has to be __ON to activate it. write __OFF if you dont want to export detailed planes but keep the coordinate systems
+## notation: list of parameters split with ';' e.g. Eval__detailed_plane__ON=[1.0,2.0,3.0];Eval__detailed_plane_2__ON=[1.0,2.0,3.0]
+
+detailed_planes=Eval__TestCS__OFF=[-0.772, -0.695, -0.05]
+
+
+## car velocity [m/s]
+u_inlet=16.11
+
+
+## specify which type of simulation should be started 0.0 -> half-car; 1.0 -> full car straight line; 2.0 -> full car cornering
+90_simstate=2.0
+
+## -----------------------------------------------------------------------------------------------
+## cornering simulation parameters
+## -----------------------------------------------------------------------------------------------
+
+## specify if a cornering simulation should be started. [1.0 if yes, 0.0 if no]
+
+
+## car positioning parameters
+
+## yaw angle [deg]
+ang_yaw=5.0
+
+## pitch angle [deg]
+ang_pitch=-0.1346
+
+## roll angle [deg]
+ang_roll=-0.8322
+
+## -----------------------------------------------------------------------------------------------
+## windtunnel parameters
+## -----------------------------------------------------------------------------------------------
+
+## corner radius the car drives on [m]
+wt_corner_radius=23.925
+
+## length of the windtunnel [m] default 45.0m
+wt_length=45.0
+
+## percentage of the windtunnel length that should be behind the car (default = 2/3)
+wt_farfield_ratio=2/3

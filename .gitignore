@@ -67,3 +67,9 @@ Thumbs.db
 # iteration. Keep them alongside the checkout and point geometry.stl_dir at
 # them. Reverse this line if the team decides CAD revisions belong in git.
 CAD/
+
+# StarCCM+ benchmark from the previous pipeline. The Java scripts and SLURM
+# templates beside it ARE tracked - they are the reference for what the old
+# chain did. The .sim itself is 47 MB of run data and falls under the rule at
+# the top of this file; git would keep it forever.
+benchmark_old_pipeline/*.sim

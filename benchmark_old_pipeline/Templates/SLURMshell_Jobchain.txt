@@ -1,0 +1,12 @@
+#!/bin/sh
+
+### This shell script submits the jobchain with the correct dependencies, when run in the shell via: sh -e SLURM_Jobchain.txt
+
+###SMeshID=$(sbatch --parsable SLURMbatchSMesh.txt)
+SMeshID=$(sbatch --parsable SLURMbatchSMesh.txt)
+### returns sim job id (dependency for both post processing jobs)
+echo 'Submitted Mesh batch job ' $SMeshID
+SimID=$(sbatch --parsable -d afterok:$SMeshID SLURMbatchVMesh_Sim.txt)
+echo 'Submitted Sim batch job ' $SimID
+
+sbatch -d afterok:$SimID SLURMbatchEvalquery.txt
