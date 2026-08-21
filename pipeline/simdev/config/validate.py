@@ -93,13 +93,23 @@ def validate(spec: CaseSpec) -> list[str]:
                 "the wall. Shells are measured from the vehicle surface, so "
                 "unlike a box they follow a cornering attitude"
             )
-        else:
+        elif spec.domain.wake is None:
             reach = max(s.distance for s in spec.domain.refinement_shells)
             warnings.append(
                 f"refinement shells reach {reach:.2f} body lengths from the "
                 "car. Beyond that the cornering far wake is still at the "
                 "background cell size: shells follow the car, not the path, "
-                "and no curved wake region exists yet"
+                "and no domain.wake region is declared to pick it up"
+            )
+        elif spec.domain.wake.end * 1.0 < max(
+            s.distance for s in spec.domain.refinement_shells
+        ):
+            warnings.append(
+                f"domain.wake.end ({spec.domain.wake.end:.2f} body lengths) is "
+                "shorter than the vehicle shells' own reach "
+                f"({max(s.distance for s in spec.domain.refinement_shells):.2f}"
+                "); the wake region ends before the vehicle shells would have "
+                "handed off to it"
             )
     elif spec.domain.kind == "annulus":
         errors.append(

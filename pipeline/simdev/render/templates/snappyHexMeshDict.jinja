@@ -35,6 +35,16 @@ geometry
         file            "{{ shell_surface }}.stl";
     }
 {% endif %}
+{% if wake_surface %}
+    // A surface swept along the cornering arc, used ONLY to measure distance
+    // from for the wake shells below - same exclusions as the vehicle
+    // surface above, just following the path instead of the car.
+    {{ wake_surface }}
+    {
+        type            triSurfaceMesh;
+        file            "{{ wake_surface }}.stl";
+    }
+{% endif %}
 }
 
 castellatedMeshControls
@@ -122,6 +132,22 @@ castellatedMeshControls
             mode            distance;
             levels          (
 {% for shell in refinement_shells %}
+                                ({{ "%.6f"|format(shell.distance) }} {{ shell.level }})
+{% endfor %}
+                            );
+        }
+{% endif %}
+{% if wake_surface and wake_shells %}
+        // Same idea as the vehicle shells above, at a distance from the
+        // curved wake surface instead: refines the shape of the corner's
+        // wake rather than a box, which is what lets it follow the path
+        // without needing an orientation of its own. context.wake_shells
+        // sorts them, same reason as refinement_shells.
+        {{ wake_surface }}
+        {
+            mode            distance;
+            levels          (
+{% for shell in wake_shells %}
                                 ({{ "%.6f"|format(shell.distance) }} {{ shell.level }})
 {% endfor %}
                             );

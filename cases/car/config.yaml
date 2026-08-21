@@ -173,8 +173,7 @@ domain:
   # Deliberately none for the cornering state. A refinement region is an
   # axis-aligned box and a cornering wake follows the curve of the path, so a
   # box sized to hold the wake would leave most of its cells in clean air.
-  # Curved regions are on the list; until then the far wake sits at the
-  # background cell size and the validator warns about it.
+  # See domain.wake below for the curved region that replaces it.
   refinement_regions: []
 
   # Refinement measured from the vehicle's own surface instead, which is what
@@ -192,20 +191,47 @@ domain:
   #
   # Distances are body lengths (0.44 m), so 0.12 is 53 mm - about a tyre
   # radius, and comfortably more than the ride height, which is why the road
-  # under the car is refined with it. Levels are absolute: 5 is 3 mm against
-  # the 0.75 mm on the wall itself.
+  # under the car is refined with it. Levels are absolute: 4 is 3 mm against
+  # the 0.75 mm on the wall itself (48 mm background, see profiles.py "car").
   #
   # They must get coarser with distance. snappy applies the first shell that
   # contains a cell, so an outer shell finer than an inner one silently never
   # applies; validate() rejects that rather than letting it mesh.
   #
   # NOT A WAKE REGION. These follow the car, not the path, so past 0.9 body
-  # lengths the cornering far wake is still at background size. A curved wake
-  # region is the next piece of work and the validator keeps saying so.
+  # lengths the cornering far wake would be at background size without
+  # domain.wake below to hand off to.
   refinement_shells:
-    - {distance: 0.12, level: 5}
-    - {distance: 0.35, level: 4}
-    - {distance: 0.90, level: 3}
+    - {distance: 0.12, level: 4}
+    - {distance: 0.35, level: 3}
+    - {distance: 0.90, level: 2}
+
+  # The curved wake region NOT A WAKE REGION above warns about. Swept along
+  # the same arc the annulus domain itself is built from - domain.point() at
+  # the vehicle's own corner_radius - so it curves with whichever
+  # corner_radius/corner_direction the driving state asks for and needs no
+  # orientation of its own, the same reasoning as refinement_shells. No-op on
+  # the straight state, which resolves to a box domain with no arc to sweep
+  # along.
+  #
+  # start 0.0 picks up right where the vehicle shells leave off (they cover
+  # the car out to 0.90 body lengths); end 5.0 carries it to about half the
+  # downstream domain length.
+  #
+  # half_width 0.35 and half_height 0.25 body lengths are a first-pass
+  # estimate sized to comfortably cover the car's own track width and height
+  # with margin for the wake to spread - nobody has measured the actual wake
+  # width off this mesh yet. Check it against a real run (U in a few
+  # cross-sections behind the car) before trusting a force number that
+  # depends on it, and widen it if the wake is spilling out of the fine band.
+  wake:
+    start: 0.0
+    end: 5.0
+    half_width: 0.35
+    half_height: 0.25
+    shells:
+      - {distance: 0.15, level: 3}
+      - {distance: 0.40, level: 2}
 
   # Meshing time, at no cost in resolution anywhere.
   #
@@ -313,11 +339,12 @@ geometry:
     # A 42 mm chord on a 440 mm car: at the case-wide level the section stops
     # being an aerofoil.
     #
-    # LEVELS ARE COUNTED FROM A 96 mm BACKGROUND. Level 7 is 0.75 mm. They
-    # were two lower when the background was 24 mm; the re-basing moved every
-    # level by +2 and changed no absolute size. tests/test_cell_sizes.py pins
-    # the metres, so if you re-base again and miss a patch the suite fails.
-    - {name: Wing, role: body, refinement_min: 7, refinement_max: 7}
+    # LEVELS ARE COUNTED FROM A 48 mm BACKGROUND. Level 6 is 0.75 mm. They
+    # were one higher when the background was 96 mm; the 2026-08-21
+    # re-basing (see profiles.py "car") moved every level by -1 and changed
+    # no absolute size. tests/test_cell_sizes.py pins the metres, so if you
+    # re-base again and miss a patch the suite fails.
+    - {name: Wing, role: body, refinement_min: 6, refinement_max: 6}
 
     # --- wheels --------------------------------------------------------
     # PINNED TO ONE LEVEL, 7, RATHER THAN THE 6-7 RANGE THIS USED TO CARRY.
@@ -341,18 +368,18 @@ geometry:
     # Three surfaces per corner sharing one wheel id. The id pairs them;
     # nothing parses the names. Axis, centre and rolling radius are measured
     # from these surfaces for whichever driving state is selected.
-    - {name: Tire_FL, role: tyre, wheel: FL, refinement_min: 7, refinement_max: 7}
-    - {name: Tire_FR, role: tyre, wheel: FR, refinement_min: 7, refinement_max: 7}
-    - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 7, refinement_max: 7}
-    - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 7, refinement_max: 7}
+    - {name: Tire_FL, role: tyre, wheel: FL, refinement_min: 6, refinement_max: 6}
+    - {name: Tire_FR, role: tyre, wheel: FR, refinement_min: 6, refinement_max: 6}
+    - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 6, refinement_max: 6}
+    - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 6, refinement_max: 6}
 
     # Closed sleeves around the rims, which become cell zones rather than
     # walls so the rim and spokes pump air. Meshed but not rotated separately
     # in cornering - see handbook section 6.
-    - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 5, refinement_max: 6}
-    - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 5, refinement_max: 6}
-    - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 5, refinement_max: 6}
-    - {name: MRF_RR, role: mrfZone, wheel: RR, refinement_min: 5, refinement_max: 6}
+    - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 4, refinement_max: 5}
+    - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 4, refinement_max: 5}
+    - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 4, refinement_max: 5}
+    - {name: MRF_RR, role: mrfZone, wheel: RR, refinement_min: 4, refinement_max: 5}
 
     # --- suspension ----------------------------------------------------
     # Upright, upper and lower arms, tie rod and driveshaft as one part per
@@ -363,10 +390,10 @@ geometry:
     # Extra refinement for the same reason the Ahmed stilts get it: these are
     # 5 mm sections, and at the case-wide level snappy cannot build a medial
     # axis it trusts and the layers collapse.
-    - {name: SUS_FL, role: body, refinement_min: 7, refinement_max: 7}
-    - {name: SUS_FR, role: body, refinement_min: 7, refinement_max: 7}
-    - {name: SUS_RL, role: body, refinement_min: 7, refinement_max: 7}
-    - {name: SUS_RR, role: body, refinement_min: 7, refinement_max: 7}
+    - {name: SUS_FL, role: body, refinement_min: 6, refinement_max: 6}
+    - {name: SUS_FR, role: body, refinement_min: 6, refinement_max: 6}
+    - {name: SUS_RL, role: body, refinement_min: 6, refinement_max: 6}
+    - {name: SUS_RR, role: body, refinement_min: 6, refinement_max: 6}
 
     # --- domain boundaries ---------------------------------------------
     # No symmetry patch: asymmetric geometry, so the model is full.

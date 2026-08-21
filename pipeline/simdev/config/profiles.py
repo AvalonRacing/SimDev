@@ -142,10 +142,23 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
     },
     "car": {
         "mesh": {
-            # 0.096 / 2^7 == 0.024 / 2^5 == 0.75 mm.
-            "base_cell_size": 0.096,
-            "surface_refinement_min": 6,
-            "surface_refinement_max": 7,
+            # Re-based from 0.096 m / level 6-7 (2026-08-21), targeting 15M
+            # cells. NOT a plain shrink of base_cell_size: an earlier attempt
+            # (0.0687 m, same levels) hit 14.4M but silently halved the
+            # finest wall cell to 0.537 mm, invalidating the layer stack
+            # below (tuned for exactly 0.75 mm) without retuning it - see
+            # tests/test_cell_sizes.py's docstring on why that is the wrong
+            # move. A correct re-basing halves base_cell_size and drops
+            # every level by 1 in lockstep (here and in every per-patch
+            # override in cases/car/config.yaml, plus every shell/wake
+            # level), which leaves every absolute cell size - 0.75 mm walls,
+            # 1.5 mm MRF sleeves - exactly where it was. The added cells
+            # come entirely from a finer background/mid-field, which is
+            # also where the case's own history says the mesh was thin
+            # (see the "first production mesh" note below).
+            "base_cell_size": 0.048,
+            "surface_refinement_min": 5,
+            "surface_refinement_max": 6,
         },
         # 2000 iterations. At the measured 14.78 s/iter this is ~8.6 h
         # wall clock, not the 5 h that was hoped for - see the handbook.
@@ -156,6 +169,13 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # massively separated cornering open-wheel car. Iterations past that
         # buy a different point on the same cycle, not a better answer. Read
         # the coefficients as time-averages over plateau_window.
+        #
+        # CUT TO 750 (2026-08-21): the native-Linux 6.93M-cell run showed the
+        # windowed mean fully settled by iteration ~200-400 and unchanged
+        # through iteration 2000 - only the oscillation kept sampling, not a
+        # different answer. 750 gives ~2x margin over that while convergence
+        # work is ongoing and mesh size just went up; revisit once the
+        # numerics/scheme changes below are validated.
         #
         # THE PRESSURE SETTINGS STAY AT THEIR DEFAULTS, AND THAT IS A MEASURED
         # RESULT, NOT AN OVERSIGHT. Do not "optimise" them again without
@@ -177,7 +197,7 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # down to 400 cells total) but the reductions it saves are not what
         # this case is waiting on.
         "solve": {
-            "max_iterations": 2000,
+            "max_iterations": 750,
             "n_ranks": 40,
             # Never write only at the end on a run this long.
             "write_interval": 500,

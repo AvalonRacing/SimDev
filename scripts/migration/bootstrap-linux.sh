@@ -29,11 +29,25 @@ say "Adding the OpenFOAM repository"
 # Added by hand rather than by piping their install script into sudo bash:
 # the repository line is recorded in docs/linux-migration.md section 3 and is
 # worth being able to read before it runs as root.
+#
+# The suite must match the running codename, not be hardcoded to noble:
+# dl.openfoam.com builds each suite against that release's own library ABIs
+# (e.g. noble's openfoam2412 depends on libopenmpi3t64; resolute's depends on
+# libopenmpi40 instead), so a mismatched suite fails apt dependency
+# resolution rather than just being a cosmetic version skew. Verified against
+# the actual Packages file rather than assumed, since dl.openfoam.com may not
+# carry every codename yet.
+FOAM_SUITE="${VERSION_CODENAME:-noble}"
+if ! curl -fsSL "https://dl.openfoam.com/repos/deb/dists/${FOAM_SUITE}/main/binary-amd64/Packages" -o /dev/null; then
+    echo "WARNING: dl.openfoam.com has no '${FOAM_SUITE}' suite; falling back to noble." \
+         "This may pull in library versions (e.g. libopenmpi3t64) that don't exist on this release."
+    FOAM_SUITE=noble
+fi
 sudo apt-get update -qq
 sudo apt-get install -y -qq curl gnupg ca-certificates
 curl -fsSL https://dl.openfoam.com/pubkey.gpg \
     | sudo gpg --dearmor -o /usr/share/keyrings/openfoam.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openfoam.gpg] https://dl.openfoam.com/repos/deb noble main" \
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openfoam.gpg] https://dl.openfoam.com/repos/deb ${FOAM_SUITE} main" \
     | sudo tee /etc/apt/sources.list.d/openfoam.list >/dev/null
 sudo apt-get update -qq
 
@@ -58,7 +72,7 @@ fi
 say "Building the virtualenv"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade -q pip
-"$VENV/bin/pip" install -q -e "$REPO"
+"$VENV/bin/pip" install -q -r "$REPO/requirements.txt"
 
 say "Wiring OpenFOAM into the shell"
 # Sourced last so it wins on PATH. The venv must NOT shadow OpenFOAM, which

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import trimesh
 
 from simdev.config.resolve import load_case
@@ -34,6 +35,7 @@ from simdev.geometry.stl import (
 from simdev.geometry.wheels import Wheel, derive_wheels
 from simdev.render.context import (
     VEHICLE_SURFACE,
+    WAKE_SURFACE,
     corner_frame,
     layer_patches,
     wheel_speeds,
@@ -231,6 +233,93 @@ def _write_vehicle_surface(
             "triangles_after": len(combined.faces),
         },
         warnings,
+    )
+
+
+def _write_wake_surface(
+    spec: CaseSpec,
+    domain: Domain,
+    geom_bounds: tuple[list[float], list[float]],
+    run_dir: Path,
+) -> tuple[dict[str, Any], list[str]]:
+    """A rectangular tube swept along the domain's own cornering arc.
+
+    A cornering wake curves with the path, and the vehicle-distance shells
+    above stop following it once the car is further away than their
+    outermost distance - a shell has no idea which way the road bends past
+    that point. This sweeps a synthetic surface along the exact arc
+    domain.point() already draws the tunnel from, at the vehicle's own
+    corner_radius, so distance from it curves with the path by construction
+    rather than by being told the radius separately.
+
+    Open by construction - a ruled surface between cross-section rings, one
+    quad short of a closed tube at each end - which is fine for `mode
+    distance`: snappy only needs the nearest point on it, the same as
+    VEHICLE_SURFACE, and it is excluded from refinementSurfaces the same way.
+
+    No-op (empty dict, no warnings) whenever domain.wake is unset or the
+    resolved domain is not an annulus: a box domain has no arc to sweep along,
+    and WakeRefinement says so is not an error, just nothing to draw.
+    """
+    wake = spec.domain.wake
+    if wake is None or not isinstance(domain, DomainSector):
+        return {}, []
+
+    lo, hi = geom_bounds
+    car_z = (lo[2] + hi[2]) / 2.0
+    length = domain.geom_length
+
+    # Downstream is wherever the outlet is, not wherever theta happens to
+    # increase - see DomainSector.theta_outlet.
+    dtheta_sign = 1.0 if domain.theta_outlet >= domain.theta_car else -1.0
+    theta_start = domain.theta_car + dtheta_sign * (wake.start * length) / domain.radius
+    theta_end = domain.theta_car + dtheta_sign * (wake.end * length) / domain.radius
+
+    half_width = wake.half_width * length
+    half_height = wake.half_height * length
+
+    # ~5 degrees per segment, same reasoning as ArcBlock's own subdivision:
+    # blockMesh's single-interpolation-point arc only stays round over a
+    # modest angle, and this is a plain ruled surface with the same problem
+    # in miniature - too few segments and the "curve" is visibly a polygon.
+    n_segments = max(4, math.ceil(abs(theta_end - theta_start) / math.radians(5.0)))
+    thetas = np.linspace(theta_start, theta_end, n_segments + 1)
+
+    # The four corners of the swept cross-section in (r, z) - constant
+    # across every ring; only theta advances along the sweep.
+    corners = (
+        (domain.radius - half_width, car_z - half_height),
+        (domain.radius - half_width, car_z + half_height),
+        (domain.radius + half_width, car_z + half_height),
+        (domain.radius + half_width, car_z - half_height),
+    )
+
+    rings = np.array(
+        [[domain.point(theta, r, z) for r, z in corners] for theta in thetas]
+    )
+    vertices = rings.reshape(-1, 3)
+
+    faces = []
+    for i in range(len(thetas) - 1):
+        for c in range(4):
+            c_next = (c + 1) % 4
+            a, b = i * 4 + c, i * 4 + c_next
+            a2, b2 = (i + 1) * 4 + c, (i + 1) * 4 + c_next
+            faces.append((a, b, b2))
+            faces.append((a, b2, a2))
+
+    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=False)
+    write_surface(mesh, run_dir / "constant" / "triSurface" / f"{WAKE_SURFACE}.stl")
+    return (
+        {
+            "start": wake.start,
+            "end": wake.end,
+            "half_width": wake.half_width,
+            "half_height": wake.half_height,
+            "theta_start": theta_start,
+            "theta_end": theta_end,
+        },
+        [],
     )
 
 
@@ -596,6 +685,8 @@ def prepare(
     geometry_files = _write_geometry(meshes, run_dir)
     shell_surface, shell_warnings = _write_vehicle_surface(spec, meshes, run_dir)
     warnings.extend(shell_warnings)
+    wake_surface, wake_warnings = _write_wake_surface(spec, domain, (lo, hi), run_dir)
+    warnings.extend(wake_warnings)
 
     result = PrepareResult(
         spec=spec,
@@ -700,6 +791,9 @@ def prepare(
                 # *from*, and that ratio is the whole reason the setting
                 # exists. Empty when the case declares no shells.
                 "shell_surface": shell_surface,
+                # Same reasoning as shell_surface: empty when domain.wake is
+                # unset or the domain isn't an annulus.
+                "wake_surface": wake_surface,
             },
         ),
     )

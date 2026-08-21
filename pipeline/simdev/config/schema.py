@@ -145,6 +145,33 @@ class RefinementShell(BaseModel):
     level: int = Field(ge=1)
 
 
+class WakeRefinement(BaseModel):
+    """A curved refinement region following the vehicle's path behind it.
+
+    Only meaningful for the annulus (cornering) domain. RefinementShell
+    already gives the near field an orientation-free refinement, but it is
+    measured from the vehicle's own surface, so it stops following the wake
+    once the car is more than the outermost shell's distance away - a
+    cornering wake curves with the path for much longer than that. This
+    instead sweeps a synthetic surface along the same arc the domain itself
+    is built from, at the vehicle's own corner_radius and corner_direction,
+    and refines by distance from *that* the same way RefinementShell refines
+    from the vehicle - so it needs no orientation either, and tracks
+    whichever radius the driving state asks for.
+
+    Numbers are in body lengths, like everything else in DomainConfig.
+    `start`/`end` are arc length behind the car (0 = at the car); the
+    cross-section swept along the arc is `half_width` (radial) by
+    `half_height` (vertical), centred on the vehicle's own mid-height.
+    """
+
+    start: float = 0.0
+    end: float = Field(gt=0.0)
+    half_width: float = Field(gt=0.0)
+    half_height: float = Field(gt=0.0)
+    shells: list[RefinementShell] = Field(default_factory=list)
+
+
 class DomainConfig(BaseModel):
     """Extents are in body lengths for both domain kinds.
 
@@ -162,6 +189,9 @@ class DomainConfig(BaseModel):
     half_width_lengths: float = 3.0
     height_lengths: float = 3.0
     max_blockage: float = 0.01
+    # Ignored on a box domain - there is no curved path to follow. See
+    # WakeRefinement.
+    wake: WakeRefinement | None = None
     refinement_regions: list[RefinementRegion] = Field(default_factory=list)
     # Ordered coarse-to-fine or fine-to-coarse as you like; validate() checks
     # that they are consistent rather than trusting the order.

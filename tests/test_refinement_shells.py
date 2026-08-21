@@ -283,7 +283,13 @@ def test_a_case_with_no_shells_is_warned_about() -> None:
     assert any("no domain.refinement_shells" in w for w in validate(spec))
 
 
-def test_the_far_wake_limitation_stays_on_the_record() -> None:
-    """Shells follow the car, not the path. The cornering far wake is not covered."""
-    spec = load_case(CASE, "car", None, None)
+def test_the_far_wake_limitation_is_warned_about_without_a_wake_region() -> None:
+    """Shells follow the car, not the path - domain.wake is what covers it."""
+    spec = load_case(CASE, "car", None, {"domain": {"wake": None}})
     assert any("far wake" in w for w in validate(spec))
+
+
+def test_a_declared_wake_region_silences_the_far_wake_warning() -> None:
+    spec = load_case(CASE, "car", None, None)
+    assert spec.domain.wake is not None
+    assert not any("far wake" in w for w in validate(spec))

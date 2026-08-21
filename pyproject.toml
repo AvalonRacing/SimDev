@@ -18,6 +18,10 @@ dependencies = [
     # cleanly and raises only when the geometry is actually built.
     "scipy>=1.11",
     "networkx>=3.0",
+    # Also a deferred trimesh dependency: trimesh.path.polygons (the
+    # contact-patch/footprint cutting code) imports shapely.ops at call time,
+    # not at trimesh import time, so this only surfaces when that code runs.
+    "shapely>=2.0",
     "pyyaml>=6.0",
     # STEP import. Bundles OpenCASCADE, so there is no CAD-vendor or FreeCAD
     # dependency. On Ubuntu the wheel still needs libGLU from apt - see

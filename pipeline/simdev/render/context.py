@@ -39,6 +39,14 @@ CORNER_ZONE = "all"
 # fifteen.
 VEHICLE_SURFACE = "vehicle"
 
+# A synthetic surface swept along the domain's own cornering arc, that the
+# wake shells measure distance from - same role as VEHICLE_SURFACE, same
+# exclusion from refinementSurfaces, just following the path instead of the
+# car. Written by prepare._write_wake_surface only when spec.domain.wake is
+# set and the domain is an annulus; the name exists here too so there is one
+# spelling of it, matching VEHICLE_SURFACE.
+WAKE_SURFACE = "wake"
+
 WALL_FUNCTIONS: dict[WallTreatment, dict[str, str]] = {
     WallTreatment.HIGH_Y_PLUS: {
         "nut": "nutkWallFunction",
@@ -141,6 +149,24 @@ def refinement_shells(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]
     shells = [
         {"distance": shell.distance * length, "level": shell.level}
         for shell in spec.domain.refinement_shells
+    ]
+    return sorted(shells, key=lambda s: s["distance"])
+
+
+def wake_shells(spec: CaseSpec, domain: DomainBox) -> list[dict[str, Any]]:
+    """Resolve wake shells to an absolute distance in metres, finest first.
+
+    Same resolution and ordering as refinement_shells - see its docstring -
+    just measured from WAKE_SURFACE instead of VEHICLE_SURFACE. Empty
+    whenever refinement_shells() would need to check, so callers can test
+    this list directly rather than re-deriving domain.wake's applicability.
+    """
+    if spec.domain.wake is None or not isinstance(domain, DomainSector):
+        return []
+    length = domain.geom_length
+    shells = [
+        {"distance": shell.distance * length, "level": shell.level}
+        for shell in spec.domain.wake.shells
     ]
     return sorted(shells, key=lambda s: s["distance"])
 
@@ -614,6 +640,16 @@ def build_context(
         "shell_surface": (
             VEHICLE_SURFACE if spec.domain.refinement_shells else ""
         ),
+        # Same pattern, for the curved wake region - see WAKE_SURFACE and
+        # WakeRefinement. Empty (and so absent from snappy's geometry) unless
+        # the case declares domain.wake AND resolved to an annulus domain;
+        # a box domain has no arc to sweep the surface along.
+        "wake_surface": (
+            WAKE_SURFACE
+            if spec.domain.wake is not None and isinstance(domain, DomainSector)
+            else ""
+        ),
+        "wake_shells": wake_shells(spec, domain),
         "layer_patches": layer_patches(spec, domain),
         "wall_patches": wall_patches,
         "force_patches": [
