@@ -163,8 +163,23 @@ geometry is silently wrong. The Ahmed case declares `true` explicitly.
 Steady aero forces routinely keep drifting long after residuals hit 1e-4.
 Residuals alone lie. So:
 
-- The gate tests **Cd and Cl** for a plateau: relative scatter *and* least-squares
-  drift over a trailing window, both against a tolerance.
+- The gate asks **two separate questions** of Cd and Cl, because on a separated
+  case they have different answers and only one is about convergence:
+  - **Has the mean stopped moving?** The trailing window's mean against the
+    mean of the window before it, versus `solve.drift_tol`. *This* is the
+    convergence test, and it is the one to keep tight.
+  - **How far does it swing about that mean?** `std/|mean|` over the trailing
+    window, versus `solve.amplitude_tol`. A stability bound, not a convergence
+    test — a limit cycle is physics, and a gate that fails on it is measuring
+    the flow rather than the solve.
+- **Not a least-squares slope inside one window.** A sine sampled over part of
+  a period genuinely has a slope, so that test reads a perfectly stationary
+  limit cycle as drift, at a magnitude set by where in the cycle the run
+  stopped — it reported "+10.92 % drifting" on a mean that had not moved.
+  Two consecutive window means each average the cycle away instead. The
+  corollary is that **`plateau_window` wants to be at least one oscillation
+  period long**, and judging drift needs two whole windows, so a run shorter
+  than `2 × plateau_window` is reported as unjudgeable rather than converged.
 - The **reported coefficient is the mean over that window**, with its standard
   deviation and window bounds recorded — never the last instantaneous iteration.
 - A run that hits `max_iterations` without plateauing **terminates and is

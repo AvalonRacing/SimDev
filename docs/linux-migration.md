@@ -364,12 +364,47 @@ The venv-shadows-OpenFOAM-on-PATH trap still applies — keep calling
 
 ## 6. Still open, unrelated to the platform
 
-- **`solve.plateau_tol` is 0.002 and unreachable.** The cornering case converges
-  in the mean (Cd 1.0635 +/- 0.35 %, Cl -1.726 +/- 0.9 % over rolling
-  200-iteration windows) but carries a physical limit-cycle oscillation of
-  +/-7.9 % in Cl and +/-2.2 % in Cd. Steady RANS on a massively separated flow
-  has no fixed point to find. The gate needs a threshold that reflects that, or
-  the run needs time-averaging.
+- ~~**`solve.plateau_tol` is 0.002 and unreachable.**~~ **Closed 2026-08-21.**
+  `plateau_tol` asked one question of two different things. It is now
+  `solve.drift_tol` (has the mean stopped moving - the convergence test, and
+  the one that stays tight) and `solve.amplitude_tol` (how far the coefficient
+  swings about that mean - a stability bound, not a convergence test, because
+  on a massively separated flow the swing is a limit cycle the flow genuinely
+  has). `gates/convergence.py` compares two consecutive window means rather
+  than fitting a slope inside one window: a sine sampled over part of a period
+  genuinely has a slope, which is why the old test read a perfectly stationary
+  limit cycle as "+10.92 % drifting". Replayed against the 2000-iteration
+  6.93M history, the case now passes.
+
+  **What is still open is sampling, not convergence.** A periodogram of that
+  history puts Cd's limit cycle at a 500-750 iteration period (autocorrelation
+  zero-crossing implies ~628) and Cl's at ~40. `plateau_window` is 200, so it
+  averages Cl's cycle away and does not touch Cd's - which is why `drift_tol`
+  has to sit at 0.035 for the car rather than the 0.002 default. Sweeping
+  every stopping point of the stationary part:
+
+  | window | Cd median / worst | Cl median / worst |
+  |---|---|---|
+  | 200 | 0.80 % / 1.91 % | 1.34 % / 3.00 % |
+  | 400 | 0.64 % / 1.33 % | 1.07 % / 2.15 % |
+
+- **A 750-iteration run carries a 1.5-3 % noise floor, by decision.**
+  `max_iterations` is 750 and stays there: a run that has not converged by
+  then is broken and is not worth developing against. That is a statement
+  about convergence, and it holds - the mean is settled well before 750. It is
+  not a statement about *averaging*. With ~500 iterations spent on the startup
+  transient and a Cd cycle of ~628-750, a 750-iteration run samples well under
+  one full cycle, so the coefficient it reports lands somewhere on the cycle
+  rather than at its mean. Measured against the 2000-iteration answer:
+
+  | window averaged | Cd | Cl |
+  |---|---|---|
+  | 550-750 (what a 750-iteration run reports) | +1.56 % | -3.01 % |
+  | 500-2000 (whole stationary part) | +0.50 % | -0.96 % |
+
+  So treat ~1.5 % in Cd and ~3 % in Cl as the floor when comparing two design
+  variants at this iteration count. A delta smaller than that is where in the
+  cycle each run stopped, not a design effect.
 - **Layer coverage** on `Chassis` (48 %), tyres (51-58 %) and `SUS` (25 %) is
   below the old 0.7 default and not reachable by refining — see the note in
   `cases/car/config.yaml`. y+ is the criterion that actually holds, and it

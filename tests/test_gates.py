@@ -255,6 +255,111 @@ def test_convergence_window_is_the_trailing_slice() -> None:
     assert end == 300
 
 
+# --- limit cycles ---------------------------------------------------------
+#
+# Steady RANS on a massively separated cornering open-wheel car has no fixed
+# point to find. It settles to a stationary mean and then oscillates about it
+# forever. The measured car case (docs/linux-migration.md, "Still open")
+# converges in the mean - Cd 1.0635 +/- 0.35 %, Cl -1.726 +/- 0.9 % over
+# rolling 200-iteration windows - while carrying a physical limit cycle of
+# +/-2.2 % in Cd and +/-7.9 % in Cl. Judging that oscillation as scatter and
+# calling it "not converged" measures the amplitude of real physics, not the
+# state of the solve, so drift and amplitude are two separate questions with
+# two separate tolerances.
+
+
+def _limit_cycle(
+    n: int, period: float = 180.0, drift: float = 0.0
+) -> pd.DataFrame:
+    """A settled mean with the car case's measured oscillation on top."""
+    it = np.arange(1, n + 1)
+    phase = 2.0 * np.pi * it / period
+    return pd.DataFrame(
+        {
+            "Time": it,
+            "Cd": 1.0635 * (1.0 + 0.022 * np.sin(phase) + drift * it),
+            "Cl": -1.726 * (1.0 + 0.079 * np.sin(phase + 0.7) + drift * it),
+        }
+    )
+
+
+# The window has to be at least one oscillation period long for either test
+# to mean anything, so these pin it explicitly rather than inheriting a
+# profile's.
+CYCLE: dict = {"solve": {"plateau_window": 180}}
+
+
+def test_a_settled_limit_cycle_converges() -> None:
+    """The mean has stopped moving; the oscillation about it is the physics."""
+    spec = _spec(CYCLE)
+    result = check_convergence(_limit_cycle(1200), spec)
+
+    assert result.converged is True, result.reasons
+    assert result.means["Cd"] == pytest.approx(1.0635, rel=5e-3)
+    assert result.means["Cl"] == pytest.approx(-1.726, rel=5e-3)
+
+
+def test_the_oscillation_is_reported_even_though_it_passes() -> None:
+    """Amplitude is a number the engineer needs, not a reason to fail."""
+    spec = _spec(CYCLE)
+    result = check_convergence(_limit_cycle(1200), spec)
+
+    assert result.converged is True, result.reasons
+    assert result.amplitudes["Cl"] > result.amplitudes["Cd"]
+    # std of a sine of amplitude A is A/sqrt(2).
+    assert result.amplitudes["Cl"] == pytest.approx(0.079 / np.sqrt(2), rel=0.1)
+    assert result.amplitudes["Cd"] == pytest.approx(0.022 / np.sqrt(2), rel=0.1)
+
+
+def test_a_limit_cycle_that_is_still_drifting_fails() -> None:
+    """A moving mean is the thing the gate exists to catch."""
+    spec = _spec(CYCLE)
+    result = check_convergence(_limit_cycle(1200, drift=1e-4), spec)
+
+    assert result.converged is False
+    assert any("drifting" in r for r in result.reasons)
+
+
+def test_an_oscillation_beyond_the_amplitude_bound_fails() -> None:
+    """A settled mean does not excuse an unbounded wobble."""
+    spec = _spec({"solve": {"plateau_window": 180, "amplitude_tol": 0.01}})
+    result = check_convergence(_limit_cycle(1200), spec)
+
+    assert result.converged is False
+    assert any("oscillates" in r for r in result.reasons)
+
+
+def test_drift_is_judged_on_the_mean_not_on_scatter_within_the_window() -> None:
+    """Where in the cycle the run stopped must not decide the verdict.
+
+    A least-squares slope fitted inside a single window reads a stationary
+    limit cycle as drift, because a sine sampled over part of a period
+    genuinely has a slope - that is what produced a '+10.92 % drift' on a
+    mean that had not moved at all. Two consecutive window means each average
+    the cycle away instead, so every stopping point agrees.
+    """
+    spec = _spec(CYCLE)
+    window = spec.solve.plateau_window
+
+    for stop in range(1000, 1000 + window, 37):
+        result = check_convergence(
+            _limit_cycle(stop, period=float(window)), spec
+        )
+        assert result.converged is True, (stop, result.reasons)
+
+
+def test_two_whole_windows_are_needed_before_a_verdict() -> None:
+    """One window gives a mean but nothing to compare it against."""
+    spec = _spec(CYCLE)
+    window = spec.solve.plateau_window
+
+    result = check_convergence(_limit_cycle(window + 10), spec)
+
+    assert result.converged is False
+    assert any(str(2 * window) in r for r in result.reasons)
+    assert "Cd" in result.means  # still reported, never withheld
+
+
 def test_y_plus_gate_passes_inside_the_band() -> None:
     spec = _spec()
     df = pd.DataFrame(

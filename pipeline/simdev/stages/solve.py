@@ -46,6 +46,11 @@ def solve(
             detail={
                 **{f"{k}_mean": v for k, v in result.means.items()},
                 **{f"{k}_std": v for k, v in result.stds.items()},
+                # std/|mean|, recorded rather than left to be recomputed: on a
+                # limit-cycle case this is how wide the cycle is, and it is
+                # the number that says whether a delta between two runs is a
+                # design effect or just where each one stopped.
+                **{f"{k}_amplitude": v for k, v in result.amplitudes.items()},
                 "n_iterations": result.n_iterations,
                 "window_start": result.window[0],
                 "window_end": result.window[1],

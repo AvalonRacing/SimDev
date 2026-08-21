@@ -28,7 +28,12 @@ DEFAULTS: dict[str, Any] = {
     # At 1e-6 it only fires when the solution really has stopped moving, and
     # the force-plateau gate owns termination the rest of the time - which is
     # also what makes "raise max_iterations" a remedy that works.
-    "solve": {"plateau_window": 200, "plateau_tol": 0.002, "residual_tol": 1.0e-6},
+    "solve": {
+        "plateau_window": 200,
+        "drift_tol": 0.002,
+        "amplitude_tol": 0.10,
+        "residual_tol": 1.0e-6,
+    },
     "post": {"max_fraction_outside": 0.1},
 }
 
@@ -196,9 +201,46 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # stops at nProcs x this value, so the default builds coarse levels
         # down to 400 cells total) but the reductions it saves are not what
         # this case is waiting on.
+        # THE TOLERANCES ARE SPLIT BECAUSE THIS CASE HAS A LIMIT CYCLE, and
+        # both numbers below are measured on it rather than chosen. The
+        # 6.93M-cell run held its rolling 200-iteration mean to +/-0.35 % in
+        # Cd and +/-0.9 % in Cl while swinging +/-2.2 % and +/-7.9 % about it
+        # (docs/linux-migration.md). Those are answers to two different
+        # questions and they differ by an order of magnitude, which is why a
+        # single plateau_tol could not be set to anything useful: at 0.002 it
+        # failed every run on the swing, and loose enough to pass the swing it
+        # would no longer notice a mean that was still moving.
+        #
+        # drift_tol 0.035 is MEASURED, and it is loose because plateau_window
+        # is shorter than the oscillation. Sweeping every stopping point of
+        # the 2000-iteration 6.93M run, over the stationary part only (both
+        # windows past iteration 500), the drift between consecutive windows
+        # comes out:
+        #
+        #   window 200   Cd median 0.80 % worst 1.91 %   Cl 1.34 % / 3.00 %
+        #   window 400   Cd median 0.64 % worst 1.33 %   Cl 1.07 % / 2.15 %
+        #
+        # A periodogram of that history says why: Cd's limit cycle runs at a
+        # period of 500-750 iterations (autocorrelation zero-crossing implies
+        # ~628), while Cl's is ~40. A 200-iteration window averages Cl's
+        # cycle away and does not touch Cd's, so what is left in the Cd drift
+        # is the cycle itself rather than any movement of the mean.
+        #
+        # 0.035 clears the worst case above with a little margin. THE BETTER
+        # FIX IS A LONGER WINDOW, NOT A LOOSER BOUND: plateau_window 400 with
+        # max_iterations ~1500 (500 transient + two 400-windows + margin)
+        # would let drift_tol come back to ~0.025, and 750/2500 would make it
+        # tighter still. Both cost wall clock that has not been budgeted, so
+        # this stays measured-and-documented rather than quietly optimistic.
+        #
+        # amplitude_tol is left at the 0.10 default, which clears the measured
+        # 2.4-3.6 % Cl standard deviation with margin while still catching a
+        # solve that comes apart. Tighten drift_tol, never amplitude_tol, if
+        # you want a stricter run - only the first one is about convergence.
         "solve": {
             "max_iterations": 750,
             "n_ranks": 40,
+            "drift_tol": 0.035,
             # Never write only at the end on a run this long.
             "write_interval": 500,
         },

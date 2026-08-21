@@ -382,8 +382,19 @@ class SolveConfig(BaseModel):
     # disk rather than growing disk, and the newest write doubles as a
     # restart point.
     write_interval: int | None = Field(default=None, gt=0)
+    # The window wants to be at least one oscillation period long, because
+    # both tests below average over it. See gates/convergence.py.
     plateau_window: int = 200
-    plateau_tol: float = 0.002
+
+    # How far the trailing window's mean may move from the window before it.
+    # This is the convergence test, and it is the one that should stay tight.
+    drift_tol: float = 0.002
+
+    # How far the coefficient may swing about that mean, as std/|mean|. NOT a
+    # convergence test: on a separated case the swing is a limit cycle the
+    # flow genuinely has, so this is a stability bound - wide enough to let
+    # real physics through, narrow enough to catch a solve coming apart.
+    amplitude_tol: float = 0.10
     residual_tol: float = 1.0e-4
 
     # --- pressure equation cost -------------------------------------------
