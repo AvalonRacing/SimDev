@@ -349,13 +349,47 @@ def test_locked_wheels_fall_back_to_a_plain_wall() -> None:
 # --- MRF zones ------------------------------------------------------------
 
 
-def test_cornering_turns_every_cell_at_the_corner_rate() -> None:
+def test_cornering_turns_the_background_at_the_corner_rate_and_wheels_at_their_own() -> None:
     """No cell may be left inertial inside a car going round a corner.
 
     snappyHexMesh moves the wheel-sleeve cells out of the background zone
     when it creates their own, so covering only 'all' would leave those cells
-    with no frame rotation at all. Every zone therefore carries the same
-    corner frame.
+    with no frame rotation at all - closed by giving the wheel zone its own
+    rotation instead, rather than the background's (2026-08-21): the wheel's
+    own spin is a far better approximation of what that cell is actually
+    doing than the corner rate is.
+    """
+    resolved = spec()
+    domain = sector()
+    frame = corner_frame(resolved, domain)
+    wheel = _wheel([0.15, -0.09, 0.033])
+    speeds = wheel_speeds(resolved, {"FL": wheel}, frame)
+
+    zones = mrf_zones(resolved, domain, speeds, frame)
+
+    assert [z["cell_zone"] for z in zones] == ["all", "MRF_FL"]
+    background, wheel_zone = zones
+
+    assert background["axis"] == (0.0, 0.0, 1.0)
+    assert background["origin"] == frame.origin
+    assert background["omega"] == pytest.approx(frame.omega)
+
+    assert wheel_zone["origin"] == wheel.origin
+    assert wheel_zone["axis"] == wheel.axis
+    assert wheel_zone["omega"] == pytest.approx(speeds["FL"]["omega"])
+    assert wheel_zone["omega"] != pytest.approx(frame.omega)
+
+
+def test_the_road_and_the_tyre_are_excluded_from_the_rotating_frame() -> None:
+    """Both carry absolute velocities; the car body does not.
+
+    Asserted on EVERY cornering zone, not just the corner frame. A tyre face
+    is an included face of whichever zone owns the cell behind it, and
+    MRFZone::correctBoundaryVelocity overwrites included faces with the
+    zone's own Omega ^ (Cf - origin) every SIMPLE iteration. Leave the wheel
+    sleeves off this list and the tyre faces that border a sleeve cell lose
+    _tyre_bc's corner-carry term while the rest of the same patch keeps it -
+    a step of |omega_corner x r| ~ 15 m/s across a cellZone boundary.
     """
     resolved = spec()
     domain = sector()
@@ -363,26 +397,13 @@ def test_cornering_turns_every_cell_at_the_corner_rate() -> None:
     speeds = wheel_speeds(resolved, {"FL": _wheel([0.15, -0.09, 0.033])}, frame)
 
     zones = mrf_zones(resolved, domain, speeds, frame)
+    assert len(zones) > 1, "expected the wheel sleeves alongside the corner frame"
 
-    assert [z["cell_zone"] for z in zones] == ["all", "MRF_FL"]
     for zone in zones:
-        assert zone["axis"] == (0.0, 0.0, 1.0)
-        assert zone["origin"] == frame.origin
-        assert zone["omega"] == pytest.approx(frame.omega)
-
-
-def test_the_road_and_the_tyre_are_excluded_from_the_rotating_frame() -> None:
-    """Both carry absolute velocities; the car body does not."""
-    resolved = spec()
-    domain = sector()
-    frame = corner_frame(resolved, domain)
-    speeds = wheel_speeds(resolved, {"FL": _wheel([0.15, -0.09, 0.033])}, frame)
-
-    excluded = mrf_zones(resolved, domain, speeds, frame)[0]["non_rotating_patches"]
-
-    assert "ground" in excluded
-    assert "Tire_FL" in excluded
-    assert "Body" not in excluded
+        excluded = zone["non_rotating_patches"]
+        assert "ground" in excluded, zone["cell_zone"]
+        assert "Tire_FL" in excluded, zone["cell_zone"]
+        assert "Body" not in excluded, zone["cell_zone"]
 
 
 def test_straight_line_gets_one_zone_per_wheel() -> None:
@@ -438,9 +459,9 @@ def test_cornering_in_a_box_is_rejected() -> None:
         validate(CaseSpec.model_validate(case))
 
 
-def test_cornering_warns_that_wheel_mrf_zones_are_dropped() -> None:
+def test_cornering_warns_that_the_corner_rate_is_dropped_from_wheel_zones() -> None:
     warnings = validate(spec())
-    assert any("rim pumping" in w for w in warnings)
+    assert any("own spin rate" in w for w in warnings)
 
 
 def test_a_wheel_id_on_a_non_rotating_role_is_rejected() -> None:

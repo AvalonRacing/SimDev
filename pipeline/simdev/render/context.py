@@ -518,20 +518,43 @@ def mrf_zones(
     speeds: dict[str, dict[str, Any]],
     frame: CornerFrame | None,
 ) -> list[dict[str, Any]]:
-    """The rotating cell zones, which differ completely between the two modes.
+    """The rotating cell zones, which differ between the two modes.
 
     Straight-line: one zone per wheel, covering the rim and spokes, turning
     about that wheel's own measured axis. This is what makes a wheel pump air
     rather than merely present a moving skin.
 
-    Cornering: a single zone over every cell, turning about the corner. The
-    two cannot be combined. An MRF cell belongs to exactly one zone and
-    carries exactly one frame rotation, so there is no way to express "this
-    cell is going round the corner *and* round the wheel" - that is a screw
-    motion, and MRF only does rotations. Choosing the corner over the rims is
-    not a close call: the corner term is the entire reason the case exists,
-    while rim pumping is a refinement on top of a wheel whose surface is
-    still driven at the right speed by its boundary condition.
+    Cornering: the background turns about the corner, and each wheel zone
+    ALSO turns about its own axis at its own spin rate (2026-08-21) - not
+    composed with the corner's rotation, just replacing "same as the
+    background" with "the wheel's own speeds[patch.wheel] entry", the same
+    values the straight-line branch below already uses. That is an
+    approximation, not the exact compound motion (a cell going round the
+    corner and round the wheel at once is a screw motion, and MRF's
+    Coriolis/centrifugal source term for one zone only expresses one
+    rotation), but a deliberately accepted one: what the wheel zone drops is
+    the corner's contribution to the *source term* inside the sleeve, and
+    there the rate comparison is the honest one, because Coriolis is 2*Omega
+    x u against the same u - 3.75 rad/s against 381 rad/s is a 1% term.
+
+    What that argument does NOT license is dropping the corner from the
+    wheel's *wall velocity*, and MRF will do exactly that if you let it.
+    MRFZone::correctBoundaryVelocity overwrites every included patch face
+    with Omega ^ (Cf - origin) on each SIMPLE iteration, discarding whatever
+    the boundary condition computed. Rates are the wrong units for that
+    comparison: the corner acts on a 4 m lever and the spin on a 0.033 m one,
+    so the two linear speeds are 15.0 and 12.6 m/s - the same order, both of
+    them essentially the road speed, as they must be for a rolling wheel.
+    Worse, it would apply only to the tyre faces that happen to border a
+    sleeve cell, leaving the rest of the same patch on the full absolute
+    velocity from _tyre_bc and putting a 15 m/s step across a cellZone
+    boundary that has no physical meaning.
+
+    So the wheel zones carry the same non-rotating patch list as the corner
+    frame. Every tyre face is then an excluded face, correctBoundaryVelocity
+    leaves _tyre_bc's coded spin-plus-carry value alone wherever it sits, and
+    the wheel's own omega is left to do the one job it was added for: driving
+    the Coriolis/centrifugal source that makes the rim pump air.
     """
     if frame is not None:
         excluded = [
@@ -541,29 +564,31 @@ def mrf_zones(
             or (p.wheel is not None and traits(p.role).is_wall)
         ]
 
-        # The wheel sleeves still become cell zones - that is what keeps
-        # their faces internal and stops snappy making boundary patches
-        # nobody wrote a condition for - and snappy takes those cells *out*
-        # of the background zone when it does. Left alone they would be the
-        # only cells in the domain with no frame rotation at all, sitting
-        # inertial inside a car going round a corner. Giving them the corner
-        # frame too closes that hole: every cell turns at the same rate about
-        # the same axis, which is exactly the state "the wheel zones are
-        # meshed but not used" is meant to describe.
-        rotating = [CORNER_ZONE] + [
-            p.name for p in spec.geometry.patches if p.role is PatchRole.MRF_ZONE
-        ]
-        return [
+        zones = [
             {
-                "name": "cornerFrame" if zone == CORNER_ZONE else f"cornerFrame_{zone}",
-                "cell_zone": zone,
+                "name": "cornerFrame",
+                "cell_zone": CORNER_ZONE,
                 "origin": frame.origin,
                 "axis": frame.axis,
                 "omega": frame.omega,
                 "non_rotating_patches": excluded,
             }
-            for zone in rotating
         ]
+        for patch in spec.geometry.patches:
+            if patch.role is not PatchRole.MRF_ZONE or patch.wheel not in speeds:
+                continue
+            entry = speeds[patch.wheel]
+            zones.append(
+                {
+                    "name": f"cornerFrame_{patch.name}",
+                    "cell_zone": patch.name,
+                    "origin": entry["wheel"].origin,
+                    "axis": entry["wheel"].axis,
+                    "omega": entry["omega"],
+                    "non_rotating_patches": excluded,
+                }
+            )
+        return zones
 
     zones: list[dict[str, Any]] = []
     for patch in spec.geometry.patches:
