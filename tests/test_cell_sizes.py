@@ -26,15 +26,22 @@ CASE = Path(__file__).resolve().parents[1] / "cases" / "car" / "config.yaml"
 
 # What each surface must resolve to, in metres, whatever the background is.
 #
-#   0.75 mm - bodywork, tyres, the wing and the suspension links. The coarsest
-#             that still puts ~56 cells on a 42 mm wing chord and 5 across a
-#             4 mm control arm.
+#   0.375 mm - Chassis (at refinement_max; its flat plate still holds at
+#             0.75 mm) and the wing, which is a curved aerofoil section
+#             everywhere and so carries the fine level everywhere.
+#   0.75 mm - Body, the tyres and the suspension links. Body is held at one
+#             level, not a 6-7 range: 93% of its area lands in the finest bin
+#             either way, so a range there is level 7 almost everywhere, and
+#             at 1.84M faces - 69% of every wall face in the case - that put
+#             the mesh at 20.26M against a 15M target. See the long note in
+#             cases/car/config.yaml. Also the coarsest that still puts 5
+#             cells across a 4 mm control arm.
 #   1.5  mm - the MRF sleeves, which are cell zones rather than walls and only
 #             have to enclose the rim cleanly.
 PRODUCTION_CELL_SIZE = {
     "Body": 0.00075,
-    "Chassis": 0.00075,
-    "Wing": 0.00075,
+    "Chassis": 0.000375,
+    "Wing": 0.000375,
     "Tire_FL": 0.00075,
     "Tire_FR": 0.00075,
     "Tire_RL": 0.00075,

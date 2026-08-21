@@ -201,10 +201,32 @@ domain:
   # NOT A WAKE REGION. These follow the car, not the path, so past 0.9 body
   # lengths the cornering far wake would be at background size without
   # domain.wake below to hand off to.
+  #
+  # Mid-field tier added 2026-08-21: level 1 (24 mm, half the 48 mm
+  # background) from 0.90 out to 1.30 body lengths, pushing toward 15M cells
+  # and giving the near-wake formation region one coarsening step instead of
+  # dropping straight to raw background at 0.9 - which the CFD review flagged
+  # as a plausible contributor to the force oscillation on top of the
+  # physical limit-cycle. Not a wake region either, same limitation as the
+  # three shells above: it follows the car, not the path.
+  #
+  # REACH RESTORED TO 1.80 (2026-08-21, second pass). It had been pulled in to
+  # 1.30 on the theory that it shared the blame for a 20.35M count against a
+  # 15M target. Measured, both ways, on the full mesh:
+  #
+  #   reach 1.80 -> 20.35M cells
+  #   reach 1.30 -> 20.26M cells      (a 0.4% saving)
+  #
+  # and in the finished mesh the level 1 tier holds 49,154 cells, 0.24% of the
+  # total. The tier is nearly free at any reach, so it is set by what the wake
+  # needs rather than by a cell budget, and 1.80 is the reach that actually
+  # hands off to domain.wake. The overshoot was never here - it was entirely
+  # the Body promotion below, which is where the 15M target got paid for.
   refinement_shells:
     - {distance: 0.12, level: 4}
     - {distance: 0.35, level: 3}
     - {distance: 0.90, level: 2}
+    - {distance: 1.80, level: 1}
 
   # The curved wake region NOT A WAKE REGION above warns about. Swept along
   # the same arc the annulus domain itself is built from - domain.point() at
@@ -224,14 +246,43 @@ domain:
   # width off this mesh yet. Check it against a real run (U in a few
   # cross-sections behind the car) before trusting a force number that
   # depends on it, and widen it if the wake is spilling out of the fine band.
+  # SHELLS WIDENED 2026-08-21 to spend the cells the Body cap freed, and the
+  # first tier is sized to a property of the tube rather than picked.
+  #
+  # _write_wake_surface sweeps an OPEN rectangular tube - four side walls, no
+  # caps, no interior - and these are `mode distance` from that surface. So a
+  # tier does not fill the tube, it wraps its walls in a rind. The deepest
+  # interior point is min(half_width, half_height) = 0.25 body lengths from
+  # the nearest wall, which means the old first tier at 0.15 left the middle
+  # of the wake at level 2 (12 mm) inside a level 3 (6 mm) rind - the finest
+  # cells on the band's edge and the coarsest in its core, which is backwards.
+  # Any first tier < 0.25 has that defect; 0.50 clears it with margin.
+  #
+  # Measured cost, sampling the wake neighbourhood and summing 1/cell^3
+  # (deltas against the mesh this replaces, at 10.80M):
+  #
+  #   0.15/0.40/0.55 (was)          -            10.80M
+  #   0.25/0.40/0.55        +0.82M  ->           11.62M   core just covered
+  #   0.40/0.70/1.00        +2.62M  ->           13.42M
+  #   0.50/0.80/1.10        +3.92M  ->           14.72M   <- chosen
+  #   0.60/0.90/1.20        +5.33M  ->           16.13M   over budget
+  #
+  # NOT SPENT ON A LEVEL 4 TIER, though it fits: 0.05 at level 4 costs +4.20M
+  # and lands on 15.0M almost exactly. It would put the finest cells in the
+  # case in a 22 mm rind hugging the tube wall - and half_width/half_height
+  # are an unmeasured first-pass estimate, so that wall is not a physical
+  # surface. Refining the wake uniformly is worth more than resolving an
+  # arbitrary boundary finely. Revisit once the wake has been measured off a
+  # real run and the tube is known to sit where the shear layers are.
   wake:
     start: 0.0
     end: 5.0
     half_width: 0.35
     half_height: 0.25
     shells:
-      - {distance: 0.15, level: 3}
-      - {distance: 0.40, level: 2}
+      - {distance: 0.50, level: 3}
+      - {distance: 0.80, level: 2}
+      - {distance: 1.10, level: 1}
 
   # Meshing time, at no cost in resolution anywhere.
   #
@@ -334,17 +385,44 @@ geometry:
 
   patches:
     # --- bodywork ------------------------------------------------------
-    - {name: Body, role: body}
-    - {name: Chassis, role: body}
+    # BODY IS HELD AT 6, AND IT IS THE PATCH THE WHOLE CELL BUDGET TURNS ON.
+    # It was briefly given the 6-7 range Chassis still carries. That reads
+    # like "flat panels stay at 0.75 mm, only curved regions reach 0.375 mm",
+    # and on a tyre it would be - but Body is not a tyre. 93% of its area
+    # already lands in the finest bin (see the wheel note below, same
+    # measurement), so a 6-7 range on Body is level 7 almost everywhere, and
+    # the mesh measured it:
+    #
+    #   Body at 6-7 -> 1,840,811 faces, 69% of every wall face in the case,
+    #                  ~7.1M of the 9.5M cells layer addition adds, and a
+    #                  20.26M total against a 15M target.
+    #
+    # Nothing else is close: Chassis is 447,456 faces, Wing 153,281, a tyre
+    # ~23,000. Body is the only patch that can move five million cells, so it
+    # is the one that pays for the target. At level 6 it also gets its full
+    # 6-layer stack back: layer_budget_for() is 487.5 um at 0.75 mm against
+    # 243.8 um at 0.375 mm, and the latter fits only 4 of the 6 requested
+    # (see schema.n_layers_for). First-layer thickness is 40 um either way,
+    # so y+ at the wall does not move - what changes is that the stack stops
+    # handing off to the background two layers early.
+    - {name: Body, role: body, refinement_min: 6, refinement_max: 6}
+    # Chassis keeps the range. At 447k faces its level-7 share costs roughly a
+    # quarter of what Body's did, and unlike the bodywork shell it is a mix of
+    # flat plate and small curved detail, which is the case a 6-7 range is
+    # actually for.
+    - {name: Chassis, role: body, refinement_min: 6, refinement_max: 7}
     # A 42 mm chord on a 440 mm car: at the case-wide level the section stops
-    # being an aerofoil.
+    # being an aerofoil. Pinned to level 7 (was 6), 2026-08-21, for the same
+    # reason as Body/Chassis above and the same layer-budget cost - the whole
+    # wing is a curved aerofoil section, not a mix of flat and curved like
+    # the body, so it gets the fine level everywhere rather than a range.
     #
     # LEVELS ARE COUNTED FROM A 48 mm BACKGROUND. Level 6 is 0.75 mm. They
     # were one higher when the background was 96 mm; the 2026-08-21
     # re-basing (see profiles.py "car") moved every level by -1 and changed
     # no absolute size. tests/test_cell_sizes.py pins the metres, so if you
     # re-base again and miss a patch the suite fails.
-    - {name: Wing, role: body, refinement_min: 6, refinement_max: 6}
+    - {name: Wing, role: body, refinement_min: 7, refinement_max: 7}
 
     # --- wheels --------------------------------------------------------
     # PINNED TO ONE LEVEL, 7, RATHER THAN THE 6-7 RANGE THIS USED TO CARRY.
