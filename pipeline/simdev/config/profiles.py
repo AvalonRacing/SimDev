@@ -237,14 +237,37 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 2.4-3.6 % Cl standard deviation with margin while still catching a
         # solve that comes apart. Tighten drift_tol, never amplitude_tol, if
         # you want a stricter run - only the first one is about convergence.
-        # CUT TO 500 (2026-08-22), and unlike the 2000 -> 750 cut this one is
-        # measured on the mesh it applies to rather than on a smaller one. On
-        # the 13.28M run, replaying the gate against a hypothetical stop at
-        # iteration 500 gives drift Cd -0.10 % and Cl -3.05 % over windows
-        # 101-300 and 301-500, both inside the 3.5 % bound - so the run that
-        # actually happened would have passed 250 iterations earlier. Forces
-        # plateau by ~200 and residuals by ~150; iterations past that sample
-        # the limit cycle, they do not move the mean.
+        # BACK TO 750 (2026-08-22, same day), BECAUSE THE 500 BELOW WAS
+        # VALIDATED ON THE WRONG MESH AND DID NOT TRANSFER.
+        #
+        # The reasoning under it is sound and its measurement is real - on the
+        # 13.28M mesh. On the 17.80M mesh it fails outright: Cl drift at
+        # iteration 500 is -9.78 % against the 3.5 % bound, and the force
+        # history shows why it is not the window aliasing that produced the
+        # earlier borderline numbers. Cl is still descending at iteration 500,
+        # from a -1.03 window mean to -1.14, with the trend intact at the last
+        # sample. That is a mean that has not arrived, not a cycle sampled at
+        # an awkward phase.
+        #
+        # THE TRANSIENT GETS LONGER AS THE MESH GETS FINER, which is the
+        # general lesson: an iteration count calibrated on one mesh is not
+        # evidence about a finer one. Cd settles either way - its drift at the
+        # same stop is +0.33 % - so this is a Cl-only limit and it is Cl that
+        # the aero decisions turn on.
+        #
+        #   (was) CUT TO 500 (2026-08-22), and unlike the 2000 -> 750 cut this
+        #   one is measured on the mesh it applies to rather than on a smaller
+        #   one. On the 13.28M run, replaying the gate against a hypothetical
+        #   stop at iteration 500 gives drift Cd -0.10 % and Cl -3.05 % over
+        #   windows 101-300 and 301-500, both inside the 3.5 % bound - so the
+        #   run that actually happened would have passed 250 iterations
+        #   earlier. Forces plateau by ~200 and residuals by ~150; iterations
+        #   past that sample the limit cycle, they do not move the mean.
+        #
+        # 750 is not proven sufficient either - it is the previous value, it
+        # is what the 13.28M run had, and the 17.80M Cl may still be moving at
+        # it. Check the drift on the next run before trusting a Cl off this
+        # profile, and raise it again if the mean is still walking.
         #
         # WRITE_INTERVAL MUST DIVIDE MAX_ITERATIONS. It did not: 500 into 750
         # wrote fields at iteration 500 and then never again, because
@@ -256,10 +279,10 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # write every timestep to postProcessing/ - so nothing in the reported
         # numbers was wrong, only the fields you can look at.
         #
-        # 250 divides 500, so this writes at 250 and at 500. purgeWrite 2
-        # keeps both. If either number changes, keep the division exact.
+        # 250 divides 750, so this writes at 250, 500 and 750, and purgeWrite 2
+        # keeps the last two. If either number changes, keep the division exact.
         "solve": {
-            "max_iterations": 500,
+            "max_iterations": 750,
             "n_ranks": 40,
             "drift_tol": 0.035,
             # Never write only at the end on a run this long, and never on an
