@@ -154,7 +154,34 @@ mesh:
   # nothing, which is a real failure mode and the one worth catching.
   min_layer_coverage: 0.2
   n_layers: 6
-  first_layer_thickness: 4.0e-05
+  # 40 -> 25 um, 2026-08-22, TO BUY STACK HEADROOM RATHER THAN TO CHASE y+
+  # DIRECTLY. The note above explains why 40 um was chosen over the 20 um
+  # wall-profile default: it moved y+ from 0.46 to 0.93 and stopped spending
+  # resolution below y+ 1. That reasoning still holds, and this does not undo
+  # it - 25 um puts Body back at ~0.93 x 25/40 = 0.93, Wing ~0.84, which is
+  # still at the y+ ~1 the argument asks for and nowhere near the 0.46 it
+  # rejected.
+  #
+  # What it buys is margin. The measured failure on the 13.28M run was not
+  # that 40 um is too thick where it is honoured - Body and Wing came in at
+  # 1.49 and 1.35, comfortably inside the 0-5 band. It is that on the tyres
+  # and the suspension snappy could not fit the stack at all and thickened
+  # the first layer to compensate, which is what put four tyres at 4.6-5.1
+  # and failed the gate on Tire_FL. Six layers at 40 um want 450 um of a
+  # 487.5 um budget - 92% - and a curved tread near a contact patch does not
+  # leave 8% of slack anywhere.
+  #
+  # At 25 um the same six layers want 281 um, 58% of that budget, and 205 um
+  # (five layers, the clamp) against the 243.75 um the tyres now have after
+  # their refinement to 0.375 mm. Both leave real room. The stack still
+  # reaches into the log layer: 281 um is y+ ~13 at the body condition
+  # against ~21 before, which is the one thing this costs.
+  #
+  # y+ is roughly linear in this number wherever the stack is honoured, so
+  # expect Body ~0.93, Wing ~0.84, Chassis ~0.50, tyres ~2-3. If a later run
+  # shows the good patches drifting under y+ 0.5 with no tyre benefit, this
+  # is the number to put back up - not the gate bound.
+  first_layer_thickness: 2.5e-05
   expansion_ratio: 1.25
   # Raised from the 0.5 default, which is also snappy's own
   # maxFaceThicknessRatio - the schema renders this straight into it so the
@@ -279,6 +306,29 @@ domain:
     end: 5.0
     half_width: 0.35
     half_height: 0.25
+    # THE LEVEL 4 TIER WAS ADDED AND THEN TAKEN BACK OUT, 2026-08-22, AND THE
+    # ORIGINAL OBJECTION ABOVE IS WHY IT LOST THE TIE.
+    #
+    # It went in for a 20M target and is measured at +4.20M. Body going to
+    # 0.375 mm is measured at +9.46M. From a 13.28M base the two together are
+    # ~27M, so at a 20M budget they do not both fit and one has to go.
+    #
+    # Body wins on two counts. It is the surface actually under development,
+    # where this tier refines flow around a tube whose half_width and
+    # half_height are still the unmeasured first-pass estimate the note above
+    # warns about - so the tier's cells land in a rind around a boundary that
+    # may not be where the shear layers are, while Body's land on geometry
+    # that is definitely there. And the wake region sits 0 to 5 body lengths
+    # DOWNSTREAM: it shapes base pressure near the car, but most of its length
+    # is behind everything that carries load.
+    #
+    # The three tiers below stay. They are what the 13.28M run had, they hand
+    # off to the mid-field shell cleanly, and nothing measured says they are
+    # short. WHAT WOULD JUSTIFY THE LEVEL 4 TIER IS THE MEASUREMENT NOBODY HAS
+    # TAKEN YET: sample U in cross-sections at 0.5, 1, 2 and 3 body lengths
+    # behind the car, see where the velocity deficit actually sits against
+    # this tube, and size half_width/half_height to it. Refining around a
+    # guessed boundary is what this keeps declining to do.
     shells:
       - {distance: 0.50, level: 3}
       - {distance: 0.80, level: 2}
@@ -405,12 +455,53 @@ geometry:
     # (see schema.n_layers_for). First-layer thickness is 40 um either way,
     # so y+ at the wall does not move - what changes is that the stack stops
     # handing off to the background two layers early.
-    - {name: Body, role: body, refinement_min: 6, refinement_max: 6}
-    # Chassis keeps the range. At 447k faces its level-7 share costs roughly a
-    # quarter of what Body's did, and unlike the bodywork shell it is a mix of
-    # flat plate and small curved detail, which is the case a 6-7 range is
-    # actually for.
-    - {name: Chassis, role: body, refinement_min: 6, refinement_max: 7}
+    #
+    # ---------------------------------------------------------------------
+    # BODY IS NOW AT 7 (0.375 mm), 2026-08-22. THE PARAGRAPHS ABOVE ARE NOT
+    # WRONG - THEIR PREMISE EXPIRED. Every measurement in them still holds;
+    # what changed is the two things they were arguing from.
+    #
+    #   1. The budget. They were sizing to 15M, where Body's +9.46M does not
+    #      fit. The target is now 20M.
+    #   2. The priority. Body and Wing are the surfaces under development;
+    #      Chassis, the tyres and the suspension are aero dummies that do not
+    #      represent the real car. Spending the finest cells in the case on
+    #      geometry nobody is going to iterate is backwards, however cheap
+    #      those patches are per face.
+    #
+    # The cost is measured exactly, not estimated - car-15m-check against
+    # car-15m-b differ in Body's refinement_max and essentially nothing else
+    # (the mid-field reach moved 1.3 -> 1.8, worth 0.4%):
+    #
+    #   Body refinement_max 7 -> 20,259,975 cells
+    #   Body refinement_max 6 -> 10,801,197 cells
+    #                            +9,458,778 for this one line
+    #
+    # THE LAYER OBJECTION IS ANSWERED BY THE 25 um FIRST LAYER, not ignored.
+    # At 40 um the 0.375 mm cell fit only 4 of 6 layers, which is what the
+    # paragraph above objects to. At 25 um it fits 5, at 205 um of a 243.8 um
+    # budget. Body still gives up one layer and drops from 58% to 84% budget
+    # used, so expect its y+ to rise from ~0.9 toward ~1.3 - well inside the
+    # 0-5 band, and the cost of resolving the surface that is actually being
+    # designed.
+    - {name: Body, role: body, refinement_min: 7, refinement_max: 7}
+    # CHASSIS DROPS ITS RANGE AND GOES FLAT AT 0.75 mm, 2026-08-22. It kept a
+    # 6-7 range on the argument below, which was about geometry: a mix of flat
+    # plate and small curved detail is the case a range is for. That is still
+    # true and no longer decisive - Chassis is an aero dummy. Its 446k faces
+    # were the second-largest level-7 consumer in the case after the wing, and
+    # that is resolution spent on a shape that does not represent the car.
+    #
+    # It stays at 0.75 mm rather than going coarser because it still blocks
+    # and turns flow that reaches the Body and Wing downstream: the dummy's
+    # exact shape does not matter, but the wake it sheds onto the surfaces
+    # under development does.
+    #
+    #   (was) Chassis keeps the range. At 447k faces its level-7 share costs
+    #   roughly a quarter of what Body's did, and unlike the bodywork shell it
+    #   is a mix of flat plate and small curved detail, which is the case a
+    #   6-7 range is actually for.
+    - {name: Chassis, role: body, refinement_min: 6, refinement_max: 6}
     # A 42 mm chord on a 440 mm car: at the case-wide level the section stops
     # being an aerofoil. Pinned to level 7 (was 6), 2026-08-21, for the same
     # reason as Body/Chassis above and the same layer-budget cost - the whole
@@ -436,13 +527,49 @@ geometry:
     # low_y_plus exists to hold, and it is the y+ gate's own failure.
     #
     # The layer budget does not change: surface_cell_size_for() sizes the
-    # stack against refinement_MAX, which was already 7, so the 6 layers at
-    # 450 um were always budgeted against a 0.75 mm cell. What changes is that
-    # the whole tyre now gets that cell instead of half of it.
+    # stack against refinement_MAX, which was already at the fine level, so
+    # the 6 layers at 450 um were always budgeted against a 0.75 mm cell.
+    # What changed is that the whole tyre got that cell instead of half of it.
     #
-    # It also leaves the contact patch note below intact: cut_height 1 mm is
-    # sized against a 0.75 mm surface cell, which is now what the tread has
-    # everywhere rather than only where it curves.
+    # (The paragraph above says "level 7" and the values below now say 7 again
+    # for a different reason. When it was written the background was 96 mm and
+    # level 7 meant 0.75 mm; the 2026-08-21 re-basing to 48 mm made that same
+    # 0.75 mm level 6, which is what these lines carried until now. Read the
+    # metres, never the level numbers - tests/test_cell_sizes.py pins the
+    # metres for exactly this reason.)
+    #
+    # HELD AT 0.75 mm, AND THE TYRE y+ IS FIXED BY THE FIRST LAYER ALONE.
+    # 2026-08-22.
+    #
+    # These were briefly taken to 0.375 mm to fix the y+ gate failure on the
+    # 13.28M run (Tire_FL 5.07 against a 0-5 band, all four tyres 4.58-5.07).
+    # That was the wrong lever, and the layer table shows why it is not the
+    # surface cell at fault - it is the stack being squeezed:
+    #
+    #   patch     layers of target   thickness achieved   y+
+    #   Wing         3.61 / 4              91.5%          1.35
+    #   Body         4.54 / 6              84.3%          1.49
+    #   Tire_FL      3.10 / 6              64.9%          5.07
+    #
+    # Where the stack fits, snappy honours the 40 um first layer and y+ lands
+    # near 1. Where it does not fit, snappy thickens the first layer rather
+    # than dropping whole layers, and y+ goes to 5. The tyres wanted 450 um of
+    # stack in a 487.5 um budget - 92% of it - with nothing left over to
+    # absorb the medial-axis trouble a curved tread near a contact patch
+    # always causes.
+    #
+    # SO REFINING THEM MADE THE y+ PROBLEM HARDER, NOT EASIER. The budget
+    # follows refinement_max, so 0.375 mm halves it to 243.8 um and the stack
+    # has *less* room, not more: 205 um of 243.8 is 84% used. Staying at
+    # 0.75 mm with the 25 um first layer puts six layers in 281 um of 487.5 -
+    # 58% used, the largest margin any wall patch in the case has. The
+    # coarser tyre is the better-resolved wall, which is not the intuitive
+    # result and is worth remembering.
+    #
+    # It is also the right call on priority: the tyres are aero dummies and do
+    # not represent the real car, so the 1.5M cells refining them costs belong
+    # to Body instead. They stay at 0.75 mm rather than going coarser still
+    # because the wake they shed lands on the surfaces under development.
     # Three surfaces per corner sharing one wheel id. The id pairs them;
     # nothing parses the names. Axis, centre and rolling radius are measured
     # from these surfaces for whichever driving state is selected.

@@ -237,12 +237,34 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 2.4-3.6 % Cl standard deviation with margin while still catching a
         # solve that comes apart. Tighten drift_tol, never amplitude_tol, if
         # you want a stricter run - only the first one is about convergence.
+        # CUT TO 500 (2026-08-22), and unlike the 2000 -> 750 cut this one is
+        # measured on the mesh it applies to rather than on a smaller one. On
+        # the 13.28M run, replaying the gate against a hypothetical stop at
+        # iteration 500 gives drift Cd -0.10 % and Cl -3.05 % over windows
+        # 101-300 and 301-500, both inside the 3.5 % bound - so the run that
+        # actually happened would have passed 250 iterations earlier. Forces
+        # plateau by ~200 and residuals by ~150; iterations past that sample
+        # the limit cycle, they do not move the mean.
+        #
+        # WRITE_INTERVAL MUST DIVIDE MAX_ITERATIONS. It did not: 500 into 750
+        # wrote fields at iteration 500 and then never again, because
+        # simpleFoam does not force a write at endTime unless residualControl
+        # stops it first. The 13.28M run therefore finished cleanly with its
+        # newest field data 250 iterations stale, which is invisible until
+        # someone opens the case in ParaView and reads a coefficient off the
+        # wrong time. Coefficients were unaffected - the function objects
+        # write every timestep to postProcessing/ - so nothing in the reported
+        # numbers was wrong, only the fields you can look at.
+        #
+        # 250 divides 500, so this writes at 250 and at 500. purgeWrite 2
+        # keeps both. If either number changes, keep the division exact.
         "solve": {
-            "max_iterations": 750,
+            "max_iterations": 500,
             "n_ranks": 40,
             "drift_tol": 0.035,
-            # Never write only at the end on a run this long.
-            "write_interval": 500,
+            # Never write only at the end on a run this long, and never on an
+            # interval that does not divide max_iterations - see above.
+            "write_interval": 250,
         },
     },
 }

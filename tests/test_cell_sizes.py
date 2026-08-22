@@ -26,21 +26,42 @@ CASE = Path(__file__).resolve().parents[1] / "cases" / "car" / "config.yaml"
 
 # What each surface must resolve to, in metres, whatever the background is.
 #
-#   0.375 mm - Chassis (at refinement_max; its flat plate still holds at
-#             0.75 mm) and the wing, which is a curved aerofoil section
-#             everywhere and so carries the fine level everywhere.
-#   0.75 mm - Body, the tyres and the suspension links. Body is held at one
-#             level, not a 6-7 range: 93% of its area lands in the finest bin
-#             either way, so a range there is level 7 almost everywhere, and
-#             at 1.84M faces - 69% of every wall face in the case - that put
-#             the mesh at 20.26M against a 15M target. See the long note in
-#             cases/car/config.yaml. Also the coarsest that still puts 5
-#             cells across a 4 mm control arm.
+# THE TABLE NOW SPLITS ON WHAT IS UNDER DEVELOPMENT, NOT ON GEOMETRY.
+# Rebalanced 2026-08-22. Body and the wing are the surfaces being designed;
+# the chassis, tyres and suspension are aero dummies that do not represent the
+# real car. The finest cells in the case go to the first pair and nothing
+# else, whatever the second group's curvature would otherwise argue for.
+#
+#   0.375 mm - Body and Wing, and only these two. Body costs +9.46M cells at
+#             this size, measured directly (car-15m-check 20,259,975 against
+#             car-15m-b 10,801,197, differing in Body's refinement_max and
+#             essentially nothing else). That is the single largest line item
+#             in the mesh and it is spent deliberately.
+#   0.75 mm - Chassis, the tyres and the suspension links. Dummies, held here
+#             rather than coarser because the wake they shed lands on the two
+#             surfaces above. Also the coarsest that still puts 5 cells across
+#             a 4 mm control arm.
 #   1.5  mm - the MRF sleeves, which are cell zones rather than walls and only
 #             have to enclose the rim cleanly.
+#
+# NOTE THE TYRES ARE COARSER THAN BODY AND BETTER RESOLVED AT THE WALL, which
+# looks wrong and is not. The layer budget follows refinement_max, so the
+# 0.75 mm tyre gets 487.5 um to fit its stack in and uses 58% of it, while the
+# 0.375 mm Body gets 243.8 um and uses 84%. Margin is what makes snappy honour
+# the first-layer thickness instead of thickening it, and thickening it is
+# what put the tyres at y+ 5 on the 13.28M run.
+#
+# THESE NUMBERS WERE EDITED TO MATCH A DELIBERATE CHANGE, which the docstring
+# above forbids doing after a re-basing. This was not a re-basing. A re-basing
+# changes base_cell_size and every level together and must leave every metre
+# here untouched - a failure there means a patch was missed, and editing the
+# table would hide it. This was a decision about where resolution belongs, so
+# the designed sizes genuinely changed and the pins follow them. If you are
+# here because a re-basing broke this file, the exemption is not yours: go and
+# find the patch you missed.
 PRODUCTION_CELL_SIZE = {
-    "Body": 0.00075,
-    "Chassis": 0.000375,
+    "Body": 0.000375,
+    "Chassis": 0.00075,
     "Wing": 0.000375,
     "Tire_FL": 0.00075,
     "Tire_FR": 0.00075,
