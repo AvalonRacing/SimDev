@@ -261,13 +261,36 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         #   17.80M      -1.0150      -1.1453   -12.8 %
         #
         # So a Cl from this profile UNDERSTATES DOWNFORCE, by roughly a tenth
-        # on a fine mesh, and understates it more as the mesh grows. That is
-        # tolerable for what these runs are for - comparing meshes and designs
-        # against each other, where every run carries the same bias and the
-        # delta is what is read. It is not tolerable as an absolute: do not
-        # set a number from this profile against the StarCCM+ benchmark, and
-        # do not compare it with the 500- and 750-iteration results already in
-        # the run history.
+        # on a fine mesh, and understates it more as the mesh grows.
+        #
+        # THE "EVERY RUN CARRIES THE SAME BIAS SO THE DELTA SURVIVES" DEFENCE
+        # THAT USED TO SIT HERE IS FALSE, and the 17.80M/22.93M pair killed
+        # it. Those two meshes differ only in where the fine cells sit, and
+        # the Cl difference between them CHANGES SIGN with the stopping point:
+        #
+        #   read at iteration 250:   -7.1 %
+        #   read at iteration 500:  +13.7 %
+        #
+        # The bias is not common-mode, because each mesh has its own
+        # oscillation phase and its own transient length.
+        #
+        # WHAT ACTUALLY LIMITS THIS, measured by sweeping every stopping point
+        # past iteration 200 and taking the windowed mean at each: a Cl read
+        # this way moves 12.7-27.9 % depending only on where the run stopped,
+        # and widening the window to 150 still leaves 8-17 %. The oscillation
+        # is slow relative to the run, so averaging inside one run cannot
+        # remove it. THE ERROR BAR ON ANY Cl FROM THIS PROFILE IS ROUGHLY
+        # +/-15 %, and any mesh or design effect smaller than that is not
+        # resolvable here - including the ~10 % allocation effect the pair
+        # above was built to measure.
+        #
+        # Cd is far better behaved: the same sweep gives 3.6-5.1 %.
+        #
+        # So: use this profile to screen for LARGE effects and to keep the
+        # pipeline exercised. Do not set a number from it against the StarCCM+
+        # benchmark, do not compare it with the 500- and 750-iteration results
+        # already in the run history, and do not read a small delta off two
+        # runs at this length and believe it.
         #
         # FOR A TRUSTWORTHY ABSOLUTE Cl, raise max_iterations on that one run
         # and put drift_tol back. Do not widen a bound to make a gate green.

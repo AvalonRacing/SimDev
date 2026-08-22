@@ -44,12 +44,16 @@ CASE = Path(__file__).resolve().parents[1] / "cases" / "car" / "config.yaml"
 #   1.5  mm - the MRF sleeves, which are cell zones rather than walls and only
 #             have to enclose the rim cleanly.
 #
-# NOTE THE TYRES ARE COARSER THAN BODY AND BETTER RESOLVED AT THE WALL, which
-# looks wrong and is not. The layer budget follows refinement_max, so the
-# 0.75 mm tyre gets 487.5 um to fit its stack in and uses 58% of it, while the
-# 0.375 mm Body gets 243.8 um and uses 84%. Margin is what makes snappy honour
-# the first-layer thickness instead of thickening it, and thickening it is
-# what put the tyres at y+ 5 on the 13.28M run.
+# THE TYRES ARE COARSER THAN BODY AND THAT COSTS THEM y+, which is the
+# opposite of what this comment used to claim. The old argument was that a
+# 0.75 mm tyre uses only 58% of its layer budget against Body's 84% at
+# 0.375 mm, and that the margin would make snappy honour the first-layer
+# thickness. Measured across the two ~20M runs, y+ tracks the surface cell
+# instead - Body 0.64 at 0.375 mm against 1.34 at 0.75 mm, tyres 2.1 against
+# 4.8 - with the wing unchanged at 0.375 mm in both runs (1.14 vs 1.13) as
+# the control. snappy's extrusion is limited by faces across a curved feature,
+# not by the nominal budget. The tyres are held coarse on priority, not
+# because it helps them.
 #
 # THESE NUMBERS WERE EDITED TO MATCH A DELIBERATE CHANGE, which the docstring
 # above forbids doing after a re-basing. This was not a re-basing. A re-basing
