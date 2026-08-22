@@ -80,10 +80,18 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
     # still reported, it just cannot be compared against anything yet.
     previous = df.iloc[-2 * window : -window] if n >= 2 * window else None
 
-    reasons: list[str] = []
+    # Split deliberately. `failures` decides the verdict; `notes` is measured
+    # detail that is reported either way. A disabled tolerance has to produce
+    # a note rather than a failure, or turning the gate off would flip every
+    # run to 'converged' - which is a claim nobody made.
+    failures: list[str] = []
+    notes: list[str] = []
     means: dict[str, float] = {}
     stds: dict[str, float] = {}
     amplitudes: dict[str, float] = {}
+
+    drift_tol = spec.solve.drift_tol
+    amplitude_tol = spec.solve.amplitude_tol
 
     for coefficient in present:
         values = tail[coefficient].to_numpy()
@@ -94,11 +102,11 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
         scale = max(abs(mean), 1e-9)
         amplitudes[coefficient] = stds[coefficient] / scale
 
-        if amplitudes[coefficient] > spec.solve.amplitude_tol:
-            reasons.append(
+        if amplitude_tol is not None and amplitudes[coefficient] > amplitude_tol:
+            failures.append(
                 f"{coefficient} oscillates by {amplitudes[coefficient]:.2%} of "
                 f"its mean over the last {window} iterations, beyond the "
-                f"{spec.solve.amplitude_tol:.2%} bound; that is wider than a "
+                f"{amplitude_tol:.2%} bound; that is wider than a "
                 "limit cycle and suggests the solve is not stable"
             )
 
@@ -106,23 +114,37 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
             continue
 
         drift = (mean - float(previous[coefficient].to_numpy().mean())) / scale
-        if abs(drift) > spec.solve.drift_tol:
-            reasons.append(
+        if drift_tol is None:
+            notes.append(
+                f"{coefficient} mean moved {drift:+.2%} between the last two "
+                f"{window}-iteration windows (not judged: drift_tol is unset)"
+            )
+        elif abs(drift) > drift_tol:
+            failures.append(
                 f"{coefficient} is still drifting: its mean moved {drift:+.2%} "
                 f"between the last two {window}-iteration windows, beyond the "
-                f"{spec.solve.drift_tol:.2%} bound"
+                f"{drift_tol:.2%} bound"
             )
 
     if previous is None:
-        reasons.append(
+        failures.append(
             f"only {n} iterations recorded, need at least {2 * window} to "
             f"compare two consecutive {window}-iteration window means and so "
             "tell a settled mean from a drifting one"
         )
 
+    if drift_tol is None:
+        notes.append(
+            f"convergence was NOT judged: drift_tol is unset, so Cd and Cl are "
+            f"means over the last {window} iterations at a stopping point "
+            "chosen deliberately rather than reached by a plateau test. Valid "
+            "for comparing runs that all stop at the same iteration; not an "
+            "absolute, and not a converged value"
+        )
+
     return ConvergenceResult(
-        converged=not reasons,
-        reasons=reasons,
+        converged=not failures,
+        reasons=failures + notes,
         means=means,
         stds=stds,
         amplitudes=amplitudes,

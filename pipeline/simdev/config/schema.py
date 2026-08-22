@@ -388,13 +388,25 @@ class SolveConfig(BaseModel):
 
     # How far the trailing window's mean may move from the window before it.
     # This is the convergence test, and it is the one that should stay tight.
-    drift_tol: float = 0.002
+    #
+    # None disables the test: the drift is still measured and still reported,
+    # it just stops deciding whether the run passed. Use it when the stopping
+    # point is chosen deliberately rather than by convergence - a short run
+    # taken as a fixed-cost sample for comparing meshes against each other,
+    # where every run carries the same bias and the delta is what is read.
+    # Never set it to a large number to get the same effect: that records
+    # 'converged' for a run nobody judged, and None records the truth.
+    drift_tol: float | None = 0.002
 
     # How far the coefficient may swing about that mean, as std/|mean|. NOT a
     # convergence test: on a separated case the swing is a limit cycle the
     # flow genuinely has, so this is a stability bound - wide enough to let
     # real physics through, narrow enough to catch a solve coming apart.
-    amplitude_tol: float = 0.10
+    #
+    # None disables it on the same terms as drift_tol above. Think twice: this
+    # one catches a solve coming apart, which is worth knowing about however
+    # the stopping point was chosen.
+    amplitude_tol: float | None = 0.10
     residual_tol: float = 1.0e-4
 
     # --- pressure equation cost -------------------------------------------

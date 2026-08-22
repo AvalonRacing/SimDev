@@ -360,6 +360,62 @@ def test_two_whole_windows_are_needed_before_a_verdict() -> None:
     assert "Cd" in result.means  # still reported, never withheld
 
 
+# --- convergence not judged -----------------------------------------------
+#
+# drift_tol None is for a run whose stopping point is chosen rather than
+# reached: a fixed-cost sample used to compare meshes against each other,
+# where every run carries the same bias and only the delta is read. The drift
+# is still measured, because a number nobody looks at is worse than a number
+# that fails - it just stops deciding the verdict.
+
+# amplitude_tol is lifted alongside, and only because _forces() drifts Cl
+# through zero: std/|mean| is 11.5% there, so the stock 10% bound fires for a
+# reason that has nothing to do with drift and would mask what these check.
+# test_amplitude_still_gates_when_drift_is_not_judged covers the bound itself.
+UNJUDGED: dict = {
+    "solve": {"plateau_window": 50, "drift_tol": None, "amplitude_tol": 1.0}
+}
+JUDGED: dict = {
+    "solve": {"plateau_window": 50, "drift_tol": 0.002, "amplitude_tol": 1.0}
+}
+
+
+def test_unset_drift_tol_does_not_fail_a_drifting_run() -> None:
+    drifting = _forces(250, drift=1e-3)
+
+    assert check_convergence(drifting, _spec(JUDGED)).converged is False
+    assert check_convergence(drifting, _spec(UNJUDGED)).converged is True
+
+
+def test_unset_drift_tol_still_measures_and_reports_the_drift() -> None:
+    """The number has to survive, or turning the gate off hides the problem."""
+    result = check_convergence(_forces(250, drift=1e-3), _spec(UNJUDGED))
+
+    assert any("not judged" in r for r in result.reasons)
+    assert any("NOT judged" in r for r in result.reasons)
+    # the measured drift is still in there, with a sign and a magnitude
+    assert any("Cd mean moved" in r for r in result.reasons)
+
+
+def test_unset_drift_tol_reports_the_mean_over_the_window() -> None:
+    spec = _spec(UNJUDGED)
+    result = check_convergence(_forces(250), spec)
+
+    assert result.window == (200, 250)
+    assert result.means["Cd"] == pytest.approx(0.35, abs=1e-3)
+
+
+def test_amplitude_still_gates_when_drift_is_not_judged() -> None:
+    """Turning off the convergence test must not turn off the stability one."""
+    spec = _spec(
+        {"solve": {"plateau_window": 180, "drift_tol": None, "amplitude_tol": 0.01}}
+    )
+    result = check_convergence(_limit_cycle(1200), spec)
+
+    assert result.converged is False
+    assert any("oscillates" in r for r in result.reasons)
+
+
 def test_y_plus_gate_passes_inside_the_band() -> None:
     spec = _spec()
     df = pd.DataFrame(

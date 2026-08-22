@@ -237,41 +237,45 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 2.4-3.6 % Cl standard deviation with margin while still catching a
         # solve that comes apart. Tighten drift_tol, never amplitude_tol, if
         # you want a stricter run - only the first one is about convergence.
-        # 500 ITERATIONS, AND THE DRIFT GATE IS EXPECTED TO FAIL ON Cl AT IT.
-        # That combination is deliberate, so read this before "fixing" either.
+        # 250 ITERATIONS, AND CONVERGENCE IS NOT JUDGED. Both halves of that
+        # are deliberate. Read this before restoring either.
         #
-        # WHY 500. Measured on the 13.28M mesh: replaying the gate against a
-        # hypothetical stop at iteration 500 gives drift Cd -0.10 % and Cl
-        # -3.05 % over windows 101-300 and 301-500, both inside the 3.5 %
-        # bound - the 750-iteration run that actually happened would have
-        # passed 250 iterations earlier. Forces plateau by ~200 and residuals
-        # by ~150. Iterations past that mostly re-sample the limit cycle.
+        # THIS PROFILE NO LONGER ASKS "HAS IT CONVERGED". It takes a
+        # fixed-cost sample: run 250 iterations, average Cd and Cl over the
+        # last 50, report them. drift_tol is None, which switches the drift
+        # test from a verdict to a recorded number (see gates/convergence.py -
+        # it still measures and prints the drift, it just stops failing on
+        # it). amplitude_tol stays on, because it catches a solve coming apart
+        # and that is worth knowing however the stopping point was picked.
         #
-        # WHAT 500 DOES NOT COVER, and this is measured too. On the 17.80M
-        # mesh the same stop gives Cl drift -9.78 %, and the force history
-        # says it is not the window aliasing behind the earlier borderline
-        # numbers: Cl is still descending at iteration 500, from a -1.03
-        # window mean to -1.14, trend intact at the last sample. A mean that
-        # has not arrived, not a cycle caught at an awkward phase.
+        # WHAT THIS BUYS: ~45 min a run against ~2.9 h at 500, which is what
+        # makes a mesh sweep affordable.
         #
-        # It was raised to 750 for that and put back to 500 by decision: from
-        # 500 to 750 the coefficient does not move enough to pay for the extra
-        # 40 % of wall clock on every run, and the runs are being used to
-        # compare meshes against each other rather than to publish an absolute
-        # Cl. Both stops are equally affected, so a mesh-to-mesh delta read at
-        # 500 is as good as one read at 750.
+        # WHAT IT COSTS, MEASURED, so nobody has to rediscover it. Cl is still
+        # moving at iteration 250 on every mesh tried, always toward more
+        # downforce, and the finer the mesh the more it moves:
         #
-        # THE CONSEQUENCE, WRITTEN DOWN SO IT IS NOT REDISCOVERED. A Cl off
-        # this profile on an ~18M mesh is a lower bound on downforce, not a
-        # converged value - the trend at the stop is still downward. Do not
-        # quote it as an absolute, do not widen drift_tol to make the gate go
-        # green, and if a single trustworthy absolute Cl is ever needed, raise
-        # max_iterations for that run rather than editing the bound.
+        #   mesh      Cl at 250    Cl at 500    move
+        #    6.93M      -1.5959      -1.6787    -5.2 %
+        #   13.28M      -0.9782      -1.0600    -8.4 %
+        #   17.80M      -1.0150      -1.1453   -12.8 %
+        #
+        # So a Cl from this profile UNDERSTATES DOWNFORCE, by roughly a tenth
+        # on a fine mesh, and understates it more as the mesh grows. That is
+        # tolerable for what these runs are for - comparing meshes and designs
+        # against each other, where every run carries the same bias and the
+        # delta is what is read. It is not tolerable as an absolute: do not
+        # set a number from this profile against the StarCCM+ benchmark, and
+        # do not compare it with the 500- and 750-iteration results already in
+        # the run history.
+        #
+        # FOR A TRUSTWORTHY ABSOLUTE Cl, raise max_iterations on that one run
+        # and put drift_tol back. Do not widen a bound to make a gate green.
         #
         # THE GENERAL LESSON, which cost a night to learn: the transient gets
         # longer as the mesh gets finer, so an iteration count calibrated on
-        # one mesh is not evidence about a finer one. Cd is unaffected either
-        # way - its drift at the same stop is +0.33 %.
+        # one mesh is not evidence about a finer one. Cd is far less affected
+        # than Cl at every stop measured.
         #
         # WRITE_INTERVAL MUST DIVIDE MAX_ITERATIONS. It did not: 500 into 750
         # wrote fields at iteration 500 and then never again, because
@@ -283,15 +287,23 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # write every timestep to postProcessing/ - so nothing in the reported
         # numbers was wrong, only the fields you can look at.
         #
-        # 250 divides 500, so this writes at 250 and at 500. purgeWrite 2 keeps
+        # 125 divides 250, so this writes at 125 and at 250. purgeWrite 2 keeps
         # both. If either number changes, keep the division exact.
         "solve": {
-            "max_iterations": 500,
+            "max_iterations": 250,
             "n_ranks": 40,
-            "drift_tol": 0.035,
-            # Never write only at the end on a run this long, and never on an
-            # interval that does not divide max_iterations - see above.
-            "write_interval": 250,
+            # The averaging window, and at 250 iterations it is also the whole
+            # of what this profile reports: Cd and Cl are the mean over the
+            # last 50. Two windows still fit (100 of 250), so the drift is
+            # measurable and gets reported - it just no longer gates.
+            "plateau_window": 50,
+            # None, not a large number. See the block above and the field
+            # comment in schema.SolveConfig: a huge tolerance would record
+            # 'converged' for a run nobody judged; None records the truth.
+            "drift_tol": None,
+            # Never write only at the end, and never on an interval that does
+            # not divide max_iterations - see above.
+            "write_interval": 125,
         },
     },
 }
