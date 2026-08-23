@@ -64,16 +64,17 @@ def validate(spec: CaseSpec) -> list[str]:
             p.role is PatchRole.MRF_ZONE for p in spec.geometry.patches
         ):
             warnings.append(
-                "cornering gives each wheel's MRF zone its own spin rate, "
-                "not composed with the corner frame's rotation: a cell "
-                "carries one frame rotation and cannot be going round the "
-                "corner and round the wheel at once, which is a screw "
-                "motion. What the sleeve drops is the corner's share of the "
-                "Coriolis/centrifugal source inside it, and there the rate "
-                "comparison holds - 2*Omega x u against the same u makes the "
-                "corner a ~1% term against the spin. The tyre walls keep the "
-                "full spin-plus-carry velocity: they stay non-rotating "
-                "patches in every zone, so MRF never overwrites them"
+                "cornering makes no MRF zone out of the wheel sleeves: the "
+                "corner frame already covers every cell, and two adjacent "
+                "MRF zones subtract each other's frame flux on the faces "
+                "they share, which is every face of a sleeve boundary. "
+                "Measured on a duct at 1 m/s, splitting one zone into two "
+                "adjacent halves carrying the SAME frame moved the solution "
+                "by 0.44 m/s. The sleeves stay in the mesh as refinement "
+                "regions, and the wheels still turn - the tyre walls carry "
+                "the full spin-plus-carry velocity through their coded "
+                "condition. What is lost is rim pumping, which needs a "
+                "sliding mesh rather than a second frame"
             )
         if spec.ground.motion is GroundMotion.MOVING:
             warnings.append(

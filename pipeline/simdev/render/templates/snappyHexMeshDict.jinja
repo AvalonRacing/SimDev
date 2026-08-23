@@ -15,6 +15,17 @@ geometry
         file            "{{ patch.file }}";
     }
 {% endfor %}
+{% for volume in refinement_volumes %}
+    // A closed volume used ONLY to refine the cells inside it. Deliberately
+    // absent from refinementSurfaces, like the two distance surfaces below:
+    // it creates no patch, is never snapped to, and never enters force
+    // integration. Putting it there without a cellZone would make it a wall.
+    {{ volume.name }}
+    {
+        type            triSurfaceMesh;
+        file            "{{ volume.file }}";
+    }
+{% endfor %}
 {% for box in refinement_boxes %}
     {{ box.name }}
     {
@@ -108,6 +119,14 @@ castellatedMeshControls
 
     refinementRegions
     {
+{% for volume in refinement_volumes %}
+        {{ volume.name }}
+        {
+            mode            inside;
+            // For 'inside' the distance is ignored; only the level applies.
+            levels          ((1.0 {{ volume.level }}));
+        }
+{% endfor %}
 {% for box in refinement_boxes %}
         {{ box.name }}
         {

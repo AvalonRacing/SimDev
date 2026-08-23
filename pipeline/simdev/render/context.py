@@ -512,6 +512,21 @@ def build_bcs(
     return bcs
 
 
+def sleeves_are_cell_zones(frame: CornerFrame | None) -> bool:
+    """Whether the wheel sleeves become cellZones, and so MRF zones, at all.
+
+    True only for a straight-line case. It is asked in two places that have
+    to agree - mrf_zones() below, which writes constant/MRFProperties, and
+    build_context(), which decides whether snappy makes the sleeve a cellZone
+    surface or a plain refinement region - and disagreeing is silent in both
+    directions. A zone in the dictionary that the mesh does not have aborts
+    the solver on startup; a zone in the mesh that the dictionary does not
+    name leaves those cells inertial in a rotating domain, and nothing says
+    so. See mrf_zones() for why cornering has none.
+    """
+    return frame is None
+
+
 def mrf_zones(
     spec: CaseSpec,
     domain: Domain,
@@ -522,41 +537,58 @@ def mrf_zones(
 
     Straight-line: one zone per wheel, covering the rim and spokes, turning
     about that wheel's own measured axis. This is what makes a wheel pump air
-    rather than merely present a moving skin.
+    rather than merely present a moving skin. The four sleeves are metres
+    apart in a domain with no other cellZone in it, so every face on a sleeve
+    boundary is shared with unzoned fluid and belongs to exactly one frame.
 
-    Cornering: the background turns about the corner, and each wheel zone
-    ALSO turns about its own axis at its own spin rate (2026-08-21) - not
-    composed with the corner's rotation, just replacing "same as the
-    background" with "the wheel's own speeds[patch.wheel] entry", the same
-    values the straight-line branch below already uses. That is an
-    approximation, not the exact compound motion (a cell going round the
-    corner and round the wheel at once is a screw motion, and MRF's
-    Coriolis/centrifugal source term for one zone only expresses one
-    rotation), but a deliberately accepted one: what the wheel zone drops is
-    the corner's contribution to the *source term* inside the sleeve, and
-    there the rate comparison is the honest one, because Coriolis is 2*Omega
-    x u against the same u - 3.75 rad/s against 381 rad/s is a 1% term.
+    Cornering: ONE zone, `all`, over the whole domain - and no wheel zones,
+    which is why the sleeves are not cellZone surfaces at all in this mode
+    (see sleeves_are_cell_zones and build_context).
 
-    What that argument does NOT license is dropping the corner from the
-    wheel's *wall velocity*, and MRF will do exactly that if you let it.
-    MRFZone::correctBoundaryVelocity overwrites every included patch face
+    ADJACENT MRF ZONES DOUBLE-COUNT THE FRAME FLUX ON THE FACES THEY SHARE,
+    AND IN A CORNERING CASE EVERY SLEEVE FACE IS SUCH A FACE. `all` covers
+    the background and snappy moves the sleeve cells out of it into their own
+    zone - polyTopoChange carries one cellZone label per cell
+    (polyTopoChange.H:211), so the assignment is a move, not a copy - which
+    leaves the two zones sharing the whole sleeve boundary. MRFZone then
+    marks a face as belonging to a zone when EITHER of its cells is in that
+    zone (MRFZone.C:80-87), so those faces are internal faces of both, and
+    MRFZoneList::makeRelative simply loops the zones subtracting each frame's
+    Omega ^ (Cf - origin) in turn (MRFZoneList.C:249-254). The flux entering
+    the sleeve is therefore not the flux leaving the fluid around it.
+
+    MEASURED, BECAUSE THE OBVIOUS OBJECTION IS THAT TWO ZONES DESCRIBING THE
+    SAME MOTION SHOULD BEHAVE LIKE ONE. A 4 x 4 x 1 duct at 1 m/s in a frame
+    turning at 1 rad/s, meshed and run twice with everything identical except
+    whether the cells are declared as one cellZone or as two adjacent halves
+    carrying the SAME origin, axis and omega:
+
+        max |dU| = 0.437 m/s on a 1 m/s inlet, mean 0.072 m/s
+
+    Same mesh, same frame, same boundary conditions; the entire difference is
+    the interface. So this is not a compound-motion approximation that could
+    be traded off against the ~1% Coriolis argument - it is a discretisation
+    error at the sleeve boundary, and it is there whether the wheel zone
+    carries the wheel's spin rate or the corner's own.
+
+    WHAT CORNERING GIVES UP IS RIM PUMPING, WHICH IS THE LIMITATION THE
+    HANDBOOK ALREADY NAMED. A cell carries one frame rotation and cannot be
+    going round the corner and round the wheel at once, so the sleeve was
+    never going to express the real motion; the tyre and rim walls still
+    carry the full spin-plus-carry velocity through _tyre_bc's coded
+    condition, so the wheels turn, they just do not drive the air inside the
+    rim. Doing it properly needs a sliding mesh, not a second MRF zone.
+
+    The tyres stay on the corner frame's non-rotating patch list either way.
+    MRFZone::correctBoundaryVelocity overwrites every *included* patch face
     with Omega ^ (Cf - origin) on each SIMPLE iteration, discarding whatever
-    the boundary condition computed. Rates are the wrong units for that
-    comparison: the corner acts on a 4 m lever and the spin on a 0.033 m one,
-    so the two linear speeds are 15.0 and 12.6 m/s - the same order, both of
-    them essentially the road speed, as they must be for a rolling wheel.
-    Worse, it would apply only to the tyre faces that happen to border a
-    sleeve cell, leaving the rest of the same patch on the full absolute
-    velocity from _tyre_bc and putting a 15 m/s step across a cellZone
-    boundary that has no physical meaning.
-
-    So the wheel zones carry the same non-rotating patch list as the corner
-    frame. Every tyre face is then an excluded face, correctBoundaryVelocity
-    leaves _tyre_bc's coded spin-plus-carry value alone wherever it sits, and
-    the wheel's own omega is left to do the one job it was added for: driving
-    the Coriolis/centrifugal source that makes the rim pump air.
+    the boundary condition computed, and the rate comparison is the wrong
+    one for that: the corner acts on a 4 m lever and the spin on a 0.033 m
+    one, so the two linear speeds are 15.0 and 12.6 m/s - the same order,
+    both of them essentially the road speed, as they must be for a rolling
+    wheel. Excluding the tyres leaves _tyre_bc's value alone.
     """
-    if frame is not None:
+    if not sleeves_are_cell_zones(frame):
         excluded = [
             p.name
             for p in spec.geometry.patches
@@ -564,7 +596,7 @@ def mrf_zones(
             or (p.wheel is not None and traits(p.role).is_wall)
         ]
 
-        zones = [
+        return [
             {
                 "name": "cornerFrame",
                 "cell_zone": CORNER_ZONE,
@@ -574,21 +606,6 @@ def mrf_zones(
                 "non_rotating_patches": excluded,
             }
         ]
-        for patch in spec.geometry.patches:
-            if patch.role is not PatchRole.MRF_ZONE or patch.wheel not in speeds:
-                continue
-            entry = speeds[patch.wheel]
-            zones.append(
-                {
-                    "name": f"cornerFrame_{patch.name}",
-                    "cell_zone": patch.name,
-                    "origin": entry["wheel"].origin,
-                    "axis": entry["wheel"].axis,
-                    "omega": entry["omega"],
-                    "non_rotating_patches": excluded,
-                }
-            )
-        return zones
 
     zones: list[dict[str, Any]] = []
     for patch in spec.geometry.patches:
@@ -623,6 +640,20 @@ def build_context(
     wall_patches = [
         p.name for p in spec.geometry.patches if traits(p.role).is_wall
     ]
+    # A sleeve that is not a cellZone must not be a refinementSurface either.
+    # A refinementSurface without a cellZone is a WALL: snappy would snap to
+    # it, give it a boundary patch nothing writes a condition for, and put a
+    # closed shell of rubber-thin wall inside each wheel. So in cornering the
+    # sleeves leave refinementSurfaces entirely and come back below as
+    # refinement regions, which refine the same cells and create no surface.
+    cell_zones = sleeves_are_cell_zones(frame)
+    meshed_as_surface = [
+        p
+        for p in spec.geometry.patches
+        if p.name in geometry_files
+        and (cell_zones or p.role is not PatchRole.MRF_ZONE)
+    ]
+
     refined_patches = [
         {
             "name": p.name,
@@ -637,8 +668,23 @@ def build_context(
             ),
             "is_cell_zone": p.role is PatchRole.MRF_ZONE,
         }
+        for p in meshed_as_surface
+    ]
+
+    # Closed volumes that refine the cells they contain and nothing else -
+    # no patch, no faceZone, no cellZone. The wheel sleeves in cornering,
+    # where they cannot be MRF zones (see mrf_zones) but the air inside the
+    # rim still wants the resolution their old surface refinement gave it.
+    refinement_volumes = [
+        {
+            "name": p.name,
+            "file": Path(geometry_files[p.name]).name,
+            "level": spec.patch_refinement(p)[1],
+        }
         for p in spec.geometry.patches
-        if p.name in geometry_files
+        if p.role is PatchRole.MRF_ZONE
+        and not cell_zones
+        and p.name in geometry_files
     ]
 
     # The initial internal field. Prescribing a freestream everywhere in a
@@ -657,6 +703,7 @@ def build_context(
         "domain": domain,
         "geometry_files": {n: Path(p).name for n, p in geometry_files.items()},
         "refined_patches": refined_patches,
+        "refinement_volumes": refinement_volumes,
         "refinement_boxes": refinement_boxes(spec, domain),
         "refinement_shells": refinement_shells(spec, domain),
         # The combined vehicle surface the shells measure distance from. Named

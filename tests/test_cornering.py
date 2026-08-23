@@ -349,47 +349,20 @@ def test_locked_wheels_fall_back_to_a_plain_wall() -> None:
 # --- MRF zones ------------------------------------------------------------
 
 
-def test_cornering_turns_the_background_at_the_corner_rate_and_wheels_at_their_own() -> None:
-    """No cell may be left inertial inside a car going round a corner.
+def test_cornering_is_one_frame_over_every_cell_and_no_wheel_zones() -> None:
+    """Two adjacent MRF zones subtract each other's frame flux where they meet.
 
-    snappyHexMesh moves the wheel-sleeve cells out of the background zone
-    when it creates their own, so covering only 'all' would leave those cells
-    with no frame rotation at all - closed by giving the wheel zone its own
-    rotation instead, rather than the background's (2026-08-21): the wheel's
-    own spin is a far better approximation of what that cell is actually
-    doing than the corner rate is.
-    """
-    resolved = spec()
-    domain = sector()
-    frame = corner_frame(resolved, domain)
-    wheel = _wheel([0.15, -0.09, 0.033])
-    speeds = wheel_speeds(resolved, {"FL": wheel}, frame)
+    The corner frame owns 'all', which after snappy is every cell that is not
+    in some other zone. A wheel sleeve zone therefore shares its entire
+    boundary with 'all', and MRFZone counts a face as its own when EITHER of
+    the face's cells is in the zone - so those faces are internal faces of
+    both zones and MRFZoneList::makeRelative subtracts both frames from them.
 
-    zones = mrf_zones(resolved, domain, speeds, frame)
-
-    assert [z["cell_zone"] for z in zones] == ["all", "MRF_FL"]
-    background, wheel_zone = zones
-
-    assert background["axis"] == (0.0, 0.0, 1.0)
-    assert background["origin"] == frame.origin
-    assert background["omega"] == pytest.approx(frame.omega)
-
-    assert wheel_zone["origin"] == wheel.origin
-    assert wheel_zone["axis"] == wheel.axis
-    assert wheel_zone["omega"] == pytest.approx(speeds["FL"]["omega"])
-    assert wheel_zone["omega"] != pytest.approx(frame.omega)
-
-
-def test_the_road_and_the_tyre_are_excluded_from_the_rotating_frame() -> None:
-    """Both carry absolute velocities; the car body does not.
-
-    Asserted on EVERY cornering zone, not just the corner frame. A tyre face
-    is an included face of whichever zone owns the cell behind it, and
-    MRFZone::correctBoundaryVelocity overwrites included faces with the
-    zone's own Omega ^ (Cf - origin) every SIMPLE iteration. Leave the wheel
-    sleeves off this list and the tyre faces that border a sleeve cell lose
-    _tyre_bc's corner-carry term while the rest of the same patch keeps it -
-    a step of |omega_corner x r| ~ 15 m/s across a cellZone boundary.
+    Measured on a duct at 1 m/s: one cellZone against two adjacent halves
+    carrying the SAME origin, axis and omega moved the solution by 0.44 m/s.
+    So this is not a compound-motion trade-off that a small wheel-vs-corner
+    rate ratio could buy back - a second zone is wrong at the interface
+    whatever rate it carries.
     """
     resolved = spec()
     domain = sector()
@@ -397,7 +370,29 @@ def test_the_road_and_the_tyre_are_excluded_from_the_rotating_frame() -> None:
     speeds = wheel_speeds(resolved, {"FL": _wheel([0.15, -0.09, 0.033])}, frame)
 
     zones = mrf_zones(resolved, domain, speeds, frame)
-    assert len(zones) > 1, "expected the wheel sleeves alongside the corner frame"
+
+    assert [z["cell_zone"] for z in zones] == ["all"]
+    background = zones[0]
+    assert background["axis"] == (0.0, 0.0, 1.0)
+    assert background["origin"] == frame.origin
+    assert background["omega"] == pytest.approx(frame.omega)
+
+
+def test_the_road_and_the_tyre_are_excluded_from_the_rotating_frame() -> None:
+    """Both carry absolute velocities; the car body does not.
+
+    A tyre face is an included face of the zone that owns the cell behind it,
+    and MRFZone::correctBoundaryVelocity overwrites included faces with the
+    zone's own Omega ^ (Cf - origin) every SIMPLE iteration - discarding
+    _tyre_bc's spin-plus-carry value, which is the whole wheel model. The
+    corner acts on a 4 m lever, so that is a ~15 m/s overwrite, not a detail.
+    """
+    resolved = spec()
+    domain = sector()
+    frame = corner_frame(resolved, domain)
+    speeds = wheel_speeds(resolved, {"FL": _wheel([0.15, -0.09, 0.033])}, frame)
+
+    zones = mrf_zones(resolved, domain, speeds, frame)
 
     for zone in zones:
         excluded = zone["non_rotating_patches"]
@@ -459,9 +454,16 @@ def test_cornering_in_a_box_is_rejected() -> None:
         validate(CaseSpec.model_validate(case))
 
 
-def test_cornering_warns_that_the_corner_rate_is_dropped_from_wheel_zones() -> None:
+def test_cornering_warns_that_rim_pumping_is_dropped_with_the_wheel_zones() -> None:
+    """The limitation has to reach the run log, not just the source comment.
+
+    Declaring mrfZone sleeves on a cornering case looks like it buys rim
+    pumping and does not: the sleeves are meshed and refined but carry no
+    frame of their own, because a second MRF zone adjacent to the corner
+    frame is wrong at the faces they share.
+    """
     warnings = validate(spec())
-    assert any("own spin rate" in w for w in warnings)
+    assert any("rim pumping" in w for w in warnings)
 
 
 def test_a_wheel_id_on_a_non_rotating_role_is_rejected() -> None:

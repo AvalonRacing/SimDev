@@ -226,6 +226,58 @@ def test_mrf_zones_become_cell_zones_and_carry_no_boundary_condition(car) -> Non
         assert f"\n    MRF_{wheel}\n" not in field
 
 
+def test_cornering_meshes_the_sleeves_as_refinement_regions_not_cell_zones(car) -> None:
+    """The corner frame already owns every cell, so a sleeve zone is a second
+    MRF zone adjacent to it - and adjacent zones subtract each other's frame
+    flux on every face they share. See render/context.py::mrf_zones.
+
+    Three things have to be true together, and each fails differently:
+
+    - no cellZone in snappyHexMeshDict, or the mesh grows a zone with no
+      MRFProperties entry and those cells are left inertial in silence;
+    - no cellZone in MRFProperties, or the solver aborts looking for a zone
+      the mesh does not have;
+    - and NOT a refinementSurface either. A refinementSurface without a
+      cellZone is a wall: snappy would snap to the sleeve, plug the inside of
+      each wheel with it, and create a patch that nothing writes a boundary
+      condition for. It stays a refinement region, which refines the same
+      cells and creates no surface at all.
+    """
+    result = car(
+        "corner_sleeves",
+        **{
+            "physics.mode": "cornering",
+            "physics.corner_radius": 3.0,
+            "domain.kind": "annulus",
+            "ground.motion": "static",
+        },
+    )
+    snappy = (result.run_dir / "system" / "snappyHexMeshDict").read_text(encoding="utf-8")
+    properties = (result.run_dir / "constant" / "MRFProperties").read_text(
+        encoding="utf-8"
+    )
+    field = (result.run_dir / "0" / "U").read_text(encoding="utf-8")
+
+    # Anchored on the dictionary keys at their own indent: the word
+    # "refinementSurfaces" also appears in the template's comments, and
+    # splitting on the bare word lands this slice in the geometry block.
+    surfaces = snappy.split("\n    refinementSurfaces\n")[1].split(
+        "\n    refinementRegions\n"
+    )[0]
+    regions = snappy.split("\n    refinementRegions\n")[1]
+
+    assert properties.count("cellZone") == 1
+    assert "cellZone        all;" in properties
+    for wheel in CORNERS:
+        assert f"MRF_{wheel}" not in surfaces
+        assert f"cellZone        MRF_{wheel};" not in snappy
+        assert f"faceZone        MRF_{wheel};" not in snappy
+        # Still refined, still not a patch.
+        assert f"MRF_{wheel}" in regions
+        assert f'file            "MRF_{wheel}.stl";' in snappy
+        assert f"\n    MRF_{wheel}\n" not in field
+
+
 def test_each_wheel_gets_its_own_mrf_entry(car) -> None:
     result = car()
     properties = (result.run_dir / "constant" / "MRFProperties").read_text(

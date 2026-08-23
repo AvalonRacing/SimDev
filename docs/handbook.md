@@ -1017,10 +1017,40 @@ pumping; cornering gets one frame over everything and drives the tyre surface
 through its boundary condition instead. What is lost in cornering is rim
 pumping, not wheel rotation, and the validator says so.
 
-One subtlety worth keeping: snappy takes the wheel-zone cells *out* of `all`
-when it creates their zones, so cornering also emits a corner-frame entry for
-each wheel zone. Without it those few hundred cells would be the only inertial
-ones in a car going round a corner.
+**In cornering the sleeves are not cell zones at all**, and the reason is
+sharper than the screw-motion argument above. `all` is every cell that is not
+in some other zone — `polyTopoChange` carries one cellZone label per cell
+(`polyTopoChange.H:211`), so snappy's zone assignment is a *move*, not a copy,
+and a wheel zone therefore shares its entire boundary with the corner frame.
+`MRFZone` counts a face as its own when **either** of the face's cells is in
+the zone (`MRFZone.C:80-87`), so every one of those faces is an internal face
+of *both* zones, and `MRFZoneList::makeRelative` just loops the zones
+subtracting each frame's `Ω × r` in turn (`MRFZoneList.C:249-254`). The flux
+entering the sleeve is not the flux leaving the fluid around it.
+
+Measured, because the obvious objection is that two zones describing the same
+motion should behave like one. A 4×4×1 duct at 1 m/s in a frame turning at
+1 rad/s, run twice with everything identical except whether the cells are one
+cellZone or two adjacent halves carrying the **same** origin, axis and omega:
+
+| | max \|ΔU\| | mean \|ΔU\| |
+|---|---|---|
+| one zone vs two adjacent zones, same frame | 0.437 m/s | 0.072 m/s |
+
+On a 1 m/s inlet. So a second zone is wrong at the interface whatever rate it
+carries — this is not an approximation that a favourable Coriolis rate ratio
+could buy back. Cornering emits one entry, `cornerFrame` on `all`, and the
+sleeves stay in the mesh as **refinement regions** (`mode inside`), which
+refine the same cells and create no surface, no patch and no zone.
+
+They must not become `refinementSurfaces` either. A refinement surface without
+a cellZone is a *wall*: snappy would snap to the sleeve and plug the inside of
+each wheel with a patch nothing writes a boundary condition for.
+
+An earlier version of this section said cornering emits a corner-frame entry
+per wheel zone so those cells are not left inertial. That fixed the inertial
+cells and left the interface error in place; the fix is to not create the
+zones.
 
 **Do not let MRF surfaces enter force integration.** They cannot —
 `ROLE_TRAITS[MRF_ZONE].in_forces` is `False` — and this is the exact bug the old
@@ -1210,7 +1240,7 @@ compile; `simpleFoam` runs and writes coefficients.
 | Curved **far**-wake refinement for cornering | `domain.refinement_shells` now cover the near field and the flow through the car, and they follow any attitude — but they follow the *car*, not the *path*, so past the outermost shell the cornering far wake is still at background size. `refinement_regions` are axis-aligned boxes and a cornering wake leaves them. The validator says so on every run |
 | Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
 | Full plane-cut image suite | `post` exists with a minimal set |
-| Rim pumping while cornering | Wheel MRF zones are meshed but carry the corner frame; needs a sliding mesh to do properly |
+| Rim pumping while cornering | The sleeves are meshed and refined but carry no frame of their own — a second MRF zone adjacent to the corner frame double-subtracts the frame flux on every face they share. Needs a sliding mesh to do properly |
 | Transition model | `turbulence_model` is config-selected |
 | Parametric sweeps | Per-run records aggregate on read; `--set` overrides one field without copying the case |
 
