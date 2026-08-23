@@ -323,6 +323,34 @@ def _write_wake_surface(
     )
 
 
+def _write_paraview_stub(run_dir: Path) -> Path:
+    """An empty `case.foam` so the run opens in ParaView without ceremony.
+
+    ParaView's OpenFOAM reader keys off a file with the `.foam` suffix and
+    reads the case from the directory containing it; the file's contents are
+    never read, which is why this is empty rather than templated. Written at
+    prepare time, before there is a mesh, so a run can be opened and watched
+    while it is still meshing or solving.
+
+    THE RUN IS DECOMPOSED, so on opening this set the reader's `Case Type` to
+    `Decomposed Case`. It defaults to `Reconstructed Case`, and a parallel run
+    has no reconstructed data unless somebody has made some: the fields live
+    in processor*/ and the top level holds only 0/.
+
+    Reconstructing is possible but is not free and is not automatic.
+    `snappyHexMesh -overwrite -parallel` replaces the polyMesh that
+    decomposePar wrote the proc addressing beside, so `reconstructPar` fails
+    on a missing `pointProcAddressing` until `reconstructParMesh -constant`
+    has rebuilt it. Both are single-threaded; on the 20.88M cell car that is
+    about ten minutes and takes the run directory from 6.3 to 11 GB. Worth it
+    to hand someone a single self-contained case, not worth it to look at a
+    result - the decomposed read shows the same fields for neither cost.
+    """
+    stub = Path(run_dir) / "case.foam"
+    stub.touch()
+    return stub
+
+
 def fit_mrf_sleeves(
     spec: CaseSpec,
     meshes: dict[str, trimesh.Trimesh],
@@ -703,6 +731,7 @@ def prepare(
 
     speeds = wheel_speeds(spec, wheels, corner_frame(spec, domain))
     render_case(spec, domain, geometry_files, run_dir, wheels)
+    _write_paraview_stub(run_dir)
     write_status(
         run_dir,
         StageStatus(
