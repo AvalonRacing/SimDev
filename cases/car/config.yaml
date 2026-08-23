@@ -249,10 +249,39 @@ domain:
   # needs rather than by a cell budget, and 1.80 is the reach that actually
   # hands off to domain.wake. The overshoot was never here - it was entirely
   # the Body promotion below, which is where the 15M target got paid for.
+  #
+  # THE THREE INNER SHELLS PUSHED OUT, 2026-08-22, BECAUSE THE MESH COARSENED
+  # TOO FAST OFF THE BODYWORK. 0.12 body lengths is 53 mm: the 3 mm band ended
+  # about a tyre radius off the surface and the flow was on 6 mm cells from
+  # there out to 154 mm. Body and Wing are the surfaces under development and
+  # their near field was being resolved on cells four to eight times the
+  # surface cell.
+  #
+  #   was  0.12 / 0.35 / 0.90 / 1.80   ->  53 / 154 / 396 / 792 mm
+  #   now  0.20 / 0.50 / 1.10 / 1.80   ->  88 / 220 / 484 / 792 mm
+  #
+  # PAID FOR BY THE WAKE, NOT BY THE BUDGET. Estimated by voxelising the
+  # car's neighbourhood at 20 mm, assigning each voxel the level snappy would
+  # give it, and summing voxel_volume / cell^3 - volume refinement only, so
+  # these are not comparable to a finished mesh count, but the deltas are:
+  #
+  #   shells 0.12/0.35/0.90, wake end 5.0   3.48 M     (was)
+  #   shells 0.12/0.35/0.90, wake end 1.0   2.05 M     -1.43 M from the wake
+  #   shells 0.16/0.45/1.00, wake end 1.0   2.33 M     -1.15 M net
+  #   shells 0.20/0.50/1.10, wake end 1.0   2.64 M     -0.83 M net   <- chosen
+  #   shells 0.25/0.60/1.20, wake end 1.0   3.13 M     -0.35 M net
+  #
+  # So the near field roughly doubles its 3 mm volume (0.78 -> 1.31 M) and the
+  # case still comes out cheaper than it was. The last row is affordable too
+  # if this still reads as too coarse on the next run - that is the knob, not
+  # the outermost shell, which is nearly free at any reach (see above).
+  #
+  # 1.80 IS UNCHANGED ON PURPOSE. It is now the outer reach of the whole
+  # refinement structure, because domain.wake no longer runs past it.
   refinement_shells:
-    - {distance: 0.12, level: 4}
-    - {distance: 0.35, level: 3}
-    - {distance: 0.90, level: 2}
+    - {distance: 0.20, level: 4}
+    - {distance: 0.50, level: 3}
+    - {distance: 1.10, level: 2}
     - {distance: 1.80, level: 1}
 
   # The curved wake region NOT A WAKE REGION above warns about. Swept along
@@ -263,9 +292,9 @@ domain:
   # the straight state, which resolves to a box domain with no arc to sweep
   # along.
   #
-  # start 0.0 picks up right where the vehicle shells leave off (they cover
-  # the car out to 0.90 body lengths); end 5.0 carries it to about half the
-  # downstream domain length.
+  # start 0.0 puts the near end of the tube at the car's own centre, so the
+  # band is continuous with the vehicle shells rather than starting in a gap.
+  # For `end`, see the dated note directly above it.
   #
   # half_width 0.35 and half_height 0.25 body lengths are a first-pass
   # estimate sized to comfortably cover the car's own track width and height
@@ -301,9 +330,31 @@ domain:
   # surface. Refining the wake uniformly is worth more than resolving an
   # arbitrary boundary finely. Revisit once the wake has been measured off a
   # real run and the tube is known to sit where the shear layers are.
+  # SHORTENED FROM 5.0 TO 1.0 BODY LENGTHS, 2026-08-22.
+  #
+  # READ `end` AS AN OFFSET FROM THE CAR'S CENTRE, NOT ITS TAIL, WHICH IS WHY
+  # THIS IS 1.0 AND NOT 0.5. Both numbers are arc length from domain.theta_car,
+  # and theta_car is the CAD origin - which the car straddles: measured off
+  # CAD/Testcase the parts span x = -215 to +242 mm, so the tail (the wing at
+  # -215 mm) sits 0.49 body lengths downstream of it already. `end: 0.5` would
+  # have ended the tube 7 mm behind the wing, i.e. no wake band at all. 1.0 is
+  # half a car length of genuine wake behind the car.
+  #
+  # It was 5.0, which is 2.2 m: most of that length is far wake that no force
+  # on this car depends on, and it was the single most expensive thing in the
+  # volume refinement (see refinement_shells above - shortening it is worth
+  # -1.43 M cells, and it is what pays for the wider near-field shells).
+  #
+  # NOTE THE HANDOFF NOW REVERSES, and validate() will say so on every run:
+  # the vehicle shells reach 1.80 body lengths and the wake tube stops at
+  # 1.00, so the shells out-reach the wake rather than handing off to it. That
+  # is the intended arrangement now, not an oversight - past the tube the near
+  # wake is on the level 1/2 shells (24/12 mm) rather than dropping to raw
+  # 48 mm background. The warning is worth leaving in place: it is exactly the
+  # thing to re-read if a future change moves either number.
   wake:
     start: 0.0
-    end: 5.0
+    end: 1.0
     half_width: 0.35
     half_height: 0.25
     # THE LEVEL 4 TIER WAS ADDED AND THEN TAKEN BACK OUT, 2026-08-22, AND THE
@@ -597,9 +648,22 @@ geometry:
     - {name: Tire_RL, role: tyre, wheel: RL, refinement_min: 6, refinement_max: 6}
     - {name: Tire_RR, role: tyre, wheel: RR, refinement_min: 6, refinement_max: 6}
 
-    # Closed sleeves around the rims, which become cell zones rather than
-    # walls so the rim and spokes pump air. Meshed but not rotated separately
-    # in cornering - see handbook section 6.
+    # Closed sleeves around the rims. In a STRAIGHT-line case they become
+    # cell zones rather than walls, so the rim and spokes pump air.
+    #
+    # IN CORNERING THEY BECOME NEITHER - not a zone and not a wall, just a
+    # refinement region, 2026-08-22. The corner frame is an MRF zone over
+    # every cell, so a sleeve zone would be a second MRF zone sharing its
+    # whole boundary with the first, and adjacent zones subtract each other's
+    # frame flux on the faces they share. Measured on a duct: splitting one
+    # zone into two adjacent halves carrying the SAME frame moved the
+    # solution by 0.44 m/s on a 1 m/s inlet. What cornering gives up is rim
+    # pumping - the wheels still turn, through the tyre patches' coded
+    # spin-plus-carry condition. Handbook section 6, and
+    # render/context.py::mrf_zones for the OpenFOAM source lines.
+    #
+    # The declaration stays either way: prepare measures each wheel's axis,
+    # centre and rolling radius off the sleeve as the CAD drew it.
     - {name: MRF_FL, role: mrfZone, wheel: FL, refinement_min: 4, refinement_max: 5}
     - {name: MRF_FR, role: mrfZone, wheel: FR, refinement_min: 4, refinement_max: 5}
     - {name: MRF_RL, role: mrfZone, wheel: RL, refinement_min: 4, refinement_max: 5}
