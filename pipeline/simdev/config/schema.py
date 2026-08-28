@@ -545,38 +545,6 @@ class ContactPatchConfig(BaseModel):
     depth_below_road: float = Field(default=0.002, gt=0.0)
 
 
-class MrfInterferenceConfig(BaseModel):
-    """Keeping the MRF sleeve off the tyre's surface, in metres.
-
-    A sleeve is drawn to the same nominal diameter as the tyre bore, so CAD
-    puts the two surfaces in exactly the same place. For snappyHexMesh that is
-    degenerate: a faceZone lying on a wall produces baffles, faceZones that
-    come back "multiply connected", non-manifold points and intermittently a
-    reversed face. Measured on this car at 0.05 mm over three quarters of the
-    sleeve.
-
-    So when the gap is under `min_clearance` the sleeve is pushed
-    `interference` into the tyre - deliberately intersecting rather than
-    touching, because where it is buried in tyre material there are no fluid
-    cells and therefore no zone boundary at all. The cellZone ends up bounded
-    by the tyre's own wall, which is what should have bounded it.
-
-    Never the other way round. Shrinking the sleeve clear of the tyre would
-    leave the zone short of the air it exists to rotate, and a near miss is as
-    fragile as a hit.
-    """
-
-    enabled: bool = True
-    # Gap below which sleeve and tyre count as the same surface. Generous
-    # against the ~0 of a real coincidence and the millimetres of a sleeve
-    # with genuine clearance, so it does not have to be precise.
-    min_clearance: float = Field(default=0.001, gt=0.0)
-    # How far into the tyre it is pushed. Wants to be a few surface cells so
-    # snappy cannot resolve the two surfaces as one; validate() checks it
-    # against the sleeve's own cell size.
-    interference: float = Field(default=0.002, gt=0.0)
-
-
 class GeometryConfig(BaseModel):
     """Where the surfaces come from.
 
@@ -606,9 +574,6 @@ class GeometryConfig(BaseModel):
     scale: float = Field(default=1.0, gt=0.0)
     tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
     contact_patch: ContactPatchConfig = Field(default_factory=ContactPatchConfig)
-    mrf_interference: MrfInterferenceConfig = Field(
-        default_factory=MrfInterferenceConfig
-    )
     # A declared property of the CAD, not of the flow.
     #
     # half_model used to be derived from flow symmetry alone, which forced a

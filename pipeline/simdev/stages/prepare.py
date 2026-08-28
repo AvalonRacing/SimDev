@@ -17,12 +17,6 @@ from simdev.domain.box import BoxDomainBuilder, check_blockage
 from simdev.geometry.ahmed import build_ahmed_surfaces
 from simdev.geometry.contact import ContactPatch, extrude_contact_patch
 from simdev.geometry.decimate import cluster_vertices
-from simdev.geometry.mrf import (
-    SleeveFit,
-    outer_radius,
-    push_into_tyre,
-    surface_gap,
-)
 from simdev.geometry.roles import PatchRole, traits
 from simdev.geometry.step import Tessellation, convert, default_cache_dir
 from simdev.geometry.stl import (
@@ -58,7 +52,6 @@ class PrepareResult:
     run_dir: Path
     wheels: dict[str, Wheel] = field(default_factory=dict)
     contact_patches: dict[str, ContactPatch] = field(default_factory=dict)
-    sleeve_fits: dict[str, SleeveFit] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -351,110 +344,6 @@ def _write_paraview_stub(run_dir: Path) -> Path:
     return stub
 
 
-def fit_mrf_sleeves(
-    spec: CaseSpec,
-    meshes: dict[str, trimesh.Trimesh],
-    wheels: dict[str, Wheel],
-) -> tuple[dict[str, SleeveFit], list[str]]:
-    """Push any sleeve that is lying on its tyre a little way into it.
-
-    Modifies `meshes` in place. A sleeve with real clearance is left exactly
-    as drawn; only a coincident one is moved, and the measured gap that
-    triggered it is recorded either way.
-
-    Must run after derive_wheels(), which takes each wheel's axis from the
-    sleeve as the CAD drew it. Measuring the axis off a sleeve this has
-    already grown would be measuring the repair.
-    """
-    settings = spec.geometry.mrf_interference
-    if not settings.enabled:
-        return {}, []
-
-    sleeves = {
-        p.wheel: p
-        for p in spec.geometry.patches
-        if p.role is PatchRole.MRF_ZONE and p.wheel is not None
-    }
-    tyres = {
-        p.wheel: p
-        for p in spec.geometry.patches
-        if p.role is PatchRole.TYRE and p.wheel is not None
-    }
-
-    fits: dict[str, SleeveFit] = {}
-    warnings: list[str] = []
-
-    for wheel, sleeve_patch in sorted(sleeves.items()):
-        tyre_patch = tyres.get(wheel)
-        if tyre_patch is None or sleeve_patch.name not in meshes:
-            continue
-        if tyre_patch.name not in meshes or wheel not in wheels:
-            continue
-
-        sleeve = meshes[sleeve_patch.name]
-        tyre = meshes[tyre_patch.name]
-        measured = wheels[wheel]
-
-        gap = surface_gap(sleeve, tyre)
-        before = outer_radius(sleeve, measured.centre, measured.direction)
-
-        if gap >= settings.min_clearance:
-            fits[wheel] = SleeveFit(
-                wheel=wheel,
-                sleeve=sleeve_patch.name,
-                tyre=tyre_patch.name,
-                clearance=gap,
-                interference=0.0,
-                radius_before=before,
-                radius_after=before,
-                tyre_radius=measured.radius,
-            )
-            continue
-
-        moved = push_into_tyre(
-            sleeve, measured.centre, measured.direction, settings.interference
-        )
-        meshes[sleeve_patch.name] = moved
-        after = outer_radius(moved, measured.centre, measured.direction)
-
-        fits[wheel] = SleeveFit(
-            wheel=wheel,
-            sleeve=sleeve_patch.name,
-            tyre=tyre_patch.name,
-            clearance=gap,
-            interference=settings.interference,
-            radius_before=before,
-            radius_after=after,
-            tyre_radius=measured.radius,
-        )
-
-        # Pushed in radially, so this is the check that it did not come out
-        # the other side. A zone reaching past the tread spins the free
-        # stream, which is worse than the coincidence being repaired.
-        if after >= measured.radius:
-            warnings.append(
-                f"wheel '{wheel}': sleeve '{sleeve_patch.name}' was pushed to "
-                f"{after * 1e3:.1f} mm to clear the tyre surface, which reaches "
-                f"or passes the {measured.radius * 1e3:.1f} mm tread. The "
-                "rotating cell zone would extend into the free stream; reduce "
-                "geometry.mrf_interference.interference"
-            )
-
-    moved_fits = {w: f for w, f in fits.items() if f.moved}
-    if moved_fits:
-        warnings.append(
-            "MRF sleeve sat on the tyre surface and was pushed into it: "
-            + ", ".join(
-                f"{f.sleeve} gap {f.clearance * 1e6:.0f} um, radius "
-                f"{f.radius_before * 1e3:.1f} -> {f.radius_after * 1e3:.1f} mm"
-                for _, f in sorted(moved_fits.items())
-            )
-            + ". A faceZone lying on a wall makes baffles, multiply connected "
-            "zones and non-manifold points; an intersecting one does not"
-        )
-    return fits, warnings
-
-
 def apply_contact_patches(
     spec: CaseSpec, meshes: dict[str, trimesh.Trimesh]
 ) -> tuple[dict[str, ContactPatch], list[str]]:
@@ -703,10 +592,7 @@ def prepare(
     warnings.extend(_wheel_warnings(spec, domain, wheels))
 
     # Last, and deliberately so: everything above measured the CAD as drawn,
-    # and these are the only steps that change it.
-    sleeve_fits, sleeve_warnings = fit_mrf_sleeves(spec, meshes, wheels)
-    warnings.extend(sleeve_warnings)
-
+    # and this is the only step that changes it.
     contact_patches, contact_warnings = apply_contact_patches(spec, meshes)
     warnings.extend(contact_warnings)
 
@@ -722,7 +608,6 @@ def prepare(
         run_dir=run_dir,
         wheels=wheels,
         contact_patches=contact_patches,
-        sleeve_fits=sleeve_fits,
         warnings=warnings,
     )
 
@@ -777,20 +662,6 @@ def prepare(
                 # and `depth` says how far into the road the CAD drew it -
                 # neither is recoverable from the written STL, because the
                 # written STL is the one that has already been squared off.
-                # Measured, and the repair if any. A sleeve welded to its
-                # tyre is invisible in the written STL once it has been
-                # pushed in, so the gap that triggered it is only on record
-                # here.
-                "mrf_sleeves": {
-                    w: {
-                        "clearance": f.clearance,
-                        "interference": f.interference,
-                        "radius_before": f.radius_before,
-                        "radius_after": f.radius_after,
-                        "tyre_radius": f.tyre_radius,
-                    }
-                    for w, f in sleeve_fits.items()
-                },
                 "contact_patches": {
                     name: {
                         "area": patch.area,

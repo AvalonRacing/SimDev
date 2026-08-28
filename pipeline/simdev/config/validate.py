@@ -262,35 +262,6 @@ def validate(spec: CaseSpec) -> list[str]:
                 "away from the wall would be finer than the wall itself"
             )
 
-    # --- MRF sleeve interference -----------------------------------------
-    # The repair only works if snappy cannot resolve the two surfaces as one,
-    # which means the interference has to be worth several cells on the
-    # sleeve's own patch. A tenth of a cell moves the coincidence rather than
-    # removing it, and nothing downstream would say so.
-    mrf = spec.geometry.mrf_interference
-    if mrf.enabled:
-        for patch in spec.geometry.patches:
-            if patch.role is not PatchRole.MRF_ZONE:
-                continue
-            cell = spec.surface_cell_size_for(patch)
-            if mrf.interference < 2.0 * cell:
-                warnings.append(
-                    f"geometry.mrf_interference.interference is "
-                    f"{mrf.interference * 1e3:.2f} mm against a "
-                    f"{cell * 1e3:.2f} mm cell on '{patch.name}'. A sleeve "
-                    "pushed less than about two cells into the tyre is still "
-                    "effectively coincident with it, and the faceZone will "
-                    "still come out multiply connected"
-                )
-                break
-        if mrf.interference <= mrf.min_clearance:
-            errors.append(
-                f"geometry.mrf_interference.interference "
-                f"({mrf.interference * 1e3:.2f} mm) is not larger than "
-                f"min_clearance ({mrf.min_clearance * 1e3:.2f} mm); a sleeve "
-                "would be moved by less than the gap that triggered the move"
-            )
-
     # --- parallel --------------------------------------------------------
     if spec.solve.n_ranks > MAX_PHYSICAL_CORES:
         errors.append(

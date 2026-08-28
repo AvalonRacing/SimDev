@@ -461,25 +461,6 @@ geometry:
     cut_height: 0.001
     depth_below_road: 0.002
 
-  # The MRF sleeves are drawn to the same nominal diameter as the tyre bore,
-  # so in the CAD the two surfaces are the same surface: measured gaps of
-  # 3-7 um over about three quarters of each sleeve.
-  #
-  # That is degenerate for snappyHexMesh. A faceZone lying on a wall gave all
-  # four zones "multiply connected (shared edge)", 381 non-manifold points,
-  # 12,062 baffles, max non-orthogonality above the gate, and an intermittent
-  # reversed face at the top of the front-right tyre. Deleting the sleeves
-  # made all of it go away, which is how it was pinned down - but they are not
-  # optional, so they are pushed into the tyre instead.
-  #
-  # WHY 3 mm. It has to be worth a couple of cells or snappy can still resolve
-  # the two surfaces as one, and the sleeves sit at level 6 - a 1.5 mm cell -
-  # so two cells is 3 mm. validate() checks exactly this and warned at the
-  # 2 mm default. It takes the sleeve from r = 27 mm to r = 30 mm, still 3 mm
-  # clear of the 33 mm tread, and prepare warns if it ever reaches it.
-  mrf_interference:
-    interference: 0.003
-
   # Not symmetric about y = 0, and posed at an attitude besides. Keeps the
   # model full and a_ref at its full value. Handbook 3.3.
   symmetric: false
