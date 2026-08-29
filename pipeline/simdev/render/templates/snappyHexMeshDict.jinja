@@ -240,6 +240,21 @@ addLayersControls
     // Those extra layers resolve nothing. The ground that matters is the 0.8%
     // under the car, which the refinement shells reach and which is layered
     // either way (21 um vs 24 um). The rest is still air over bare tarmac.
+    //
+    // RE-MEASURED 2026-08-29 ON THE 48 mm BACKGROUND, and the shape holds:
+    //
+    //   nRelaxedIter 1 -> ground 1.89 layers, max aspect ratio  252, FAILED
+    //   nRelaxedIter 0 -> ground 5.91 layers, max aspect ratio 2609, FAILED
+    //                     (aspect, 16,095 cells of 2.88 M), +7.6% cells
+    //
+    // "resolve nothing" was too strong, and worth correcting: those layers do
+    // fix the ground's y+, which is 12.40 area-weighted and rises with
+    // distance because the unlayered far field has its first cell centre
+    // ~24 mm up. 0 extrudes the designed 25 um first layer and would put the
+    // far field under y+ 2. It is still not taken, because what it buys is a
+    // wall treatment on bare tarmac that no reported force depends on, and
+    // what it costs is a checkMesh aspect-ratio failure. See the ground patch
+    // note in cases/car/config.yaml for the full measurement.
     nRelaxedIter        {{ spec.mesh.n_relaxed_iter }};
 }
 

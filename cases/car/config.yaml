@@ -687,6 +687,42 @@ geometry:
 
     # --- domain boundaries ---------------------------------------------
     # No symmetry patch: asymmetric geometry, so the model is full.
+    #
+    # THE GROUND SITS ABOVE THE y+ BAND AND IS LEFT THERE ON PURPOSE,
+    # 2026-08-29. Measured on the 20.87 M low_y_plus run: post reports ground
+    # y+ 7.40, but that is the plain face mean and the faces under the car are
+    # numerous and tiny - area-weighted it is 12.40. It is NOT worst under the
+    # car; it gets worse with distance, and 87% of the ground area is more
+    # than a metre away:
+    #
+    #   distance from car   area %   mean y+
+    #   0 - 0.25 m            1.0      7.08
+    #   0.5 - 1 m            12.6     12.23
+    #   1 - 2 m              36.9     10.35
+    #   2 - 4 m              40.1     13.83
+    #   4 - 8 m               6.3     15.81
+    #
+    # THE CAUSE IS CELL HEIGHT, NOT FAST FLOW. The road is noSlip and sits in
+    # MRFProperties' nonRotatingPatches, so it is stationary in the ground
+    # frame and the far-field air is stationary with it - there is almost no
+    # shear out there. But snappy extrudes only 2.73 of the 6 layers on this
+    # patch (against 4.5 of 5 on Body), and that average is bimodal: layered
+    # under the car, bare beyond it. With no layers the first centre is ~24 mm
+    # up, where u_tau of 0.008 m/s already reads y+ 13.
+    #
+    # IT IS FIXABLE, AND THE FIX WAS MEASURED. mesh.n_relaxed_iter 0 extrudes
+    # 5.91 of 6 layers with the first layer at the designed 25 um, which would
+    # put the far field under y+ 2, for +7.6% cells (~/runs/ground-G0, -G1,
+    # 48 mm background with refinement_cap 4 so the ground matches production).
+    # What stops it is checkMesh: max aspect ratio 2609 over 16,095 cells,
+    # against its hardcoded limit of 1000. That is what a 25 um layer on a
+    # 48 mm road face IS - aspect ratio is not one of the quantities
+    # gates/mesh_quality.py judges by extent, so the single worst cell gates.
+    #
+    # NOT WORTH BUYING. The far-field ground boundary layer has no measurable
+    # effect on vehicle forces, and every force-bearing patch already passes
+    # at 2.31 or better. Reopen this only if the ground's own wall treatment
+    # starts mattering - and then the cheap lever is the gate, not the mesh.
     - {name: ground, role: ground}
     - {name: inlet, role: inlet}
     - {name: outlet, role: outlet}
