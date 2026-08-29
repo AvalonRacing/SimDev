@@ -278,10 +278,31 @@ domain:
   #
   # 1.80 IS UNCHANGED ON PURPOSE. It is now the outer reach of the whole
   # refinement structure, because domain.wake no longer runs past it.
+  #
+  # PULLED IN ONE ROW, 2026-08-29, TO BUY CELLS BACK. This takes the three
+  # inner shells to the middle row of the table above - about -0.31 M on that
+  # same voxel estimate - and is a deliberate partial walk-back of the
+  # 2026-08-22 push-out, not a revert of it: the 3 mm band still ends at
+  # 70 mm rather than the 53 mm it was pulled out from, so the "coarsened too
+  # fast off the bodywork" complaint that motivated 0.20/0.50/1.10 is only
+  # partly re-admitted.
+  #
+  #   was  0.20 / 0.50 / 1.10  ->  88 / 220 / 484 mm
+  #   now  0.16 / 0.45 / 1.00  ->  70 / 198 / 440 mm
+  #
+  # WHAT TO WATCH ON THE NEXT RUN. Body and Wing are the surfaces under
+  # development and they are what this trades against; the per-patch
+  # forceCoeffs monitors added the same day make their share of the
+  # oscillation readable directly, so if Body's amplitude grows against the
+  # 20.87 M run this is the first thing to put back.
+  #
+  # The wake was deliberately not touched. domain.wake below is what covers
+  # the region behind the car, these shells follow the car itself, and the
+  # two are sized against different things.
   refinement_shells:
-    - {distance: 0.20, level: 4}
-    - {distance: 0.50, level: 3}
-    - {distance: 1.10, level: 2}
+    - {distance: 0.16, level: 4}
+    - {distance: 0.45, level: 3}
+    - {distance: 1.00, level: 2}
     - {distance: 1.80, level: 1}
 
   # The curved wake region NOT A WAKE REGION above warns about. Swept along
