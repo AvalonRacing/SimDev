@@ -299,11 +299,43 @@ domain:
   # The wake was deliberately not touched. domain.wake below is what covers
   # the region behind the car, these shells follow the car itself, and the
   # two are sized against different things.
+  #
+  # RE-CUT AS A HALVING LADDER IN METRES, 2026-08-29. Each level doubles the
+  # cell and doubles its reach, which is the shape that hands off evenly:
+  #
+  #   level 5  0.02 m   1.5 mm      level 2  0.32 m   12 mm
+  #   level 4  0.08 m   3   mm      level 1  0.64 m   24 mm
+  #   level 3  0.16 m   6   mm
+  #
+  # Written in body lengths because that is the unit the field takes; the
+  # metres above are what was chosen and 0.44 m is l_ref. READ THE METRES.
+  #
+  # WHY IT STOPS AT LEVEL 5 AND NOT AT THE 0.75 mm WALL CELL. Each step of a
+  # halving ladder costs FOUR TIMES the step before it: a band of thickness t
+  # at cell c holds ~A*t/c^3 cells, and halving both gives (t/2)/(c/2)^3 =
+  # 4*t/c^3. So the innermost band always dominates and one more level
+  # quadruples the total. Estimated by voxelising the vehicle surface at
+  # 2/6/18 mm and summing band_volume / cell^3 - volume refinement only, so
+  # not comparable to a finished mesh count, but the ladders compare:
+  #
+  #   finest level 4, 0-70 mm   (the 0.16/0.45/1.00/1.80 shells)    2.41 M
+  #   finest level 5, 0-20 mm   <- chosen                           4.72 M
+  #   finest level 6, 0-20 mm                                      27.29 M
+  #   finest level 7, 0-10 mm                                     112.39 M
+  #   finest level 8, 0-5 mm                                      411.69 M
+  #
+  # The level 6 row is the trap. 0.75 mm is already the case-wide wall cell,
+  # so it reads like it costs nothing - but on the wall it exists only in the
+  # skin that surface refinement and layers build, whereas as a shell it fills
+  # the whole 20 mm band: 0.549 m^2 x 20 mm is 0.0098 m^3, and at 0.75 mm that
+  # is 23 M cells however it is arranged. Surface refinement thickens the mesh
+  # beside the wall; a volume shell fills the band. They are not the same buy.
   refinement_shells:
-    - {distance: 0.16, level: 4}
-    - {distance: 0.45, level: 3}
-    - {distance: 1.00, level: 2}
-    - {distance: 1.80, level: 1}
+    - {distance: 0.04545, level: 5}
+    - {distance: 0.18182, level: 4}
+    - {distance: 0.36364, level: 3}
+    - {distance: 0.72727, level: 2}
+    - {distance: 1.45455, level: 1}
 
   # The curved wake region NOT A WAKE REGION above warns about. Swept along
   # the same arc the annulus domain itself is built from - domain.point() at
