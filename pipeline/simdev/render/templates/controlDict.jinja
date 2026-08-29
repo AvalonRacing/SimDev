@@ -48,6 +48,46 @@ functions
         CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
     }
 
+    // The same coefficients again, one function object per force patch.
+    //
+    // The aggregate above says the car's Cl oscillates; it cannot say which
+    // part of the car is doing it. A limit cycle fed by the rear wing stalling
+    // and one fed by the front tyre wake look identical in the total, and they
+    // want opposite fixes. These split the total by patch so the trace can be
+    // attributed before anyone re-tunes numerics against it.
+    //
+    // Aref, lRef and CofR are deliberately the aggregate's, NOT a per-patch
+    // frontal area. That makes each patch's Cd and Cl its *share* of the
+    // vehicle coefficient, so they sum to the total and can be read against
+    // it directly. Per-patch areas would give eleven numbers on eleven
+    // different scales that add up to nothing.
+    //
+    // Cost is a surface integral per patch per iteration, which is noise
+    // against the solve - but it is eleven more directories under
+    // postProcessing/, so anything globbing forceCoeffs* needs to expect them.
+{% for p in force_patches %}
+    forceCoeffs_{{ p }}
+    {
+        type            forceCoeffs;
+        libs            ("libforces.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        log             false;
+
+        patches         ({{ p }});
+
+        rho             rhoInf;
+        rhoInf          {{ spec.flow.rho }};
+        magUInf         {{ spec.flow.u_inf }};
+        lRef            {{ spec.forces.l_ref }};
+        Aref            {{ a_ref }};
+
+        liftDir         (0 0 1);
+        dragDir         {{ drag_dir }};
+        pitchAxis       {{ pitch_axis }};
+        CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
+    }
+{% endfor %}
     yPlus
     {
         type            yPlus;

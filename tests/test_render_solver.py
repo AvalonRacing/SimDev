@@ -110,6 +110,26 @@ def test_force_coeffs_lists_only_force_patches(tmp_path: Path) -> None:
     assert "symmetry" not in patches
 
 
+def test_each_force_patch_gets_its_own_coefficient_monitor(tmp_path: Path) -> None:
+    """The aggregate says the car oscillates; only per-patch says which part.
+
+    Same Aref and CofR as the aggregate on every one of them, so the per-patch
+    coefficients sum to the total and a share can be read straight off.
+    """
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+
+    assert "forceCoeffs_body" in text
+    # Non-force walls must not acquire one: the ground carries a wall function
+    # but no reported force, and a Cd for it would be meaningless.
+    assert "forceCoeffs_ground" not in text
+    assert "forceCoeffs_symmetry" not in text
+
+    block = text[text.index("forceCoeffs_body") :]
+    block = block[: block.index("\n    }")]
+    assert "patches         (body);" in block
+    assert "Aref            0.056;" in block
+
+
 def test_control_dict_end_time_is_the_iteration_cap(tmp_path: Path) -> None:
     spec = _spec()
     text = (_render(tmp_path, spec) / "system" / "controlDict").read_text()
