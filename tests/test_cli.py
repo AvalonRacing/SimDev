@@ -6,7 +6,7 @@ import pytest
 
 from simdev.cli import main
 
-CASE = Path("cases/ahmed/config.yaml")
+CASE = Path(__file__).parent / "fixtures" / "ahmed.yaml"
 
 
 def test_help_exits_cleanly() -> None:

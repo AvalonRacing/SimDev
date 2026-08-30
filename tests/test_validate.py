@@ -9,7 +9,9 @@ from simdev.config.validate import ValidationError, estimate_y_plus, validate
 
 BASE: dict = {
     "name": "ahmed",
-    "flow": {"u_inf": 40.0, "turbulence_length_scale": 0.01},
+    # 0.6 mm at 40 m/s puts nu_t/nu at 10.7, inside the band validate()
+    # judges, so cases below warn about their own subject and nothing else.
+    "flow": {"u_inf": 40.0, "turbulence_length_scale": 0.0006},
     "ground": {"motion": "static"},
     "forces": {"a_ref_full": 0.112, "l_ref": 1.044},
     "geometry": {
@@ -218,3 +220,38 @@ def test_estimate_y_plus_is_in_the_expected_band_for_high_y_plus() -> None:
     # Ahmed at 40 m/s with a 0.3 mm first layer should land in wall-function range.
     y = estimate_y_plus(_spec())
     assert 30.0 <= y <= 300.0
+
+
+# --- freestream turbulence -------------------------------------------------
+
+
+def test_soupy_freestream_warns() -> None:
+    """nu_t/nu = 179 at the inlet, from 40 m/s on a 10 mm length scale.
+
+    Neither input looks wrong on its own, which is the point: only their
+    product says the body is sitting in air 179 times more diffusive than it
+    should be. Nothing in the case file shows that number, so validate() has
+    to be the thing that says it.
+    """
+    warnings = validate(_spec({"flow": {"turbulence_length_scale": 0.01}}))
+    soup = [w for w in warnings if "nu_t/nu" in w]
+    assert len(soup) == 1
+    assert "179" in soup[0]
+    assert "turbulence_length_scale" in soup[0]
+
+
+def test_clean_freestream_does_not_warn() -> None:
+    """1.5 mm at 15 m/s puts nu_t/nu at 10.1, inside the band."""
+    warnings = validate(
+        _spec({"flow": {"u_inf": 15.0, "turbulence_length_scale": 0.0015}})
+    )
+    assert [w for w in warnings if "nu_t/nu" in w] == []
+
+
+def test_a_freestream_too_quiet_to_sustain_turbulence_warns() -> None:
+    """The other end of the band. A vanishing freestream nu_t lets the model
+    laminarise in shear layers it should be resolving as turbulent."""
+    warnings = validate(
+        _spec({"flow": {"u_inf": 40.0, "turbulence_length_scale": 1.0e-6}})
+    )
+    assert len([w for w in warnings if "nu_t/nu" in w]) == 1

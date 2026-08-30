@@ -10,6 +10,7 @@ from simdev.run.parsers import (
     parse_layer_summary,
     read_force_coeffs,
     read_y_plus,
+    read_y_plus_area,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -174,3 +175,71 @@ def test_a_real_sigfpe_is_still_caught_alongside_the_banner() -> None:
     found = find_fatal_errors(text)
     assert len(found) == 1
     assert "sigHandler" in found[0]
+
+
+# --- area-weighted y+ ------------------------------------------------------
+
+_SFV = """\
+# Region type : patch {patch}
+# Faces  : 220096
+# Area   : 1.8802373e+01
+# Time          \tareaAverage(yPlus)
+50\t{first}
+125\t{last}
+"""
+
+
+def _write_area(run_dir: Path, patch: str, first: float, last: float) -> None:
+    d = run_dir / "postProcessing" / f"yPlusArea_{patch}" / "0"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "surfaceFieldValue.dat").write_text(
+        _SFV.format(patch=patch, first=first, last=last), encoding="utf-8"
+    )
+
+
+def test_read_y_plus_area_returns_the_latest_value_per_patch(tmp_path: Path) -> None:
+    _write_area(tmp_path, "ground", first=9.1, last=12.40)
+    _write_area(tmp_path, "Body", first=1.0, last=1.34)
+
+    assert read_y_plus_area(tmp_path) == pytest.approx({"ground": 12.40, "Body": 1.34})
+
+
+def test_read_y_plus_area_is_empty_when_the_run_predates_the_function_objects(
+    tmp_path: Path,
+) -> None:
+    """Runs meshed before these function objects existed have no such
+    directories. The gate has to fall back rather than crash on them."""
+    (tmp_path / "postProcessing").mkdir()
+    assert read_y_plus_area(tmp_path) == {}
+
+
+def test_read_y_plus_area_ignores_a_header_only_file(tmp_path: Path) -> None:
+    """A solve killed before its first write time leaves the header and no
+    rows. That is 'no measurement', not a measurement of zero."""
+    d = tmp_path / "postProcessing" / "yPlusArea_ground" / "0"
+    d.mkdir(parents=True)
+    (d / "surfaceFieldValue.dat").write_text(
+        "# Region type : patch ground\n# Time\tareaAverage(yPlus)\n", encoding="utf-8"
+    )
+    assert read_y_plus_area(tmp_path) == {}
+
+
+def test_read_y_plus_area_does_not_depend_on_the_header_shape(
+    tmp_path: Path,
+) -> None:
+    """surfaceFieldValue's header varies between OpenFOAM versions, and a
+    header whose token count disagrees with the data columns is enough to make
+    a name-based read raise. Time is the first column and the value is the
+    last; nothing else about the header is load-bearing.
+    """
+    d = tmp_path / "postProcessing" / "yPlusArea_ground" / "0"
+    d.mkdir(parents=True)
+    (d / "surfaceFieldValue.dat").write_text(
+        "# Region type : patch ground\n"
+        "# Faces  : 220096\n"
+        "# Area   : 1.8802373e+01\n"
+        "# Time            areaAverage(yPlus) of field yPlus\n"
+        "125\t12.40\n",
+        encoding="utf-8",
+    )
+    assert read_y_plus_area(tmp_path) == pytest.approx({"ground": 12.40})

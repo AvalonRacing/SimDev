@@ -209,6 +209,62 @@ def read_y_plus(path: Path) -> pd.DataFrame:
     )
 
 
+# Directory prefix the controlDict gives each per-patch area-average function
+# object. One spelling, shared with the template's loop by convention and
+# asserted by tests/test_render_solver.py.
+Y_PLUS_AREA_PREFIX = "yPlusArea_"
+
+
+def read_y_plus_area(run_dir: Path) -> dict[str, float]:
+    """Area-weighted y+ per wall patch, at the latest time available.
+
+    One surfaceFieldValue function object writes one directory per patch, so
+    this collects them rather than reading a single file. See the controlDict
+    template for why the weighted number is the one that gets judged: the
+    plain yPlus object's mean is unweighted and reads low on any patch whose
+    cell size varies.
+
+    Returns {} rather than raising when the directories are absent, because
+    runs meshed before these function objects existed are still worth
+    post-processing - the gate falls back to the unweighted mean and says so.
+    A file with a header and no rows is 'no measurement', not zero: a solve
+    killed before its first write time leaves exactly that.
+    """
+    root = Path(run_dir) / "postProcessing"
+    values: dict[str, float] = {}
+
+    for directory in sorted(root.glob(f"{Y_PLUS_AREA_PREFIX}*")):
+        patch = directory.name[len(Y_PLUS_AREA_PREFIX) :]
+        latest: tuple[float, float] | None = None
+
+        for dat in directory.glob("*/surfaceFieldValue.dat"):
+            # Read positionally, NOT by header name. surfaceFieldValue's
+            # header varies between OpenFOAM versions, and a header whose
+            # token count disagrees with the data columns does not raise - it
+            # silently produces NaN, which would then be compared against the
+            # y+ band and quietly pass. Time is the first column and the value
+            # is the last; nothing else about the header is load-bearing.
+            try:
+                frame = pd.read_csv(
+                    dat, sep=r"\s+", comment="#", header=None, engine="python"
+                )
+            except pd.errors.EmptyDataError:
+                # Comments and no rows: a solve killed before its first write
+                # time leaves exactly this. No measurement, not a zero.
+                continue
+            if frame.empty:
+                continue
+            row = frame.iloc[-1]
+            time = float(row.iloc[0])
+            if latest is None or time > latest[0]:
+                latest = (time, float(row.iloc[-1]))
+
+        if latest is not None:
+            values[patch] = latest[1]
+
+    return values
+
+
 def is_fatal_line(line: str) -> bool:
     """Whether one log line reports a fatal error.
 

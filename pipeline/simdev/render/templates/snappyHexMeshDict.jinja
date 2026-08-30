@@ -209,8 +209,10 @@ addLayersControls
     nGrow               0;
     featureAngle        130;
     nRelaxIter          5;
-    nSmoothSurfaceNormals 1;
-    nSmoothNormals      3;
+    // See mesh.n_smooth_surface_normals in the schema for why these are
+    // spec fields rather than the literals they used to be.
+    nSmoothSurfaceNormals {{ spec.mesh.n_smooth_surface_normals }};
+    nSmoothNormals      {{ spec.mesh.n_smooth_normals }};
     nSmoothThickness    10;
     maxFaceThicknessRatio {{ spec.mesh.max_layer_cell_ratio }};
     // snappy's default is 0.3, which caps the stack at 30% of the distance to

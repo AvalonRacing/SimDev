@@ -133,3 +133,39 @@ def test_post_writes_the_residual_plot(run_dir: Path) -> None:
     _mark_solve(run_dir, "ok")
     post(run_dir)
     assert (run_dir / "results" / "residuals.png").exists()
+
+
+# --- area-weighted y+ reaches the result -----------------------------------
+
+
+def _write_area_yplus(run_dir: Path, patch: str, value: float) -> None:
+    out = run_dir / "postProcessing" / f"yPlusArea_{patch}" / "0"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "surfaceFieldValue.dat").write_text(
+        f"# Region type : patch {patch}\n"
+        f"# Time\tareaAverage(yPlus)\n"
+        f"250\t{value}\n",
+        encoding="utf-8",
+    )
+
+
+def test_post_judges_and_reports_the_area_weighted_y_plus(run_dir: Path) -> None:
+    """The weighted number is what the gate judged, so it is the number the
+    result record has to carry - otherwise the report and the verdict disagree.
+    """
+    _mark_solve(run_dir, "ok")
+    _write_area_yplus(run_dir, "body", 87.5)
+    record = post(run_dir)
+    assert record.yplus["body"] == pytest.approx(87.5)
+
+
+def test_post_survives_the_gates_non_numeric_detail(run_dir: Path) -> None:
+    """The gate records which basis it judged on as a string. ResultRecord.yplus
+    is a mapping of floats, so post has to select rather than coerce - it used
+    to float() everything the gate returned."""
+    _mark_solve(run_dir, "ok")
+    _write_area_yplus(run_dir, "body", 87.5)
+    record = post(run_dir)
+    assert all(isinstance(v, float) for v in record.yplus.values())
+    assert "weighting" not in record.yplus
+    assert not any(k.endswith("_facemean_yplus") for k in record.yplus)

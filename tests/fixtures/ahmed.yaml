@@ -1,4 +1,16 @@
-# Ahmed body validation case.
+# Ahmed body - TEST FIXTURE, NOT A VALIDATION CASE.
+#
+# It lived at cases/ahmed/config.yaml as the pipeline's validation case until
+# 2026-08-30, when that effort was dropped. It is kept here, and only here,
+# because it is the fastest complete case the suite has: geometry.kind 'ahmed'
+# is generated analytically, so tests/test_cli.py and tests/test_smoke.py can
+# exercise prepare -> mesh -> solve -> post end to end without CAD, gmsh or a
+# STEP import. Nothing under cases/ refers to it and no result from it is
+# reported anywhere.
+#
+# Its freestream is deliberately left as it was, which means validate() warns
+# that nu_t/nu is 179. That warning is correct and is part of what the CLI
+# tests exercise; do not "fix" it here without checking what asserts on it.
 #
 # Reference: Ahmed, Ramm & Faltin, SAE 840300 (1984).
 # 35 degree slant, chosen over 25 degrees because the 25 degree case sits on
@@ -8,7 +20,6 @@
 # Fixed floor, matching the reference experiment's stationary tunnel wall.
 # This is why ground motion is a per-case field, not role behaviour.
 #
-# acceptance.target_cd is confirmed against the primary source in Task 18.
 name: ahmed
 
 flow:

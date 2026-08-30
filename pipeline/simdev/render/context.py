@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from simdev.config.schema import (
+    C_MU,
     CaseSpec,
     GroundMotion,
     Mode,
@@ -18,7 +19,9 @@ from simdev.domain.base import Domain, DomainSector
 from simdev.geometry.roles import PatchRole, traits
 from simdev.geometry.wheels import Wheel
 
-C_MU = 0.09
+# C_MU is imported from the schema and re-exported here for the modules and
+# tests that have always taken it from this module. The value and the formulae
+# that use it belong to the spec now - see CaseSpec.nut_ratio.
 
 # Cell zone covering every cell, which is what the cornering frame rotates.
 #
@@ -65,12 +68,87 @@ WALL_FUNCTIONS: dict[WallTreatment, dict[str, str]] = {
     },
 }
 
+# Per-role departures from the case-wide wall treatment above.
+#
+# THE GROUND IS THE ONE WALL WHOSE y+ NOBODY GETS TO DESIGN, which is why it
+# is the only entry here. Every vehicle patch has a surface refinement level
+# and a prism stack sized against it, so its y+ is a decision. The ground has
+# neither: it is a blockMesh patch, so it never enters refinementSurfaces and
+# snappy never surface-refines it, and its layer coverage is bimodal - layered
+# under the car where the refinement shells reach the floor, bare beyond it.
+# Measured on the 20.87 M run it comes out at y+ 7.4 unweighted, 12.4
+# area-weighted, worst *away* from the car (see the ground patch note in
+# cases/car/config.yaml).
+#
+# nutLowReWallFunction sets nu_t = 0 at the wall and computes the shear from
+# molecular viscosity alone. That is correct at y+ <~ 3 and substantially
+# under-predicts wall shear at y+ 12. nutUSpaldingWallFunction is a single
+# continuous fit across sublayer, buffer and log layer, so it is valid
+# wherever the floor's y+ actually lands.
+#
+# WHY THIS RATHER THAN MORE CELLS. The alternative measured in that note is
+# mesh.n_relaxed_iter 0, which extrudes the full stack on the far-field road
+# for +7.6% cells and then fails checkMesh at aspect ratio 2609. This costs
+# nothing, changes no cell, and fixes the wall treatment rather than working
+# around it. The far field still does not matter much; the 0-0.25 m band
+# under the car, which reads y+ 7.08, is the part that does.
+#
+# Only nut is overridden. kLowReWallFunction and omegaWallFunction already
+# blend across the sublayer, so they pair with Spalding correctly.
+ROLE_WALL_FUNCTIONS: dict[PatchRole, dict[str, str]] = {
+    PatchRole.GROUND: {"nut": "nutUSpaldingWallFunction"},
+}
+
+
+def wall_functions_for(role: PatchRole, wall_fns: dict[str, str]) -> dict[str, str]:
+    """The case-wide wall treatment, with any per-role departure applied."""
+    return {**wall_fns, **ROLE_WALL_FUNCTIONS.get(role, {})}
+
+
+# The y+ range over which each nut wall function is a valid model.
+#
+# The y+ gate judges a patch against the band of the wall function THAT PATCH
+# ACTUALLY CARRIES, and this is where the two facts are tied together. Without
+# it the ground - which always runs Spalding, see ROLE_WALL_FUNCTIONS - would
+# be measured against the vehicle's low-Re 0-5 band and warn on every run at a
+# y+ its own wall function handles perfectly well. A warning that always fires
+# is a warning nobody reads, and it would mask a real floor problem later.
+#
+# Spalding's upper bound is the same 300 the high-y+ profile uses: it is a fit
+# through the log layer, not a licence to stop looking at the mesh.
+NUT_Y_PLUS_BAND: dict[str, tuple[float, float]] = {
+    "nutLowReWallFunction": (0.0, 5.0),
+    "nutkWallFunction": (30.0, 300.0),
+    "nutUSpaldingWallFunction": (0.0, 300.0),
+}
+
+
+def y_plus_band_for(
+    role: PatchRole, case_band: tuple[float, float]
+) -> tuple[float, float]:
+    """The y+ band this patch's own wall treatment is valid over.
+
+    `case_band` is spec.post.yplus_min/max, which follows the case-wide wall
+    treatment and is right for every patch that carries it. Only a role with a
+    departure in ROLE_WALL_FUNCTIONS gets its own band, and it is looked up
+    from the wall function rather than declared a second time - so a change to
+    the override cannot leave the gate judging against the old band.
+    """
+    override = ROLE_WALL_FUNCTIONS.get(role, {}).get("nut")
+    if override is None:
+        return case_band
+    return NUT_Y_PLUS_BAND[override]
+
 
 def inlet_turbulence(spec: CaseSpec) -> tuple[float, float]:
-    """Freestream k and omega from turbulence intensity and length scale."""
-    k = 1.5 * (spec.flow.turbulence_intensity * spec.flow.u_inf) ** 2
-    omega = k**0.5 / (C_MU**0.25 * spec.flow.turbulence_length_scale)
-    return k, omega
+    """Freestream k and omega from turbulence intensity and length scale.
+
+    Delegates to the spec so the numbers written into 0/k and 0/omega are the
+    same ones CaseSpec.nut_ratio reported and validate() judged. When the
+    formula lived here as well, the gate and the case file could disagree
+    without anything saying so.
+    """
+    return spec.inlet_k, spec.inlet_omega
 
 
 def location_in_mesh(domain: Domain) -> tuple[float, float, float]:
@@ -480,12 +558,16 @@ def build_bcs(
                 u_entry = {"type": "fixedValue", "value": freestream}
             else:
                 u_entry = {"type": "noSlip"}
+            # Not wall_fns: the floor's y+ is an outcome rather than a design
+            # choice, so it carries the all-y+ treatment. See
+            # ROLE_WALL_FUNCTIONS.
+            ground_fns = wall_functions_for(role, wall_fns)
             entries = {
                 "U": u_entry,
                 "p": {"type": "zeroGradient"},
-                "k": {"type": wall_fns["k"], "value": f"uniform {k}"},
-                "omega": {"type": wall_fns["omega"], "value": f"uniform {omega}"},
-                "nut": {"type": wall_fns["nut"], "value": "uniform 0"},
+                "k": {"type": ground_fns["k"], "value": f"uniform {k}"},
+                "omega": {"type": ground_fns["omega"], "value": f"uniform {omega}"},
+                "nut": {"type": ground_fns["nut"], "value": "uniform 0"},
             }
         else:  # BODY, TYRE
             spinning = (

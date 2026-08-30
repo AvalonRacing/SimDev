@@ -7,7 +7,7 @@ from simdev.gates.convergence import check_convergence
 from simdev.gates.yplus import check_y_plus
 from simdev.report.plots import plot_force_history, plot_residuals
 from simdev.report.results import ResultRecord, write_result
-from simdev.run.parsers import read_force_coeffs, read_y_plus
+from simdev.run.parsers import read_force_coeffs, read_y_plus, read_y_plus_area
 from simdev.run.runner import StageError
 from simdev.run.status import StageStatus, read_status, should_skip, write_status
 from simdev.stages.common import find_latest, load_spec
@@ -37,7 +37,11 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
     convergence = check_convergence(forces, spec)
 
     y_plus_df = read_y_plus(find_latest(run_dir, "yPlus/*/yPlus.dat"))
-    y_plus_gate = check_y_plus(y_plus_df, spec)
+    # The weighted number is what the gate judges; the yPlus function object's
+    # own mean is unweighted and reads low wherever cell size varies across a
+    # patch. Empty for runs meshed before those function objects existed, and
+    # check_y_plus falls back per patch and says so.
+    y_plus_gate = check_y_plus(y_plus_df, spec, read_y_plus_area(run_dir))
 
     mesh_status = read_status(run_dir, "mesh")
     n_cells = int(mesh_status.detail.get("n_cells", 0)) if mesh_status else 0
@@ -68,9 +72,14 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
         n_iterations=convergence.n_iterations,
         n_cells=n_cells,
         yplus_passed=y_plus_gate.passed,
+        # Selected, not coerced. The gate's detail also carries each patch's
+        # unweighted face mean and a string naming which basis it judged on,
+        # and float()-ing everything it returns used to be how a new detail
+        # key crashed the whole post stage.
         yplus={
-            k.replace("_avg_yplus", ""): float(v)
+            k[: -len("_avg_yplus")]: float(v)
             for k, v in y_plus_gate.detail.items()
+            if k.endswith("_avg_yplus")
         },
         reasons=[*convergence.reasons, *y_plus_gate.reasons],
     )

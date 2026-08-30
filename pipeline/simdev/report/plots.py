@@ -9,6 +9,22 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 
+# Fixed y-limits for the coefficient panels, so two runs can be read against
+# each other by eye. Autoscaling gives every run an axis fitted to its own
+# wobble, which is what makes a 5% shift between meshes look identical to a
+# 0.5% one - the comparison an A/B is actually for.
+#
+# THESE ARE THE CAR'S RANGES. The Ahmed validation case runs Cd ~ 0.3 and a
+# small POSITIVE Cl, which would sit squashed against the floor of the Cd panel
+# and entirely off the Cl panel. Give Ahmed its own entry, or empty this dict,
+# before reading a force plot from it - a trace that has left the axis looks
+# the same as one that was never plotted.
+FORCE_AXIS_LIMITS: dict[str, tuple[float, float]] = {
+    "Cd": (0.0, 2.0),
+    "Cl": (-3.0, 0.0),
+}
+
+
 def settled_from(df: pd.DataFrame, window: tuple[int, int]) -> float:
     """First iteration to scale the y-axis from, skipping the startup transient.
 
@@ -38,7 +54,7 @@ def settled_from(df: pd.DataFrame, window: tuple[int, int]) -> float:
 def plot_force_history(
     df: pd.DataFrame, out_path: Path, window: tuple[int, int]
 ) -> Path:
-    """Cd and Cl against iteration, scaled to read in the settled region.
+    """Cd and Cl against iteration, on fixed axes so runs compare by eye.
 
     Each panel carries the mean and the +/- 1 sigma band over the averaging
     window as well as the trace, because "is it converged" is a question
@@ -62,7 +78,10 @@ def plot_force_history(
                          label=f"{column} = {mean:.4f} +/- {std:.4f}")
             axis.axhspan(mean - std, mean + std, color="C3", alpha=0.12)
 
-        if len(settled):
+        limits = FORCE_AXIS_LIMITS.get(column)
+        if limits is not None:
+            axis.set_ylim(*limits)
+        elif len(settled):
             lo, hi = float(settled.min()), float(settled.max())
             pad = max((hi - lo) * 0.25, abs(hi) * 0.02, 1e-6)
             axis.set_ylim(lo - pad, hi + pad)

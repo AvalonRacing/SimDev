@@ -237,3 +237,40 @@ def test_every_wall_patch_gets_layers(tmp_path: Path) -> None:
     layers_block = text.split("layers\n    {")[1].split("}\n\n")[0]
     assert "ground" in layers_block
     assert "body" in layers_block
+
+
+# --- layer normal smoothing ------------------------------------------------
+
+
+def test_layer_normal_smoothing_defaults_to_snappys_own_values(
+    tmp_path: Path,
+) -> None:
+    """1 and 3 are snappy's defaults and what every run before 2026-08-30
+    used, so an unset case renders exactly what it used to."""
+    text = (_render(tmp_path) / "system" / "snappyHexMeshDict").read_text()
+    assert "nSmoothSurfaceNormals 1;" in text
+    assert "nSmoothNormals      3;" in text
+
+
+def test_layer_normal_smoothing_is_settable(tmp_path: Path) -> None:
+    """These two decide how hard snappy smooths the extrusion direction before
+    building the prism stack, and on a car that is 24% suspension and tyre by
+    wetted area they are the knob that decides whether the stack survives on
+    thin, curved parts. They were compared by hand-editing a rendered
+    dictionary, which made the better setting unreproducible - the caseSpec of
+    both runs was byte-identical.
+    """
+    spec = _spec(
+        {"mesh": {"n_smooth_surface_normals": 3, "n_smooth_normals": 10}}
+    )
+    text = (_render(tmp_path, spec) / "system" / "snappyHexMeshDict").read_text()
+    assert "nSmoothSurfaceNormals 3;" in text
+    assert "nSmoothNormals      10;" in text
+
+
+def test_layer_normal_smoothing_changes_the_spec_hash() -> None:
+    """It changes the mesh, so it has to change the hash - otherwise the stage
+    cache would skip re-meshing and hand back the previous mesh."""
+    assert _spec().spec_hash() != _spec(
+        {"mesh": {"n_smooth_normals": 10}}
+    ).spec_hash()

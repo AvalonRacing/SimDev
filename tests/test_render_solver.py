@@ -177,3 +177,78 @@ def test_fields_include_constraint_types_for_parallel_runs(tmp_path: Path) -> No
     for field in ("U", "p", "k", "omega", "nut"):
         text = (case / "0" / field).read_text()
         assert '#includeEtc "caseDicts/setConstraintTypes"' in text, field
+
+
+# --- the ground's own wall treatment ---------------------------------------
+
+
+def test_ground_uses_spalding_while_the_body_keeps_the_case_treatment() -> None:
+    """The ground is the one wall whose y+ nobody gets to design.
+
+    It is a blockMesh patch, so snappy never surface-refines it, and its layer
+    coverage is bimodal - layered under the car where the shells reach the
+    floor, bare beyond it. nutLowReWallFunction sets nu_t = 0 at the wall,
+    which is right at y+ ~1 and wrong at the y+ 7-12 the far field actually
+    runs at. Spalding is valid across the whole range and costs nothing.
+    """
+    bcs = _bcs(_spec(wall_treatment="low_y_plus"))
+    ground = next(b for b in bcs["nut"] if b.patch == "ground")
+    body = next(b for b in bcs["nut"] if b.patch == "body")
+    assert ground.entries["type"] == "nutUSpaldingWallFunction"
+    assert body.entries["type"] == "nutLowReWallFunction"
+
+
+def test_ground_keeps_the_blended_k_and_omega_wall_functions() -> None:
+    """Only nut is overridden. kLowReWallFunction and omegaWallFunction both
+    blend across the sublayer already, so they pair with Spalding correctly -
+    swapping them too would be a change with no argument behind it."""
+    bcs = _bcs(_spec(wall_treatment="low_y_plus"))
+    assert next(b for b in bcs["k"] if b.patch == "ground").entries["type"] == (
+        "kLowReWallFunction"
+    )
+    assert next(b for b in bcs["omega"] if b.patch == "ground").entries["type"] == (
+        "omegaWallFunction"
+    )
+
+
+def test_ground_uses_spalding_under_every_wall_treatment() -> None:
+    """The override is about the patch, not the case. Whatever the vehicle
+    runs, the floor's y+ is an outcome rather than a choice, so it gets the
+    treatment that is valid at any y+."""
+    for treatment in ("low_y_plus", "high_y_plus", "spalding"):
+        bcs = _bcs(_spec(wall_treatment=treatment))
+        ground = next(b for b in bcs["nut"] if b.patch == "ground")
+        assert ground.entries["type"] == "nutUSpaldingWallFunction", treatment
+
+
+# --- area-weighted y+ ------------------------------------------------------
+
+
+def test_controldict_area_averages_y_plus_on_every_wall(tmp_path: Path) -> None:
+    """The yPlus function object reports an unweighted face mean.
+
+    Small faces are fine cells are low y+, so on any patch whose cell size
+    varies the plain mean is biased low - measured at 7.40 against an
+    area-weighted 12.40 on this pipeline's own ground patch. The gate has to
+    read the weighted number, and only a surfaceFieldValue produces it.
+    """
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    for patch in ("body", "ground"):
+        assert f"yPlusArea_{patch}" in text, patch
+    assert "operation       areaAverage;" in text
+    assert "fields          (yPlus);" in text
+
+
+def test_area_average_is_declared_after_the_field_it_reads(tmp_path: Path) -> None:
+    """Function objects execute in dictionary order and surfaceFieldValue
+    reads yPlus out of the registry, so the yPlus object has to have run
+    first. Declared the other way round it silently finds nothing."""
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    assert text.index("\n    yPlus\n") < text.index("yPlusArea_")
+
+
+def test_area_average_is_not_written_for_non_wall_patches(tmp_path: Path) -> None:
+    """y+ on an inlet is meaningless and the patch carries no wall function."""
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    for patch in ("inlet", "outlet", "farfield", "symmetry"):
+        assert f"yPlusArea_{patch}" not in text, patch

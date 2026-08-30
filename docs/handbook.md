@@ -225,12 +225,46 @@ High-y⁺ wall functions are *invalid* on appendages at this scale — the first
 cell swallows most of the boundary layer exactly where downforce is generated.
 So the RC car runs `low_y_plus` (y⁺ ≈ 1, ~40 µm first cell, 15–20 layers).
 
-But the Ahmed validation case runs at Re ≈ 2.8×10⁶, where wall-resolving means a
+But the Ahmed body runs at Re ≈ 2.8×10⁶, where wall-resolving means a
 ~10 µm first cell and a mesh too heavy to iterate against. So it runs
-`high_y_plus`, which is also what most published CFD comparisons use.
+`high_y_plus`, which is also what most published CFD comparisons use. (That
+case was the pipeline's validation case until 2026-08-30, when the validation
+effort was dropped. It survives as `tests/fixtures/ahmed.yaml`, the fastest
+complete case the suite has, and is still what exercises `high_y_plus` end to
+end — which is the reason the profile is worth keeping honest.)
 
 Same code path, different profile. The **y⁺ gate enforces whichever profile is
 active**, so the two can't be confused.
+
+**One patch departs from the case-wide treatment: the ground.** Every vehicle
+patch has a surface refinement level and a prism stack sized against it, so its
+y⁺ is a *decision*. The ground has neither — it is a `blockMesh` patch, never
+enters `refinementSurfaces`, and its layer coverage is bimodal (layered under
+the car where the refinement shells reach the floor, bare beyond it). Measured
+on the 20.87 M run it comes out at y⁺ 7.4 unweighted / 12.4 area-weighted, and
+`nutLowReWallFunction` — which sets ν_t = 0 at the wall — is simply not valid
+there. So `ROLE_WALL_FUNCTIONS` in `render/context.py` gives the ground
+`nutUSpaldingWallFunction`, which is continuous across sublayer, buffer and log
+layer. Only `nut` is overridden; `kLowReWallFunction` and `omegaWallFunction`
+already blend. It costs no cells, which is why it was preferred to the
+`n_relaxed_iter 0` mesh change that buys the same thing for +7.6 % cells and a
+`checkMesh` aspect-ratio failure.
+
+**The gate judges the area-weighted mean, not the face mean.** OpenFOAM's
+`yPlus` function object reports an unweighted average over a patch's faces —
+a tiny face and a huge one count equally. How wrong that is depends on how y⁺
+correlates with face size on that patch, and **the direction is not
+universal**. Measured on `car-nut10-smooth`: the ground reads 10.37 unweighted
+against 20.65 area-weighted (+99 %), because it is bimodal — many tiny refined
+faces under the car at low y⁺, a few huge bare faces far out at high y⁺ — while
+the vehicle patches run the other way and read 0–9 % *high*. Either way the
+unweighted number is the wrong average, and the ground is where it is badly
+wrong. `controlDict` therefore carries one `surfaceFieldValue` per wall patch
+(`yPlusArea_<patch>`, `operation areaAverage`), declared *after* the `yPlus`
+object because it reads that field out of the registry and the other order
+silently finds nothing. Runs meshed before those objects existed fall back to
+the face mean **per patch**, and the gate says so rather than judging quietly
+on the weaker number.
 
 ### 3.7 Why the ground is a per-case field
 
@@ -271,7 +305,7 @@ overrides.
 
 ## 4. Anatomy of a run
 
-`simdev run cases/ahmed/config.yaml --run-dir ~/runs/ahmed-01 --profile dev`
+`simdev run cases/car/config.yaml --run-dir ~/runs/car-01 --profile car_smoke`
 
 The case argument is the config **file**, not the case directory.
 

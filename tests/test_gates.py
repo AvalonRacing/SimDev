@@ -590,3 +590,105 @@ def test_production_profiles_still_trust_check_mesh() -> None:
         RESOLUTION_PROFILES["car_smoke"]["mesh"]["trust_check_mesh_verdict"]
         is False
     )
+
+
+# --- area-weighted y+ ------------------------------------------------------
+
+
+def _yplus_df(**patches: float) -> pd.DataFrame:
+    """One row per patch carrying the unweighted face mean the yPlus function
+    object reports."""
+    names = list(patches)
+    return pd.DataFrame(
+        {
+            "Time": [1] * len(names),
+            "patch": names,
+            "min": [0.1] * len(names),
+            "max": [v * 10 for v in patches.values()],
+            "average": list(patches.values()),
+        }
+    )
+
+
+def test_gate_judges_the_area_weighted_value_not_the_face_mean() -> None:
+    """A patch can pass unweighted and fail weighted, and that is the whole
+    reason this exists: the unweighted mean over-counts small faces, which are
+    the fine cells, which are the low y+. Face mean 4.9 against a bound of 5
+    looks safe; area-weighted 8.2 is outside the band the wall treatment
+    assumes."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(_yplus_df(body=4.9), spec, area_weighted={"body": 8.2})
+    assert result.passed is False
+    assert any("8.2" in r for r in result.reasons)
+
+
+def test_gate_passes_when_the_area_weighted_value_is_inside_the_band() -> None:
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    assert check_y_plus(_yplus_df(body=4.9), spec, area_weighted={"body": 2.1}).passed
+
+
+def test_gate_records_both_numbers_so_the_bias_is_visible() -> None:
+    """The gap between them is diagnostic - it says how uneven the patch's
+    cell size is - so the one that was not judged is still recorded."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(_yplus_df(body=1.0), spec, area_weighted={"body": 2.5})
+    assert result.detail["body_avg_yplus"] == pytest.approx(2.5)
+    assert result.detail["body_facemean_yplus"] == pytest.approx(1.0)
+
+
+def test_gate_falls_back_to_the_face_mean_and_says_so() -> None:
+    """Runs meshed before the area-average function objects existed have no
+    weighted number. Judging them silently on the unweighted mean would hide
+    exactly the bias this change is about."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(_yplus_df(body=1.0), spec, area_weighted={})
+    assert result.passed is True
+    assert any("not area-weighted" in r.lower() for r in result.reasons)
+    assert result.detail["body_avg_yplus"] == pytest.approx(1.0)
+
+
+def test_fallback_is_per_patch() -> None:
+    """A patch missing from the weighted set falls back on its own, without
+    dragging the patches that do have a weighted number down with it."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(
+        _yplus_df(body=1.0, ground=4.0), spec, area_weighted={"body": 2.5}
+    )
+    assert result.detail["body_avg_yplus"] == pytest.approx(2.5)
+    assert result.detail["ground_avg_yplus"] == pytest.approx(4.0)
+
+
+# --- the band follows each patch's own wall function ------------------------
+
+
+def test_a_spalding_ground_is_not_judged_against_the_low_re_band() -> None:
+    """The ground carries nutUSpaldingWallFunction whatever the case runs
+    (see ROLE_WALL_FUNCTIONS). Spalding is a continuous fit across sublayer,
+    buffer and log layer, so y+ 5.4 on it is not a finding - judging it
+    against the vehicle's 0-5 band reports a problem that does not exist, and
+    a warning that always fires is a warning nobody reads.
+    """
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(
+        _yplus_df(body=1.0, ground=5.4), spec, area_weighted={"body": 1.0, "ground": 5.4}
+    )
+    assert not any("ground" in r for r in result.reasons)
+
+
+def test_the_vehicle_is_still_judged_against_the_case_band() -> None:
+    """The override is the ground's alone. A force patch at 5.4 is still a
+    failure, because it carries nutLowReWallFunction and 5.4 is outside it."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(_yplus_df(body=5.4), spec, area_weighted={"body": 5.4})
+    assert result.passed is False
+    assert any("body" in r for r in result.reasons)
+
+
+def test_a_spalding_ground_still_warns_when_it_leaves_spaldings_own_band() -> None:
+    """Not a licence to ignore the floor. Spalding is valid to y+ ~300; past
+    that the wall model is wrong there too and it is still worth saying."""
+    spec = _spec({"physics": {"wall_treatment": "low_y_plus"}})
+    result = check_y_plus(
+        _yplus_df(body=1.0, ground=450.0), spec, area_weighted={"ground": 450.0}
+    )
+    assert any("ground" in r for r in result.reasons)

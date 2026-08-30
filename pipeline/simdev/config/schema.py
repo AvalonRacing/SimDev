@@ -10,6 +10,11 @@ from pydantic import BaseModel, Field
 
 from simdev.geometry.roles import PatchRole
 
+# k-omega's C_mu. Lives here rather than in the renderer because the freestream
+# turbulence properties below are derived from it and validate() judges them
+# before anything is rendered; render.context imports this one.
+C_MU = 0.09
+
 
 class WallTreatment(str, Enum):
     LOW_Y_PLUS = "low_y_plus"
@@ -319,6 +324,29 @@ class MeshConfig(BaseModel):
     # refined by the shells and is layered either way - 21 um against 24 um,
     # i.e. unchanged where it matters.
     n_relaxed_iter: int = Field(default=1, ge=0)
+    # How hard snappy smooths the layer extrusion DIRECTION before building
+    # the prism stack: n_smooth_surface_normals smooths the surface normals,
+    # n_smooth_normals smooths the interior displacement field derived from
+    # them. Defaults are snappy's own, and are what every run before
+    # 2026-08-30 rendered.
+    #
+    # THEY ARE HERE BECAUSE A COMPARISON WAS RUN THAT THE PIPELINE COULD NOT
+    # REPRODUCE. ~/runs/car-all7 and ~/runs/car-all7-smooth differ in exactly
+    # these two values (1/3 against 3/10) and in nothing else - their
+    # caseSpec.json files are byte-identical, because the values were
+    # hardcoded in the template and the second run was a hand-edit of the
+    # rendered dictionary. Whichever setting won, it could not have been
+    # carried forward, and no status file would have said why the meshes
+    # differed.
+    #
+    # They matter on this car specifically: it is 24% suspension and tyre by
+    # wetted area, and on thin curved sections the extrusion direction is what
+    # decides whether the stack survives at all (see mesh.min_layer_coverage
+    # in cases/car/config.yaml). More smoothing generally buys layer coverage
+    # on those parts at the cost of the stack following the surface less
+    # closely elsewhere.
+    n_smooth_surface_normals: int = Field(default=1, ge=0)
+    n_smooth_normals: int = Field(default=3, ge=0)
     # Fraction of the surface cell the whole prism stack may occupy. Also
     # rendered as snappy's own maxFaceThicknessRatio, so the pipeline's limit
     # and snappy's truncation threshold can never disagree.
@@ -744,6 +772,36 @@ class CaseSpec(BaseModel):
                 math.floor(math.log1p(budget * (ratio - 1.0) / t_1) / math.log(ratio))
             )
         return max(0, min(self.mesh.n_layers, fits))
+
+    @property
+    def inlet_k(self) -> float:
+        """Freestream turbulent kinetic energy from the turbulence intensity."""
+        return 1.5 * (self.flow.turbulence_intensity * self.flow.u_inf) ** 2
+
+    @property
+    def inlet_omega(self) -> float:
+        """Freestream specific dissipation rate from the length scale."""
+        return self.inlet_k**0.5 / (C_MU**0.25 * self.flow.turbulence_length_scale)
+
+    @property
+    def nut_ratio(self) -> float:
+        """Freestream eddy viscosity over molecular, nu_t/nu at the inlet.
+
+        The number that says whether the body sits in clean air or in soup,
+        and the reason turbulence_intensity and turbulence_length_scale cannot
+        be read one at a time: each is individually plausible, and only their
+        combination says what the freestream actually does to a boundary
+        layer. For external aero the target is roughly 1-10. At 100+ the
+        boundary layers on thin sections behave fully turbulent and thick,
+        separation is suppressed, and the vortical structures a wing or
+        underbody works by get diffused away - which spends a wall-resolved
+        mesh on a wall the freestream has already decided the answer for.
+
+        Derived here rather than in the renderer because validate() has to
+        judge it before anything is rendered, and render.context has to write
+        the very numbers that were judged. See validate.py for the band.
+        """
+        return self.inlet_k / self.inlet_omega / self.flow.nu
 
     @property
     def omega_rotation(self) -> float | None:

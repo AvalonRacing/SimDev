@@ -7,7 +7,7 @@ import pytest
 
 from simdev.cli import main
 
-CASE = Path("cases/ahmed/config.yaml")
+CASE = Path(__file__).parent / "fixtures" / "ahmed.yaml"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("simpleFoam") is None, reason="requires OpenFOAM on PATH"

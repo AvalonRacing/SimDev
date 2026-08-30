@@ -159,7 +159,7 @@ The form that works:
 ```bash
 wsl -d Ubuntu-24.04 -- bash -lc 'source /usr/lib/openfoam/openfoam2412/etc/bashrc
 cd ~/SimDev
-~/.venvs/simdev/bin/simdev run cases/ahmed/config.yaml --run-dir ~/runs/ahmed-01 --profile dev'
+~/.venvs/simdev/bin/simdev run cases/car/config.yaml --run-dir ~/runs/car-smoke --profile car_smoke'
 ```
 
 Also note that Git Bash rewrites bare Unix paths passed as `wsl.exe`

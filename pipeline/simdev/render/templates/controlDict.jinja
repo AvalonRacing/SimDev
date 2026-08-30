@@ -92,9 +92,47 @@ functions
     {
         type            yPlus;
         libs            ("libfieldFunctionObjects.so");
+        executeControl  writeTime;
         writeControl    writeTime;
         log             true;
     }
+
+    // AREA-WEIGHTED y+, ONE PER WALL PATCH, AND THE GATE READS THESE RATHER
+    // THAN THE OBJECT ABOVE.
+    //
+    // `yPlus` reports an unweighted mean over the faces of a patch, counting
+    // a tiny face and a huge one equally. How wrong that is depends on how y+
+    // correlates with face size on the patch, and THE DIRECTION IS NOT
+    // UNIVERSAL. Measured on car-nut10-smooth:
+    //
+    //     ground    face-mean 10.37   area-weighted 20.65   +99%
+    //     SUS_FL    face-mean  1.130  area-weighted  1.031   -9%
+    //
+    // The ground is bimodal - many tiny refined faces under the car at low
+    // y+, a few huge bare faces far out at high y+ - so its unweighted mean
+    // is dragged down and reports half the real number. On the vehicle the
+    // correlation reverses and it reads slightly high. Either way it is the
+    // wrong average, and the ground is the patch it is badly wrong on.
+    //
+    // DECLARED AFTER `yPlus` ON PURPOSE. surfaceFieldValue reads yPlus out of
+    // the object registry, function objects execute in dictionary order, and
+    // the other order finds nothing and reports nothing - with no error.
+    // executeControl on both is writeTime so they fire together.
+{% for p in wall_patches %}
+    yPlusArea_{{ p }}
+    {
+        type            surfaceFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        regionType      patch;
+        name            {{ p }};
+        operation       areaAverage;
+        fields          (yPlus);
+        writeFields     false;
+        executeControl  writeTime;
+        writeControl    writeTime;
+        log             false;
+    }
+{% endfor %}
 
     residuals
     {

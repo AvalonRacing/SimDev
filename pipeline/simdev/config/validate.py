@@ -10,6 +10,18 @@ Y_PLUS_ERROR_FACTOR = 5.0
 # wall function is being applied across what is effectively one cell.
 MIN_USEFUL_LAYERS = 3
 
+# Freestream eddy-viscosity ratio, nu_t/nu at the inlet. See
+# CaseSpec.nut_ratio for what it does to the solution.
+#
+# The band is deliberately wider than the target. 1-10 is where external aero
+# wants to be; the warning fires at 20 so that a case sitting a little high
+# for a defensible reason is not nagged on every run, while the 100+ that a
+# tutorial-default length scale produces is impossible to miss.
+NUT_RATIO_TARGET_LO = 1.0
+NUT_RATIO_TARGET_HI = 10.0
+NUT_RATIO_MAX = 20.0
+NUT_RATIO_MIN = 0.1
+
 
 class ValidationError(Exception):
     def __init__(self, errors: list[str]) -> None:
@@ -285,6 +297,33 @@ def validate(spec: CaseSpec) -> list[str]:
             "static ground under a vehicle case: ground-effect aerodynamics "
             "will be wrong unless you are deliberately matching a fixed-floor "
             "experiment"
+        )
+
+    # --- freestream turbulence -------------------------------------------
+    # turbulence_intensity and turbulence_length_scale are each plausible on
+    # their own at almost any value, and neither one appears in the solution
+    # as itself. What reaches the car is nu_t/nu, and it is their product -
+    # so this is the only place the pair can be judged, and it has to be
+    # judged before the mesh is built rather than inferred from a wrong
+    # answer afterwards.
+    ratio = spec.nut_ratio
+    if ratio > NUT_RATIO_MAX:
+        warnings.append(
+            f"freestream nu_t/nu is {ratio:.0f}, above {NUT_RATIO_MAX:.0f}: "
+            f"the oncoming air is {ratio:.0f}x more diffusive than molecular, "
+            "which thickens boundary layers on thin sections, suppresses "
+            "separation and diffuses the vortices a wing or underbody works "
+            f"by (target {NUT_RATIO_TARGET_LO:.0f}-{NUT_RATIO_TARGET_HI:.0f}). "
+            "Lower flow.turbulence_length_scale - it is the lever, and "
+            "turbulence_intensity sets k independently of it"
+        )
+    elif ratio < NUT_RATIO_MIN:
+        warnings.append(
+            f"freestream nu_t/nu is {ratio:.3g}, below {NUT_RATIO_MIN}: the "
+            "freestream carries almost no eddy viscosity, and kOmegaSST may "
+            "laminarise in shear layers it should resolve as turbulent. Raise "
+            f"flow.turbulence_length_scale (target "
+            f"{NUT_RATIO_TARGET_LO:.0f}-{NUT_RATIO_TARGET_HI:.0f})"
         )
 
     if errors:

@@ -66,7 +66,42 @@ flow:
   nu: 1.5e-05
   rho: 1.225
   turbulence_intensity: 0.01
-  turbulence_length_scale: 0.02
+  # 20 mm -> 1.5 mm, 2026-08-30. THIS IS NOT A LENGTH SCALE MEASUREMENT, IT IS
+  # HOW THE FREESTREAM EDDY VISCOSITY IS SET. Read it as nu_t/nu and nothing
+  # else; validate() prints that number on every run.
+  #
+  # What these two lines actually produce is nu_t = k/omega at the inlet, and
+  # at 20 mm that was:
+  #
+  #   k     = 1.5 (0.01 x 15)^2      = 0.03375 m2/s2
+  #   omega = sqrt(k)/(Cmu^0.25 L)   = 16.77 1/s
+  #   nu_t  = k/omega                = 2.01e-3 m2/s
+  #   nu_t/nu                        = 134
+  #
+  # i.e. the car was sitting in air 134 times more diffusive than molecular.
+  # SST decay over the 2.2 m inlet run is negligible - 147 ms of transit takes
+  # it to 128 - so that is what arrived at the bodywork, not a starting value
+  # that relaxes.
+  #
+  # WHY IT MATTERS HERE MORE THAN ANYWHERE. This case spends its entire cell
+  # budget on resolving walls: low_y_plus, a 25 um first layer, 20 M cells.
+  # The stated reason (physics.wall_treatment above) is that at Re_chord ~4e4
+  # a high-y+ first cell swallows the boundary layer. A freestream at nu_t/nu
+  # 134 swallows it from the other side - the 42 mm wing chord runs fully
+  # turbulent and thick whatever the mesh does, separation is suppressed, and
+  # the vortices the underbody and wing work by get diffused. The wall
+  # resolution was being spent on a boundary layer the inlet had already
+  # decided.
+  #
+  # 1.5 mm puts nu_t/nu at 10.1, at the top of the 1-10 band external aero
+  # wants. The intensity is untouched: it sets k, and k is not the problem -
+  # the length scale is the only lever on nu_t at fixed k.
+  #
+  # EXPECT THIS TO MOVE THE FORCES, and it is not a mesh effect. Thinner
+  # boundary layers and less suppressed separation mean the run history from
+  # before this date is not comparable across this line. It is also the first
+  # thing to suspect if the limit-cycle amplitude changes character.
+  turbulence_length_scale: 0.0015
 
   # The CAD assembly is built nose-forward along +x, so the car travels along
   # +x and the air comes at it from +x. The tunnel is reversed rather than the
@@ -154,6 +189,38 @@ mesh:
   # nothing, which is a real failure mode and the one worth catching.
   min_layer_coverage: 0.2
   n_layers: 6
+  # LAYER NORMAL SMOOTHING, RAISED FROM SNAPPY'S 1/3, 2026-08-30. Measured on
+  # two otherwise identical 31 M meshes - ~/runs/car-all7 (1/3) against
+  # ~/runs/car-all7-smooth (3/10), y+ read at iteration 125 on both:
+  #
+  #   patch      layers 1/3 -> 3/10     y+ 1/3 -> 3/10
+  #   SUS_FL       2.85    2.90          0.514   0.436   -15%
+  #   SUS_FR       2.84    2.87          0.473   0.418   -12%
+  #   SUS_RL       2.90    2.95          0.837   0.803    -4%
+  #   SUS_RR       2.89    2.94          0.722   0.623   -14%
+  #   Wing         4.15    4.17          1.064   1.052
+  #   Body         4.50    4.50          0.558   0.558   unchanged
+  #   Chassis, tyres, ground              unchanged to 2 dp
+  #
+  # It acts on the suspension and nowhere else, which is exactly what it
+  # should do: 4-6 mm links are where snappy struggles to build a medial axis
+  # it trusts (see min_layer_coverage above), and smoothing the extrusion
+  # direction is what lets the stack survive there. Cost is +0.08% cells
+  # (31.07 -> 31.09 M) and slightly worse skewness (7.11 -> 7.44 max, 21 -> 22
+  # highly skew faces), both still passing the mesh gate.
+  #
+  # DO NOT READ THIS AS A BIG WIN. Every force-bearing patch passed the 0-5
+  # band on BOTH meshes - the worst was Wing at ~1.05 - so this improves the
+  # already-adequate. It is taken because it is nearly free and it helps the
+  # one region that is genuinely under-layered at 2.9 of 6 requested, not
+  # because anything was failing.
+  #
+  # These were literals in the template until this date, which is why
+  # car-all7 and car-all7-smooth have byte-identical caseSpec.json files: the
+  # comparison was a hand-edit of a rendered dictionary and could not have
+  # been carried forward. They are spec fields now and change the spec hash.
+  n_smooth_surface_normals: 3
+  n_smooth_normals: 10
   # 40 -> 25 um, 2026-08-22, TO BUY STACK HEADROOM RATHER THAN TO CHASE y+
   # DIRECTLY. The note above explains why 40 um was chosen over the 20 um
   # wall-profile default: it moved y+ from 0.46 to 0.93 and stopped spending
@@ -330,12 +397,58 @@ domain:
   # the whole 20 mm band: 0.549 m^2 x 20 mm is 0.0098 m^3, and at 0.75 mm that
   # is 23 M cells however it is arranged. Surface refinement thickens the mesh
   # beside the wall; a volume shell fills the band. They are not the same buy.
+  #
+  # LADDER FACTOR CUT FROM 2 TO 1.5, 2026-08-30, KEEPING THE FINEST OFFSET.
+  # The 20 mm level 5 band is exactly as it was; every coarser step now
+  # multiplies the reach by 1.5 rather than doubling it:
+  #
+  #   level 5  0.0200 m  1.5 mm      level 2  0.0675 m  12 mm
+  #   level 4  0.0300 m  3   mm      level 1  0.1012 m  24 mm
+  #   level 3  0.0450 m  6   mm
+  #
+  # WHAT IT BUYS, on the same voxel estimate as the note above:
+  #
+  #                     was (x2)              now (x1.5)
+  #   L5  1.5 mm      0- 20 mm  3.25 M      0- 20 mm  3.25 M
+  #   L4  3   mm     20- 80 mm  1.22 M     20- 30 mm  0.20 M
+  #   L3  6   mm     80-160 mm  0.20 M     30- 45 mm  0.04 M
+  #   L2 12   mm    160-320 mm  0.05 M     45- 67 mm  0.01 M
+  #   L1 24   mm    320-640 mm  0.01 M     67-101 mm  0.00 M
+  #                            4.74 M                3.50 M
+  #
+  # -1.24 M, about a quarter of the volume refinement, and essentially all of
+  # it out of the level 4 band. THE OUTER SHELLS ARE NOT WHERE THE SAVING IS:
+  # level 1 and 2 hold 0.06 M between them at the old reach, which is the same
+  # thing the 2026-08-21 note measured on a finished mesh (49,154 cells, 0.24%
+  # of the total), so pulling them from 640 mm to 101 mm saves nothing
+  # countable. They are now only the buffer that steps level 3 down to the
+  # 48 mm background.
+  #
+  # WHAT IT COSTS IS THE 2026-08-22 COMPLAINT AGAIN. The 3 mm band ends 30 mm
+  # off the surface where it ended at 80 mm, and the whole vehicle structure
+  # stops 101 mm out where it reached 640 mm. 53 mm was judged "coarsened too
+  # fast off the bodywork" once already and pushed out to 88 mm; 30 mm is well
+  # inside that.
+  #
+  # WHAT IS DIFFERENT THIS TIME IS domain.wake BELOW, which the 2026-08-22
+  # note did not have in its present shape. The tube starts at the car's own
+  # centre and its tiers are `mode distance` from the tube walls, so level 3
+  # (6 mm) reaches 0.50 body lengths - 220 mm - out from those walls and
+  # backfills most of the near field beside and behind the car that these
+  # shells have stopped covering. AHEAD OF THE CAR IT DOES NOT: the tube spans
+  # 0 to 1.0 body lengths DOWNSTREAM of theta_car and the nose sits 242 mm
+  # upstream of it, so the front of the car is outside the 220 mm level 3 rind
+  # and hands off to the level 2 (12 mm) one instead. Nose and front wing are
+  # therefore where to read this first, and the per-patch forceCoeffs monitors
+  # are what to read it with. 1.75 is the next factor up if it is too coarse -
+  # it puts the 3 mm band back out to 35 mm and the reach to 188 mm, and costs
+  # +0.14 M.
   refinement_shells:
-    - {distance: 0.04545, level: 5}
-    - {distance: 0.18182, level: 4}
-    - {distance: 0.36364, level: 3}
-    - {distance: 0.72727, level: 2}
-    - {distance: 1.45455, level: 1}
+    - {distance: 0.04545, level: 5}    # 0.0200 m
+    - {distance: 0.06818, level: 4}    # 0.0300 m
+    - {distance: 0.10227, level: 3}    # 0.0450 m
+    - {distance: 0.15341, level: 2}    # 0.0675 m
+    - {distance: 0.23011, level: 1}    # 0.1012 m
 
   # The curved wake region NOT A WAKE REGION above warns about. Swept along
   # the same arc the annulus domain itself is built from - domain.point() at
@@ -398,13 +511,19 @@ domain:
   # volume refinement (see refinement_shells above - shortening it is worth
   # -1.43 M cells, and it is what pays for the wider near-field shells).
   #
-  # NOTE THE HANDOFF NOW REVERSES, and validate() will say so on every run:
-  # the vehicle shells reach 1.80 body lengths and the wake tube stops at
-  # 1.00, so the shells out-reach the wake rather than handing off to it. That
-  # is the intended arrangement now, not an oversight - past the tube the near
-  # wake is on the level 1/2 shells (24/12 mm) rather than dropping to raw
-  # 48 mm background. The warning is worth leaving in place: it is exactly the
-  # thing to re-read if a future change moves either number.
+  # THE HANDOFF REVERSED FOR A WEEK AND HAS NOW REVERSED BACK. Between
+  # 2026-08-22 and 2026-08-30 the vehicle shells out-reached this tube - 1.80,
+  # then 1.45 body lengths against an end of 1.00 - and validate() said so on
+  # every run, deliberately. The 2026-08-30 ladder factor cut takes the shells
+  # to 0.23, so the tube out-reaches them again by a wide margin and that
+  # warning no longer fires.
+  #
+  # WHICH MAKES THIS TUBE LOAD-BEARING IN A WAY IT WAS NOT. It is no longer
+  # only the far wake: its level 3 tier is now what resolves the near field
+  # beside and behind the car from 101 mm out, because the vehicle shells stop
+  # there. Shortening `end` or narrowing half_width/half_height now coarsens
+  # the car's own surroundings, not just the wake - read refinement_shells
+  # above before touching either.
   wake:
     start: 0.0
     end: 1.0
@@ -466,10 +585,40 @@ domain:
   shell_surface_tolerance: 0.002
 
 forces:
-  # Declared, not measured. The pipeline no longer computes a projected area
-  # from the triangles, so this is the only reference area in play - it
+  # A FIXED COMPARISON DATUM, DELIBERATELY NOT THIS CAR'S FRONTAL AREA.
+  # Do not "correct" it. 2026-08-30.
+  #
+  # Declared, not measured: the pipeline computes no projected area from the
+  # triangles, so this is the only reference area in play - it
   # non-dimensionalises every coefficient AND is what the blockage check is
   # measured against.
+  #
+  # IT IS 30% BELOW THE ACTUAL PROJECTED AREA, AND THAT IS THE INTENT.
+  # Measured off the exported STLs (all eleven force-bearing parts, unioned,
+  # projected on x, clipped at z >= 0, grid-converged at 0.5 and 0.25 mm):
+  #
+  #   Body 239.35 cm2   Chassis 67.84   Wing 43.30   SUS x4 62.24
+  #   tyres 27.72 / 25.44 / 21.11 / 23.79
+  #   union = 0.02853 m2   against 0.02 declared   (ratio 0.701)
+  #
+  # So every Cd and Cl this pipeline reports is 1/0.701 = 1.427x what it would
+  # be on the true area. TWO REASONS THAT IS THE RIGHT CHOICE HERE:
+  #
+  #   1. The StarCCM+ benchmark numbers this case is measured against were
+  #      non-dimensionalised on the same 0.02. Changing it here would break
+  #      the only external comparison there is.
+  #   2. The point of the case is comparing DESIGNS, and competing designs
+  #      have slightly different frontal areas. A reference area that tracks
+  #      the geometry would fold an area change into every coefficient and
+  #      make two designs incomparable; a fixed datum keeps the coefficient
+  #      proportional to force, which is the quantity being traded.
+  #
+  # WHAT THIS COSTS, so nobody is surprised by it: these coefficients are not
+  # comparable with published Cd/Cl for any other vehicle, and the blockage
+  # check below is 43% optimistic (real blockage ~0.8% against the 1% limit,
+  # so it still passes - but it is measured on this number, not on the car).
+  # If an absolute, externally comparable coefficient is ever wanted, divide
+  # by 1.427 rather than changing this line.
   a_ref_full: 0.02
   l_ref: 0.44
   c_of_r: [0.0, 0.0, 0.0]

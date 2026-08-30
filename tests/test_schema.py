@@ -158,3 +158,42 @@ def test_the_smoke_profile_caps_refinement() -> None:
     mesh = RESOLUTION_PROFILES["car_smoke"]["mesh"]
     assert mesh["refinement_cap"] is not None
     assert mesh["refinement_cap"] <= mesh["surface_refinement_max"]
+
+
+# --- freestream turbulence -------------------------------------------------
+#
+# k, omega and the eddy-viscosity ratio they imply are properties of the spec,
+# not of the renderer: validate() has to judge the ratio before anything is
+# rendered, and context.inlet_turbulence has to write the same two numbers the
+# judgement was made on. One formula, one owner.
+
+
+def test_inlet_k_and_omega_come_from_intensity_and_length_scale() -> None:
+    """40 m/s at 1% intensity on a 10 mm length scale."""
+    spec = _spec()
+    assert spec.inlet_k == pytest.approx(0.24, rel=1e-6)
+    assert spec.inlet_omega == pytest.approx(89.4427, rel=1e-4)
+
+
+def test_nut_ratio_is_freestream_eddy_viscosity_over_molecular() -> None:
+    """nu_t/nu at the inlet - the number that says whether the freestream is
+    clean air or soup. 0.24/89.4427 = 2.683e-3 against nu = 1.5e-5."""
+    assert _spec().nut_ratio == pytest.approx(178.885, rel=1e-4)
+
+
+def test_nut_ratio_falls_when_the_length_scale_shrinks() -> None:
+    """The length scale is the lever: omega goes up, nut goes down.
+
+    1.5 mm at 15 m/s is the car's setting and lands just above 10.
+    """
+    spec = CaseSpec.model_validate(
+        {
+            **_spec().model_dump(mode="json"),
+            "flow": {
+                "u_inf": 15.0,
+                "turbulence_intensity": 0.01,
+                "turbulence_length_scale": 0.0015,
+            },
+        }
+    )
+    assert spec.nut_ratio == pytest.approx(10.06, rel=1e-3)
