@@ -9,9 +9,25 @@ from simdev.config.schema import CaseSpec
 COEFFICIENTS = ("Cd", "Cl")
 
 
+# The three things a run can be, and why a boolean could not say them.
+#
+# "converged" and "not_converged" are verdicts. "not_judged" is the absence of
+# one - the run was stopped somewhere nobody tested, either because drift_tol
+# is unset (see profiles.RESOLUTION_PROFILES["car"]) or because it was too
+# short to hold two windows to compare.
+#
+# IT USED TO COLLAPSE INTO converged = not failures, AND THAT SHIPPED A WRONG
+# ANSWER. ~/runs/car-all7-smooth was killed by hand at iteration 127 of 500,
+# mid-transient, recorded Cd drift -17.23% and Cl +23.64% between its last two
+# windows, and wrote converged: true - because with drift_tol None those drifts
+# were notes rather than failures and only amplitude_tol gated. The disclaimer
+# was in `reasons`; the boolean is what a sweep reads.
+VERDICTS = ("converged", "not_converged", "not_judged")
+
+
 @dataclass(frozen=True)
 class ConvergenceResult:
-    converged: bool
+    verdict: str
     reasons: list[str] = field(default_factory=list)
     means: dict[str, float] = field(default_factory=dict)
     stds: dict[str, float] = field(default_factory=dict)
@@ -21,6 +37,23 @@ class ConvergenceResult:
     amplitudes: dict[str, float] = field(default_factory=dict)
     window: tuple[int, int] = (0, 0)
     n_iterations: int = 0
+    # Whether the stage should flag. SEPARATE FROM `verdict` ON PURPOSE,
+    # because "not_judged" arrives two ways that deserve opposite handling:
+    # a full run whose profile deliberately unsets drift_tol has opted out of
+    # the test and must not be reported as a failure, while a run too short to
+    # fill two windows could not be tested and should be. Both are honestly
+    # "not judged"; only the second is a problem.
+    gate_failed: bool = False
+
+    @property
+    def converged(self) -> bool:
+        """True ONLY for a run that was judged and passed.
+
+        A not_judged run is False here. That is deliberate and it is the safe
+        direction: a caller that has not been taught about `verdict` gets
+        "do not trust this", never a convergence claim nobody made.
+        """
+        return self.verdict == "converged"
 
 
 def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
@@ -63,7 +96,8 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
 
     if n < window:
         return ConvergenceResult(
-            converged=False,
+            verdict="not_judged",
+            gate_failed=True,
             reasons=[
                 f"only {n} iterations recorded, need at least {window} to judge "
                 "a plateau"
@@ -126,8 +160,13 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
                 f"{drift_tol:.2%} bound"
             )
 
-    if previous is None:
-        failures.append(
+    # An absence of evidence, not evidence of drift - so it withholds the
+    # verdict rather than returning one, but it still flags: nobody asked for
+    # an unjudged run here, the run just stopped too early to be judged.
+    judged = previous is not None and drift_tol is not None
+    too_short = previous is None
+    if too_short:
+        notes.append(
             f"only {n} iterations recorded, need at least {2 * window} to "
             f"compare two consecutive {window}-iteration window means and so "
             "tell a settled mean from a drifting one"
@@ -142,8 +181,16 @@ def check_convergence(df: pd.DataFrame, spec: CaseSpec) -> ConvergenceResult:
             "absolute, and not a converged value"
         )
 
+    if failures:
+        verdict = "not_converged"
+    elif not judged:
+        verdict = "not_judged"
+    else:
+        verdict = "converged"
+
     return ConvergenceResult(
-        converged=not failures,
+        verdict=verdict,
+        gate_failed=bool(failures or too_short),
         reasons=failures + notes,
         means=means,
         stds=stds,

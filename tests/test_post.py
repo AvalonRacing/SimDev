@@ -169,3 +169,40 @@ def test_post_survives_the_gates_non_numeric_detail(run_dir: Path) -> None:
     assert all(isinstance(v, float) for v in record.yplus.values())
     assert "weighting" not in record.yplus
     assert not any(k.endswith("_facemean_yplus") for k in record.yplus)
+
+
+def test_result_record_carries_the_verdict_not_just_a_boolean(run_dir: Path) -> None:
+    """result.json is what a sweep, an aggregate or a human actually reads, so
+    the tri-state has to reach it. A boolean alone cannot distinguish a run
+    that passed a plateau test from one nobody tested."""
+    _mark_solve(run_dir, "ok")
+    record = post(run_dir)
+    assert record.verdict in ("converged", "not_converged", "not_judged")
+    assert record.converged is (record.verdict == "converged")
+
+    import json
+    stored = json.loads((run_dir / "results" / "result.json").read_text())
+    assert stored["verdict"] == record.verdict
+
+
+def test_post_writes_the_component_force_plots(run_dir: Path) -> None:
+    """The per-patch function objects have been writing to disk since the
+    'eleven force traces' commit with nothing reading them. The attribution
+    plot is what makes them useful, so post has to produce it."""
+    _mark_solve(run_dir, "ok")
+    for patch, cl in (("body", -1.0), ("stilts", -0.05)):
+        d = run_dir / "postProcessing" / f"forceCoeffs_{patch}" / "0"
+        d.mkdir(parents=True, exist_ok=True)
+        rows = "\n".join(f"{t}\t0.3\t{cl + 0.01 * (t % 7)}" for t in range(1, 120))
+        (d / "coefficient.dat").write_text(f"# Time\tCd\tCl\n{rows}\n", encoding="utf-8")
+
+    post(run_dir)
+    assert (run_dir / "results" / "components_Cl.png").exists()
+    assert (run_dir / "results" / "components_Cd.png").exists()
+
+
+def test_post_still_works_with_no_component_objects(run_dir: Path) -> None:
+    """Runs meshed before those function objects existed have none."""
+    _mark_solve(run_dir, "ok")
+    post(run_dir)
+    assert (run_dir / "results" / "result.json").exists()

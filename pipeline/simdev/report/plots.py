@@ -104,6 +104,166 @@ def plot_force_history(
     return out_path
 
 
+def _settled(series: pd.Series, time: pd.Series, window: tuple[int, int]) -> pd.Series:
+    """The part of a trace worth scaling to: the run-up plus the window."""
+    frame = pd.DataFrame({"Time": time, "v": series}).dropna()
+    if frame.empty:
+        return frame["v"]
+    x_from = settled_from(frame.rename(columns={"v": "x"}), window)
+    return frame[frame["Time"] >= x_from]["v"]
+
+
+def panel_limits(
+    series: pd.Series, window: tuple[int, int], time: pd.Series | None = None
+) -> tuple[float, float]:
+    """y-limits sized to THIS component's oscillation, not to the vehicle's.
+
+    A per-patch Cl runs from about -1 on the body to a few hundredths on a
+    suspension arm, and the oscillation on the small ones is smaller again.
+    Drawn on the shared FORCE_AXIS_LIMITS the quiet components are flat lines
+    and the swing - the only thing an attribution plot is for - is invisible.
+    So every panel gets its own axis, fitted to the settled region of its own
+    trace.
+
+    ANCHORED ON THE AVERAGING WINDOW, NOT ON THE SETTLED REGION, and the
+    approach is allowed to run off the panel. Anchoring on the settled region
+    is not robust: a transient that has decayed to a few percent of its
+    starting value is still tens of times the oscillation amplitude, so one
+    slow-decaying component drags its own axis out until the swing is a flat
+    line again - the exact failure this helper exists to prevent, reappearing
+    through the scaling rule. The window is the pipeline's own statement of
+    which iterations it trusts, so the axis is sized to that and padded by
+    1.5x its height on each side to show the approach coming in. A trace
+    entering from off-scale and settling is the same contract
+    plot_force_history already documents for the transient.
+    """
+    if time is None:
+        time = pd.Series(range(1, len(series) + 1), index=series.index)
+    frame = pd.DataFrame({"Time": time, "v": series}).dropna()
+    if frame.empty:
+        return (-1.0, 1.0)
+
+    band = frame[(frame["Time"] >= window[0]) & (frame["Time"] <= window[1])]["v"]
+    if len(band) < 2:
+        # No window to anchor on - a smoke run, or a component that stopped
+        # early. Fall back to the settled region rather than returning
+        # something arbitrary.
+        band = _settled(series, time, window)
+    if band.empty:
+        return (-1.0, 1.0)
+
+    lo, hi = float(band.min()), float(band.max())
+    pad = max((hi - lo) * 1.5, abs(hi) * 0.01, 1e-9)
+    return (lo - pad, hi + pad)
+
+
+def oscillation(df: pd.DataFrame, window: tuple[int, int], column: str) -> float:
+    """Standard deviation of one component over the averaging window.
+
+    The window, not the whole history: a component that thrashed during the
+    startup transient and has been quiet since is not what is driving the
+    limit cycle, and ranking on the full trace would put it first.
+    """
+    if column not in df or df.empty:
+        return 0.0
+    band = df[(df["Time"] >= window[0]) & (df["Time"] <= window[1])][column]
+    if len(band) < 2:
+        band = df[column]
+    return float(band.std()) if len(band) > 1 else 0.0
+
+
+def rank_by_oscillation(
+    components: dict[str, pd.DataFrame], window: tuple[int, int], column: str
+) -> list[str]:
+    """Component names, loudest first.
+
+    The plot answers "which part of the car is oscillating", so the ordering
+    is the answer and the panels are just the evidence.
+    """
+    return sorted(
+        components, key=lambda n: oscillation(components[n], window, column), reverse=True
+    )
+
+
+def plot_component_forces(
+    components: dict[str, pd.DataFrame],
+    out_path: Path,
+    window: tuple[int, int],
+    column: str = "Cl",
+) -> Path:
+    """One panel per force patch, each on its own scale, loudest first.
+
+    WHAT THIS IS FOR. The aggregate trace says the car's Cl oscillates; it
+    cannot say which part of the car is doing it, and a limit cycle fed by the
+    rear wing stalling and one fed by a front tyre wake look identical in the
+    total while wanting opposite fixes. These panels split the total by patch
+    so the swing can be attributed before anyone re-tunes numerics against it.
+
+    Each patch's coefficient is its SHARE of the vehicle's, because every
+    per-patch function object carries the aggregate's Aref/lRef/CofR - so the
+    panels sum to the total and the sigma printed on each is directly
+    comparable with the others and with the whole-car number.
+
+    Every panel is autoscaled to itself (see panel_limits) and the title
+    carries the mean, the sigma and that sigma as a share of the summed
+    per-patch sigma - which is the number that actually answers "where is it
+    coming from".
+    """
+    usable = {n: d for n, d in components.items() if column in d and not d.empty}
+    if not usable:
+        usable = {}
+
+    order = rank_by_oscillation(usable, window, column)
+    sigmas = {n: oscillation(usable[n], window, column) for n in order}
+    total_sigma = sum(sigmas.values()) or 1.0
+
+    n = max(len(order), 1)
+    cols = 2 if n > 1 else 1
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(6.0 * cols, 1.9 * rows), squeeze=False, sharex=True
+    )
+    flat = [a for row in axes for a in row]
+
+    for axis, name in zip(flat, order):
+        df = usable[name]
+        axis.plot(df["Time"], df[column], linewidth=0.9, color="C0")
+        axis.axvspan(window[0], window[1], alpha=0.12, color="C1")
+
+        band = df[(df["Time"] >= window[0]) & (df["Time"] <= window[1])][column]
+        mean = float(band.mean()) if len(band) else float("nan")
+        if len(band):
+            axis.axhline(mean, color="C3", linewidth=0.8, linestyle="--")
+            axis.axhspan(mean - sigmas[name], mean + sigmas[name],
+                         color="C3", alpha=0.12)
+
+        axis.set_ylim(*panel_limits(df[column], window, df["Time"]))
+        axis.set_title(
+            f"{name}   {column}={mean:.4f}   sigma={sigmas[name]:.4f}"
+            f"   ({sigmas[name] / total_sigma:.0%} of summed sigma)",
+            fontsize="small", loc="left",
+        )
+        axis.grid(True, alpha=0.3)
+        axis.tick_params(labelsize="small")
+
+    for axis in flat[len(order):]:
+        axis.set_visible(False)
+    for axis in flat[max(len(order) - cols, 0):len(order)]:
+        axis.set_xlabel("iteration")
+
+    fig.suptitle(
+        f"per-component {column} - panels are individually scaled, "
+        "ordered by oscillation over the averaging window",
+        fontsize="medium",
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
 def plot_residuals(df: pd.DataFrame, out_path: Path) -> Path:
     fig, axis = plt.subplots(figsize=(9, 4))
 

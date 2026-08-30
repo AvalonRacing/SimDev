@@ -13,6 +13,7 @@ def _record(**overrides: object) -> ResultRecord:
         case_name="ahmed",
         spec_hash="abc123",
         timestamp="2026-08-09T12:00:00Z",
+        verdict="converged",
         converged=True,
         cd_mean=0.347,
         cd_std=0.0004,
@@ -70,7 +71,21 @@ def test_aggregate_combines_independent_runs(tmp_path: Path) -> None:
 
 
 def test_non_converged_record_is_written_and_flagged(tmp_path: Path) -> None:
-    write_result(tmp_path, _record(converged=False, reasons=["Cd still drifting"]))
+    write_result(
+        tmp_path,
+        _record(verdict="not_converged", converged=False, reasons=["Cd still drifting"]),
+    )
     loaded = read_result(tmp_path)
     assert loaded.converged is False
+    assert loaded.verdict == "not_converged"
     assert loaded.reasons == ["Cd still drifting"]
+
+
+def test_an_unjudged_record_round_trips_as_unjudged(tmp_path: Path) -> None:
+    """The state that a boolean could not hold. It has to survive the write,
+    or the distinction is lost exactly where it is needed - in the file a
+    sweep reads back."""
+    write_result(tmp_path, _record(verdict="not_judged", converged=False))
+    loaded = read_result(tmp_path)
+    assert loaded.verdict == "not_judged"
+    assert loaded.converged is False

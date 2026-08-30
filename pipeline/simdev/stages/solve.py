@@ -23,8 +23,12 @@ def solve(
 
         previous = read_status(run_dir, STAGE)
         assert previous is not None
+        # The stored verdict, NOT an assumed pass. Skipping re-runs the
+        # bookkeeping, not the solve, so it cannot upgrade what the run
+        # actually earned - and defaulting to "converged" here would have
+        # reintroduced the claim the tri-state exists to stop.
         return ConvergenceResult(
-            converged=True,
+            verdict=str(previous.detail.get("verdict", "not_judged")),
             reasons=["skipped: unchanged input"],
             means={k: float(v) for k, v in previous.detail.items() if k.endswith("_mean")},
         )
@@ -40,7 +44,10 @@ def solve(
         run_dir,
         StageStatus(
             stage=STAGE,
-            state="ok" if result.converged else "gate_failed",
+            # See ConvergenceResult.gate_failed: a profile that deliberately
+            # unsets drift_tol is not a failing run, but one too short to be
+            # judged is.
+            state="gate_failed" if result.gate_failed else "ok",
             input_hash=spec.spec_hash(),
             reasons=result.reasons,
             detail={
@@ -51,6 +58,7 @@ def solve(
                 # the number that says whether a delta between two runs is a
                 # design effect or just where each one stopped.
                 **{f"{k}_amplitude": v for k, v in result.amplitudes.items()},
+                "verdict": result.verdict,
                 "n_iterations": result.n_iterations,
                 "window_start": result.window[0],
                 "window_end": result.window[1],

@@ -381,10 +381,22 @@ JUDGED: dict = {
 
 
 def test_unset_drift_tol_does_not_fail_a_drifting_run() -> None:
+    """Unsetting drift_tol withholds the verdict; it does not grant one.
+
+    The distinction this test used to miss: it asserted `converged is True`
+    for the unjudged case, which is how a hand-stopped, mid-transient run
+    ended up with converged: true in its result record. Not failing and
+    passing are different outcomes, and only `verdict` can say so.
+    """
     drifting = _forces(250, drift=1e-3)
 
-    assert check_convergence(drifting, _spec(JUDGED)).converged is False
-    assert check_convergence(drifting, _spec(UNJUDGED)).converged is True
+    judged = check_convergence(drifting, _spec(JUDGED))
+    assert judged.verdict == "not_converged"
+    assert judged.converged is False
+
+    unjudged = check_convergence(drifting, _spec(UNJUDGED))
+    assert unjudged.verdict == "not_judged"
+    assert unjudged.converged is False
 
 
 def test_unset_drift_tol_still_measures_and_reports_the_drift() -> None:
@@ -692,3 +704,56 @@ def test_a_spalding_ground_still_warns_when_it_leaves_spaldings_own_band() -> No
         _yplus_df(body=1.0, ground=450.0), spec, area_weighted={"ground": 450.0}
     )
     assert any("ground" in r for r in result.reasons)
+
+
+# --- the convergence verdict is tri-state -----------------------------------
+
+
+def _force_history(n: int, cd: float = 1.0, cl: float = -1.7, drift: float = 0.0):
+    """n iterations with an optional linear drift on Cl, no oscillation."""
+    import numpy as np
+    t = np.arange(1, n + 1)
+    return pd.DataFrame(
+        {"Time": t, "Cd": np.full(n, cd), "Cl": cl * (1.0 + drift * t / n)}
+    )
+
+
+def test_a_run_nobody_judged_is_not_reported_as_converged() -> None:
+    """THE BUG THIS EXISTS TO KILL. ~/runs/car-all7-smooth was stopped by hand
+    at iteration 127 of 500, mid-transient, with its own recorded drift at
+    Cd -17.23% and Cl +23.64% between consecutive windows - and its
+    result.json said converged: true, because drift_tol is None on that
+    profile so drift produced a note instead of a failure and only
+    amplitude_tol gated.
+
+    'Stopped' is not 'converged'. Anything reading the boolean - a mesh sweep,
+    an aggregate, a human skimming JSON - has to see the difference.
+    """
+    spec = _spec({"solve": {"drift_tol": None, "plateau_window": 50}})
+    result = check_convergence(_force_history(250, drift=0.20), spec)
+    assert result.verdict == "not_judged"
+    assert result.converged is False
+
+
+def test_a_settled_run_is_converged() -> None:
+    spec = _spec({"solve": {"drift_tol": 0.05, "plateau_window": 50}})
+    result = check_convergence(_force_history(250, drift=0.0), spec)
+    assert result.verdict == "converged"
+    assert result.converged is True
+
+
+def test_a_drifting_run_is_not_converged() -> None:
+    spec = _spec({"solve": {"drift_tol": 0.002, "plateau_window": 50}})
+    result = check_convergence(_force_history(250, drift=0.50), spec)
+    assert result.verdict == "not_converged"
+    assert result.converged is False
+
+
+def test_a_run_too_short_to_compare_two_windows_is_not_judged() -> None:
+    """75 iterations against a 50-iteration window: one window fits, two do
+    not, so there is nothing to compare the mean against. That is an absence
+    of evidence, not evidence of drift."""
+    spec = _spec({"solve": {"drift_tol": 0.05, "plateau_window": 50}})
+    result = check_convergence(_force_history(75), spec)
+    assert result.verdict == "not_judged"
+    assert result.converged is False

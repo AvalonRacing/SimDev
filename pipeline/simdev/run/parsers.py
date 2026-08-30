@@ -209,6 +209,41 @@ def read_y_plus(path: Path) -> pd.DataFrame:
     )
 
 
+COMPONENT_FORCE_PREFIX = "forceCoeffs_"
+
+
+def read_component_coeffs(run_dir: Path) -> dict[str, pd.DataFrame]:
+    """Per-patch force coefficients, keyed by patch name.
+
+    controlDict writes one forceCoeffs function object per force-bearing patch
+    alongside the whole-vehicle one, all sharing the vehicle's Aref, lRef and
+    CofR - so each patch's Cd and Cl is its *share* of the total and they sum
+    to it. That is what makes an attribution plot readable: the panels add up.
+
+    THE AGGREGATE IS EXCLUDED. `postProcessing/forceCoeffs` is the whole
+    vehicle; swept in as a component it would double the total and outrank
+    every real patch in any ranking by magnitude. The prefix match with a
+    non-empty remainder is what keeps it out.
+    """
+    root = Path(run_dir) / "postProcessing"
+    out: dict[str, pd.DataFrame] = {}
+
+    for directory in sorted(root.glob(f"{COMPONENT_FORCE_PREFIX}*")):
+        patch = directory.name[len(COMPONENT_FORCE_PREFIX) :]
+        if not patch:
+            continue
+        frames = []
+        for dat in sorted(directory.glob("*/coefficient.dat")):
+            try:
+                frames.append(read_force_coeffs(dat))
+            except (pd.errors.EmptyDataError, ValueError):
+                continue
+        if frames:
+            out[patch] = pd.concat(frames).sort_values("Time")
+
+    return out
+
+
 # Directory prefix the controlDict gives each per-patch area-average function
 # object. One spelling, shared with the template's loop by convention and
 # asserted by tests/test_render_solver.py.

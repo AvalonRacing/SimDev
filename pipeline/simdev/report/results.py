@@ -13,6 +13,11 @@ class ResultRecord:
     case_name: str
     spec_hash: str
     timestamp: str
+    # "converged" | "not_converged" | "not_judged". `converged` is kept
+    # alongside it for readers that predate the tri-state, and is True only
+    # for the first - see gates.convergence.VERDICTS for why a boolean alone
+    # shipped a wrong answer.
+    verdict: str
     converged: bool
     cd_mean: float
     cd_std: float

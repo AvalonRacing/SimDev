@@ -5,9 +5,18 @@ from pathlib import Path
 
 from simdev.gates.convergence import check_convergence
 from simdev.gates.yplus import check_y_plus
-from simdev.report.plots import plot_force_history, plot_residuals
+from simdev.report.plots import (
+    plot_component_forces,
+    plot_force_history,
+    plot_residuals,
+)
 from simdev.report.results import ResultRecord, write_result
-from simdev.run.parsers import read_force_coeffs, read_y_plus, read_y_plus_area
+from simdev.run.parsers import (
+    read_component_coeffs,
+    read_force_coeffs,
+    read_y_plus,
+    read_y_plus_area,
+)
 from simdev.run.runner import StageError
 from simdev.run.status import StageStatus, read_status, should_skip, write_status
 from simdev.stages.common import find_latest, load_spec
@@ -48,6 +57,20 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
 
     results_dir = run_dir / "results"
     plot_force_history(forces, results_dir / "forces.png", convergence.window)
+
+    # Attribution. The aggregate above says the car oscillates; only these say
+    # which part of it does, and a limit cycle fed by the rear wing stalling
+    # and one fed by a front tyre wake want opposite fixes. Empty on runs
+    # meshed before the per-patch function objects existed.
+    components = read_component_coeffs(run_dir)
+    if components:
+        for coefficient in ("Cl", "Cd"):
+            plot_component_forces(
+                components,
+                results_dir / f"components_{coefficient}.png",
+                convergence.window,
+                coefficient,
+            )
     try:
         # postProcessing/ subdirectories are named after the *function object*
         # (controlDict calls it 'residuals'), not after its type - the file
@@ -62,6 +85,7 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
         case_name=spec.name,
         spec_hash=spec.spec_hash(),
         timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        verdict=convergence.verdict,
         converged=convergence.converged,
         cd_mean=convergence.means.get("Cd", float("nan")),
         cd_std=convergence.stds.get("Cd", float("nan")),
@@ -92,7 +116,11 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
             state="ok" if y_plus_gate.passed else "gate_failed",
             input_hash=spec.spec_hash(),
             reasons=record.reasons,
-            detail={"cd_mean": record.cd_mean, "cl_mean": record.cl_mean},
+            detail={
+                "cd_mean": record.cd_mean,
+                "cl_mean": record.cl_mean,
+                "verdict": record.verdict,
+            },
         ),
     )
     return record
