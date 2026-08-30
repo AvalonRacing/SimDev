@@ -252,3 +252,43 @@ def test_area_average_is_not_written_for_non_wall_patches(tmp_path: Path) -> Non
     text = (_render(tmp_path) / "system" / "controlDict").read_text()
     for patch in ("inlet", "outlet", "farfield", "symmetry"):
         assert f"yPlusArea_{patch}" not in text, patch
+
+
+# --- time-averaged fields ---------------------------------------------------
+
+
+def test_controldict_time_averages_p_and_u(tmp_path: Path) -> None:
+    """A steady case with a limit cycle has no fixed point, so a field written
+    at one iteration is one arbitrary phase of the oscillation. Comparing two
+    designs off single timesteps compares two arbitrary phases of two cycles
+    and manufactures flow-structure differences that are pure sampling."""
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    assert "type            fieldAverage;" in text
+    assert "mean        on;" in text
+    for field in ("p", "U"):
+        assert f"            {field}\n" in text, field
+
+
+def test_field_averaging_starts_where_the_force_window_starts(tmp_path: Path) -> None:
+    """<field>Mean and the reported Cd/Cl must describe the same iterations,
+    or the slice and the coefficient are answers to different questions.
+    dev profile: 300 iterations, 50-iteration window -> start at 250."""
+    spec = _spec({"solve": {"max_iterations": 300, "plateau_window": 50}})
+    text = (_render(tmp_path, spec) / "system" / "controlDict").read_text()
+    assert "timeStart       250;" in text
+
+
+def test_field_averaging_start_never_goes_negative(tmp_path: Path) -> None:
+    """A smoke run whose window is longer than the run itself would otherwise
+    ask OpenFOAM to start averaging before iteration 0."""
+    spec = _spec({"solve": {"max_iterations": 20, "plateau_window": 50}})
+    text = (_render(tmp_path, spec) / "system" / "controlDict").read_text()
+    assert "timeStart       0;" in text
+
+
+def test_no_field_average_object_when_the_list_is_empty(tmp_path: Path) -> None:
+    """Empty disables it outright rather than rendering an object averaging
+    nothing, which OpenFOAM rejects."""
+    spec = _spec({"solve": {"average_fields": []}})
+    text = (_render(tmp_path, spec) / "system" / "controlDict").read_text()
+    assert "fieldAverage" not in text

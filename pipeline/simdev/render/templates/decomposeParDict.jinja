@@ -4,4 +4,16 @@
 
 numberOfSubdomains {{ spec.solve.n_ranks }};
 
-method          scotch;
+// See solve.decomposition in the schema: hierarchical is deterministic and
+// scotch is not, and the mesh this pipeline produces has to be reproducible
+// from its spec. The split below is shaped to the domain to keep interface
+// area down - see context.hierarchical_split.
+method          {{ spec.solve.decomposition }};
+
+{% if spec.solve.decomposition == "hierarchical" %}
+coeffs
+{
+    n               ({{ hierarchical_n[0] }} {{ hierarchical_n[1] }} {{ hierarchical_n[2] }});
+    order           xyz;
+}
+{% endif %}

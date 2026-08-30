@@ -151,6 +151,55 @@ def inlet_turbulence(spec: CaseSpec) -> tuple[float, float]:
     return spec.inlet_k, spec.inlet_omega
 
 
+def hierarchical_split(
+    n_ranks: int, size: tuple[float, float, float]
+) -> tuple[int, int, int]:
+    """Factor n_ranks into an (x, y, z) split shaped to the domain.
+
+    WHY THE PIPELINE NEEDS A DETERMINISTIC DECOMPOSITION AT ALL. scotch is a
+    randomised graph partitioner with no fixed seed, and it was measured
+    partitioning an identical blockMesh two different ways: processor 0 got
+    5788 cells in ~/runs/car-nut10-smooth and 5731 in ~/runs/car-long2000.
+    snappy redistributes mid-refinement with the same method, so the finished
+    meshes differed too - 21,629,628 cells against 21,628,526 - and two runs
+    of one spec were not the same case. For a pipeline whose whole provenance
+    story is a spec hash, that is a hole: the hash pinned the inputs and
+    nothing pinned the mesh.
+
+    hierarchicalGeomDecomp sorts cells by coordinate and splits each direction
+    into equal-COUNT groups, so it stays balanced on a curved sector domain
+    whose bounding box is mostly outside the annulus - a geometric box split
+    would leave the corner blocks empty.
+
+    The split is shaped by the domain rather than fixed, because interface
+    area is processor-boundary traffic and this solver is bandwidth-bound.
+    Prime factors are assigned largest-first to whichever axis currently has
+    the greatest extent per subdivision, which keeps the blocks as cubic as
+    the factorisation allows. Deterministic by construction: no dict ordering,
+    no floating-point tie-breaking that depends on anything but the inputs.
+    """
+    factors: list[int] = []
+    remaining = n_ranks
+    divisor = 2
+    while divisor * divisor <= remaining:
+        while remaining % divisor == 0:
+            factors.append(divisor)
+            remaining //= divisor
+        divisor += 1
+    if remaining > 1:
+        factors.append(remaining)
+
+    split = [1, 1, 1]
+    extent = [max(float(s), 1e-12) for s in size]
+    for factor in sorted(factors, reverse=True):
+        # Ties broken by axis order, so the result never depends on how the
+        # floats happened to compare.
+        widest = max(range(3), key=lambda i: (extent[i] / split[i], -i))
+        split[widest] *= factor
+
+    return (split[0], split[1], split[2])
+
+
 def location_in_mesh(domain: Domain) -> tuple[float, float, float]:
     """A point in the fluid, upstream of the body and off the symmetry plane.
 
@@ -819,6 +868,15 @@ def build_context(
         "drag_dir": _foam_vec(spec.drag_dir),
         "pitch_axis": _foam_vec(spec.pitch_axis),
         "location_in_mesh": location_in_mesh(domain),
+        # Shaped to the domain so the deterministic split does not cost more
+        # interface area than it has to. See hierarchical_split.
+        "hierarchical_n": hierarchical_split(spec.solve.n_ranks, domain.size),
+        # First iteration of the force-averaging window. The fields are
+        # averaged over exactly the iterations the coefficients are averaged
+        # over, so a slice and a reported Cl describe the same thing.
+        "average_time_start": max(
+            spec.solve.max_iterations - spec.solve.plateau_window, 0
+        ),
         "ground_is_moving": spec.ground.motion.value == "moving",
         "symmetry_patch": domain.symmetry,
         "mrf_zones": zones,

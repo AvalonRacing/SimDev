@@ -274,3 +274,38 @@ def test_layer_normal_smoothing_changes_the_spec_hash() -> None:
     assert _spec().spec_hash() != _spec(
         {"mesh": {"n_smooth_normals": 10}}
     ).spec_hash()
+
+
+# --- deterministic decomposition -------------------------------------------
+
+
+def test_decompose_par_dict_is_deterministic_by_default(tmp_path: Path) -> None:
+    """scotch is a randomised graph partitioner with no fixed seed, and it was
+    measured producing different partitions from an identical blockMesh:
+    processor 0 got 5788 cells in ~/runs/car-nut10-smooth and 5731 in
+    ~/runs/car-long2000. Everything downstream inherits that - snappy
+    redistributes with the same method - so two runs of one spec produced two
+    different meshes, and the pipeline could not reproduce its own result.
+    """
+    text = (_render(tmp_path) / "system" / "decomposeParDict").read_text()
+    assert "method          hierarchical;" in text
+    # the directive, not the word - the comment above it names scotch on purpose
+    assert "method          scotch;" not in text
+    assert "order           xyz;" in text
+
+
+def test_decompose_par_dict_split_multiplies_to_the_rank_count(tmp_path: Path) -> None:
+    import re
+    spec = _spec({"solve": {"n_ranks": 8}})
+    text = (_render(tmp_path, spec) / "system" / "decomposeParDict").read_text()
+    n = re.search(r"n\s+\((\d+) (\d+) (\d+)\)", text)
+    assert n is not None
+    assert int(n[1]) * int(n[2]) * int(n[3]) == 8
+
+
+def test_scotch_is_still_reachable_for_a_deliberate_choice(tmp_path: Path) -> None:
+    """Determinism costs partition quality, so the faster partitioner stays
+    available - as a recorded choice in the spec, not a silent default."""
+    spec = _spec({"solve": {"decomposition": "scotch"}})
+    text = (_render(tmp_path, spec) / "system" / "decomposeParDict").read_text()
+    assert "method          scotch;" in text

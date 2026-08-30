@@ -480,6 +480,38 @@ class SolveConfig(BaseModel):
     # the same reason maxLoadUnbalance is: the policy should be a property of
     # the case, not of whichever build happened to run it.
     gamg_coarsest_cells: int = Field(default=10, gt=0)
+    # How decomposePar splits the mesh, and it is a REPRODUCIBILITY setting
+    # before it is a performance one.
+    #
+    # scotch is a randomised graph partitioner with no fixed seed. It was
+    # measured splitting an identical blockMesh two different ways (processor
+    # 0: 5788 cells against 5731), and because snappy redistributes
+    # mid-refinement with the same method the finished meshes differed too -
+    # 21,629,628 cells against 21,628,526 from one spec. The spec hash pinned
+    # the inputs and nothing pinned the mesh.
+    #
+    # hierarchical is deterministic: cells are sorted by coordinate and split
+    # into equal-count groups, so it is balanced even on a sector domain whose
+    # bounding box is mostly outside the annulus. It buys reproducibility and
+    # is expected to cost some partition quality - more interface area than
+    # scotch finds - which on a bandwidth-bound solver is solve time. THAT
+    # COST HAS NOT BEEN MEASURED YET; measure it against a scotch run at the
+    # same cell count before assuming it is small.
+    decomposition: Literal["hierarchical", "scotch"] = "hierarchical"
+    # Fields to time-average over the plateau window, written as <field>Mean.
+    #
+    # WITHOUT THIS A SLICE IS A SNAPSHOT OF A LIMIT CYCLE. This case does not
+    # reach a fixed point; it reaches a stationary mean and oscillates about
+    # it, which is why the forces are reported as a windowed mean rather than
+    # a final value. The fields had no equivalent, so a Cp or Cpt slice taken
+    # off a time directory sampled one arbitrary phase - and comparing two
+    # designs that way compares two arbitrary phases of two different limit
+    # cycles, which produces apparent changes in flow structure that are pure
+    # sampling. Body and Wing carry 89% of this case's Cl oscillation, so it
+    # bites hardest exactly on the surfaces under development.
+    #
+    # Empty disables the function object entirely.
+    average_fields: tuple[str, ...] = ("p", "U")
 
 
 class PostConfig(BaseModel):

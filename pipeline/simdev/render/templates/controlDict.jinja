@@ -134,6 +134,48 @@ functions
     }
 {% endfor %}
 
+{% if spec.solve.average_fields %}
+    // TIME-AVERAGED FIELDS, AND WITHOUT THEM A SLICE IS A SNAPSHOT.
+    //
+    // This case does not reach a fixed point. It reaches a stationary mean and
+    // oscillates about it, which is why every coefficient above is reported as
+    // a mean over the trailing window rather than as a final value. The fields
+    // had no equivalent: a Cp or Cpt slice taken off a time directory sampled
+    // one arbitrary phase of that cycle. Comparing two designs that way
+    // compares two arbitrary phases of two different limit cycles, and it
+    // manufactures differences in flow structure that are pure sampling.
+    //
+    // Body and Wing carry 89% of this case's Cl oscillation (see
+    // results/components_Cl.png), so the error lands hardest on exactly the
+    // surfaces under development.
+    //
+    // timeStart IS THE FORCE WINDOW'S OWN START, so <field>Mean and the
+    // reported Cd/Cl describe the same iterations. A run stopped before
+    // timeStart therefore has no average at all - which is correct, because it
+    // also has no trustworthy coefficient.
+    fieldAverage
+    {
+        type            fieldAverage;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+        timeStart       {{ average_time_start }};
+        restartOnRestart false;
+        restartOnOutput  false;
+
+        fields
+        (
+{% for f in spec.solve.average_fields %}
+            {{ f }}
+            {
+                mean        on;
+                prime2Mean  off;
+                base        time;
+            }
+{% endfor %}
+        );
+    }
+
+{% endif %}
     residuals
     {
         type            solverInfo;
