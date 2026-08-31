@@ -260,7 +260,9 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 501-2000 reference: 1-100 is +40%/+49% out, 101-200 is +1.3%/+3.2%,
         # 201-300 is -0.3%/+0.6%, and everything after sits inside +/-1%.
         #
-        # WHY plateau_window 200. Sweeping every stopping point with both
+        # WHY plateau_window 100 AND max_iterations 400, set 2026-08-31. The
+        # sweep below is unchanged and is still the evidence; what moved is
+        # which row is being bought. Sweeping every stopping point with both
         # windows past iteration 300, the drift between consecutive window
         # means comes out:
         #
@@ -268,7 +270,7 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         #      50      0.58% / 2.02%          1.04% / 4.90%
         #     100      0.39% / 1.86%          0.75% / 3.36%
         #     150      0.35% / 1.50%          0.83% / 2.51%
-        #     200      0.35% / 1.24%          0.60% / 2.21%   <- chosen
+        #     200      0.35% / 1.24%          0.60% / 2.21%
         #     300      0.34% / 0.94%          0.53% / 1.96%
         #     400      0.42% / 0.74%          0.43% / 1.50%
         #
@@ -276,28 +278,42 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         #
         #   window   Cd worst   Cl worst
         #      50      1.81%      3.31%
-        #     200      0.80%      1.74%   <- chosen
+        #     100      1.34%      2.65%   <- chosen
+        #     200      0.80%      1.74%
         #     400      0.44%      1.05%
         #
-        # 200 is where the curve flattens. Past it the accuracy keeps improving
-        # but only in proportion to the iterations bought, and max_iterations
-        # has to cover the transient plus two whole windows.
+        # 400 iterations with a 100-window is the deliberate cost/accuracy
+        # choice: 3.3 h at the measured 29.8 s/iter against 8.3 h for the
+        # 1000/200 setting it replaces, for a worst-case Cl error of 2.65%
+        # rather than 1.74%. Roughly two and a half times cheaper for about
+        # one and a half times the error. THE ERROR BAR IS THE PRICE - a Cl
+        # delta between two designs smaller than ~2.7% is not resolvable at
+        # this setting, and the way to resolve one is a longer run with its
+        # tolerances re-derived from the table above, never a wider bound here.
         #
-        # WHY drift_tol 0.025. It is applied to Cd and Cl alike, so it is set
-        # by whichever is worse - Cl, at a worst observed 2.21% over 1301
-        # stopping points on a run that is unambiguously settled. A tolerance
-        # below that fails converged runs, which is how a gate gets switched
-        # off. 0.025 clears it with a little margin and still catches Cd at
-        # twice its worst.
+        # It is checked directly rather than only interpolated. On
+        # car-long2000 the exact window this profile uses lands:
         #
-        # WHY max_iterations 1000. The transient plus two full windows is 300 +
-        # 400 = 700; 1000 leaves real margin and costs 8.3 h at the measured
-        # 29.8 s/iter. THIS IS 4x THE OLD 250-ITERATION RUN and that is the
-        # trade being made: Cl's worst-case error goes 3.31% -> 1.74%, so it
-        # buys roughly a factor of two in accuracy for a factor of four in
-        # wall clock. If that is too expensive for a screening sweep, the way
-        # to buy it back is a shorter run WITH ITS TOLERANCES RE-DERIVED from
-        # the table above - not a wider bound on this one.
+        #   window 300-400 against the 501-2000 truth:  Cd -0.03%, Cl -0.26%
+        #   drift from the preceding 200-300 window:    Cd  0.29%, Cl  0.85%
+        #
+        # so the requested stopping point is a good one - but that is ONE
+        # stopping point, and the 2.65% above is what it can be worth across
+        # all of them.
+        #
+        # THE PREVIOUS WINDOW STRADDLES THE END OF THE TRANSIENT, which is the
+        # one weakness of this setting. With max_iterations 400 the drift test
+        # compares 200-300 against 300-400, and the transient ends at ~200 - so
+        # the earlier window has no margin behind it. The measured drift at
+        # this stop is small (0.29%/0.85%), but a slower-starting case would
+        # show a drift that is transient decay rather than non-convergence.
+        #
+        # WHY drift_tol 0.04. It is applied to Cd and Cl alike, so it is set by
+        # whichever is worse - Cl, at a worst observed 3.36% over 1601 stopping
+        # points of a settled run at THIS window width. A tolerance below that
+        # fails converged runs, which is how a gate gets switched off. The
+        # tolerance is a property of the window, not of the case: 0.025 was
+        # correct for a 200-window and would produce false failures here.
         #
         # THE OLD +/-15% ERROR BAR ON Cl IS GONE, and it is worth being precise
         # about why: it was a property of the slow limit cycle, which this
@@ -313,22 +329,25 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # were unaffected - the function objects write every timestep to
         # postProcessing/ - so only the fields you can look at were wrong.
         #
-        # 500 divides 1000, so this writes at 500 and at 1000. purgeWrite 2
-        # keeps both. If either number changes, keep the division exact.
+        # 200 divides 400, so this writes at 200 and at 400. purgeWrite 2 keeps
+        # both. If either number changes, keep the division exact -
+        # tests/test_resolve.py now enforces it for every profile, because the
+        # rule had been written in a comment and checked by nothing.
         #
         # solve.average_fields is averaged from max_iterations - plateau_window,
-        # i.e. 800 here, so pMean/UMean span the same 200 iterations the
-        # reported Cd and Cl do - about 12 correlation times.
+        # i.e. 300 here, so pMean/UMean span iterations 300-400: the same ones
+        # the reported Cd and Cl do, and about 6 correlation times.
         "solve": {
-            "max_iterations": 1000,
+            "max_iterations": 400,
             "n_ranks": 40,
-            "plateau_window": 200,
-            # Measured, not chosen. See the sweep above: Cl's worst drift over
-            # 1301 stopping points of a settled run is 2.21%.
-            "drift_tol": 0.025,
+            "plateau_window": 100,
+            # Measured, not chosen, and specific to plateau_window 100: Cl's
+            # worst drift over 1601 stopping points of a settled run is 3.36%.
+            # Re-derive it if the window changes.
+            "drift_tol": 0.04,
             # Never write only at the end, and never on an interval that does
             # not divide max_iterations - see above.
-            "write_interval": 500,
+            "write_interval": 200,
         },
     },
 }

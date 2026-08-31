@@ -102,3 +102,45 @@ def test_resolved_spec_has_no_missing_values() -> None:
     assert spec.physics.wall_treatment in set(WallTreatment)
     assert spec.mesh.n_layers > 0
     assert spec.post.yplus_max > spec.post.yplus_min
+
+
+# --- profile invariants -----------------------------------------------------
+
+
+def test_write_interval_divides_max_iterations_in_every_profile() -> None:
+    """simpleFoam does not force a write at endTime unless residualControl
+    stops it first, so an interval that does not divide the run length writes
+    fields and then never writes again.
+
+    It has happened: 500 into 750 left the 13.28M run finishing cleanly with
+    its newest field data 250 iterations stale, invisible until someone opened
+    it in ParaView and read a coefficient off the wrong time. The rule was
+    written into a comment and enforced by nothing, so the next time
+    max_iterations moved it was free to break again.
+    """
+    from simdev.config.profiles import RESOLUTION_PROFILES
+
+    for name, profile in RESOLUTION_PROFILES.items():
+        solve = profile.get("solve", {})
+        interval = solve.get("write_interval")
+        if interval is None:
+            continue  # writes once at the end, which is always consistent
+        assert solve["max_iterations"] % interval == 0, (
+            f"profile '{name}': write_interval {interval} does not divide "
+            f"max_iterations {solve['max_iterations']}"
+        )
+
+
+def test_two_plateau_windows_fit_inside_every_profiles_run() -> None:
+    """The drift test compares two consecutive windows. A profile whose run is
+    shorter than 2 x plateau_window can never produce a verdict, so it would
+    report not_judged forever however well it converged."""
+    from simdev.config.profiles import DEFAULTS, RESOLUTION_PROFILES
+
+    for name, profile in RESOLUTION_PROFILES.items():
+        solve = profile.get("solve", {})
+        window = solve.get("plateau_window", DEFAULTS["solve"]["plateau_window"])
+        assert solve["max_iterations"] >= 2 * window, (
+            f"profile '{name}': {solve['max_iterations']} iterations cannot "
+            f"hold two {window}-iteration windows"
+        )
