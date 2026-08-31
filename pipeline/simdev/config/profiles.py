@@ -237,96 +237,98 @@ RESOLUTION_PROFILES: dict[str, dict[str, Any]] = {
         # 2.4-3.6 % Cl standard deviation with margin while still catching a
         # solve that comes apart. Tighten drift_tol, never amplitude_tol, if
         # you want a stricter run - only the first one is about convergence.
-        # 250 ITERATIONS, AND CONVERGENCE IS NOT JUDGED. Both halves of that
-        # are deliberate. Read this before restoring either.
+        # CONVERGENCE IS JUDGED AGAIN, AND EVERY NUMBER BELOW IS MEASURED OFF
+        # ~/runs/car-long2000 - 2000 iterations on this exact configuration,
+        # 21.6 M cells, 16.5 h. Read that run before changing any of them.
         #
-        # THIS PROFILE NO LONGER ASKS "HAS IT CONVERGED". It takes a
-        # fixed-cost sample: run 250 iterations, average Cd and Cl over the
-        # last 50, report them. drift_tol is None, which switches the drift
-        # test from a verdict to a recorded number (see gates/convergence.py -
-        # it still measures and prints the drift, it just stops failing on
-        # it). amplitude_tol stays on, because it catches a solve coming apart
-        # and that is worth knowing however the stopping point was picked.
+        # THE LIMIT CYCLE THE OLD SETTINGS WERE BUILT AROUND IS NOT IN THIS
+        # CONFIGURATION. The previous notes described a Cd cycle with a period
+        # of 500-750 iterations, measured on the 6.93 M mesh at the old
+        # freestream (nu_t/nu 134), and it was that slow cycle which made
+        # drift_tol unsettable: a window shorter than the period cannot average
+        # it away. Measured on car-long2000 the autocorrelation crosses zero at
+        # lag 17 (Cd) and 18 (Cl) and stays inside +/-0.25 out to lag 400.
+        # Integrated correlation time is 16.8 and 18.3 iterations. There is no
+        # slow cycle - only short-correlation scatter about a flat mean.
         #
-        # WHAT THIS BUYS: ~45 min a run against ~2.9 h at 500, which is what
-        # makes a mesh sweep affordable.
+        # Which of the two changes did it (the freestream fix, or the coarser
+        # level-6 patches) is NOT established. A coarser mesh damping a real
+        # oscillation would be the unwelcome explanation, and it is the thing
+        # to check if these settings ever stop behaving.
         #
-        # WHAT IT COSTS, MEASURED, so nobody has to rediscover it. Cl is still
-        # moving at iteration 250 on every mesh tried, always toward more
-        # downforce, and the finer the mesh the more it moves:
+        # THE TRANSIENT ENDS BY ITERATION ~200. 100-block means against the
+        # 501-2000 reference: 1-100 is +40%/+49% out, 101-200 is +1.3%/+3.2%,
+        # 201-300 is -0.3%/+0.6%, and everything after sits inside +/-1%.
         #
-        #   mesh      Cl at 250    Cl at 500    move
-        #    6.93M      -1.5959      -1.6787    -5.2 %
-        #   13.28M      -0.9782      -1.0600    -8.4 %
-        #   17.80M      -1.0150      -1.1453   -12.8 %
+        # WHY plateau_window 200. Sweeping every stopping point with both
+        # windows past iteration 300, the drift between consecutive window
+        # means comes out:
         #
-        # So a Cl from this profile UNDERSTATES DOWNFORCE, by roughly a tenth
-        # on a fine mesh, and understates it more as the mesh grows.
+        #   window   Cd median / worst      Cl median / worst
+        #      50      0.58% / 2.02%          1.04% / 4.90%
+        #     100      0.39% / 1.86%          0.75% / 3.36%
+        #     150      0.35% / 1.50%          0.83% / 2.51%
+        #     200      0.35% / 1.24%          0.60% / 2.21%   <- chosen
+        #     300      0.34% / 0.94%          0.53% / 1.96%
+        #     400      0.42% / 0.74%          0.43% / 1.50%
         #
-        # THE "EVERY RUN CARRIES THE SAME BIAS SO THE DELTA SURVIVES" DEFENCE
-        # THAT USED TO SIT HERE IS FALSE, and the 17.80M/22.93M pair killed
-        # it. Those two meshes differ only in where the fine cells sit, and
-        # the Cl difference between them CHANGES SIGN with the stopping point:
+        # and the error a windowed mean can carry against the 501-2000 truth:
         #
-        #   read at iteration 250:   -7.1 %
-        #   read at iteration 500:  +13.7 %
+        #   window   Cd worst   Cl worst
+        #      50      1.81%      3.31%
+        #     200      0.80%      1.74%   <- chosen
+        #     400      0.44%      1.05%
         #
-        # The bias is not common-mode, because each mesh has its own
-        # oscillation phase and its own transient length.
+        # 200 is where the curve flattens. Past it the accuracy keeps improving
+        # but only in proportion to the iterations bought, and max_iterations
+        # has to cover the transient plus two whole windows.
         #
-        # WHAT ACTUALLY LIMITS THIS, measured by sweeping every stopping point
-        # past iteration 200 and taking the windowed mean at each: a Cl read
-        # this way moves 12.7-27.9 % depending only on where the run stopped,
-        # and widening the window to 150 still leaves 8-17 %. The oscillation
-        # is slow relative to the run, so averaging inside one run cannot
-        # remove it. THE ERROR BAR ON ANY Cl FROM THIS PROFILE IS ROUGHLY
-        # +/-15 %, and any mesh or design effect smaller than that is not
-        # resolvable here - including the ~10 % allocation effect the pair
-        # above was built to measure.
+        # WHY drift_tol 0.025. It is applied to Cd and Cl alike, so it is set
+        # by whichever is worse - Cl, at a worst observed 2.21% over 1301
+        # stopping points on a run that is unambiguously settled. A tolerance
+        # below that fails converged runs, which is how a gate gets switched
+        # off. 0.025 clears it with a little margin and still catches Cd at
+        # twice its worst.
         #
-        # Cd is far better behaved: the same sweep gives 3.6-5.1 %.
+        # WHY max_iterations 1000. The transient plus two full windows is 300 +
+        # 400 = 700; 1000 leaves real margin and costs 8.3 h at the measured
+        # 29.8 s/iter. THIS IS 4x THE OLD 250-ITERATION RUN and that is the
+        # trade being made: Cl's worst-case error goes 3.31% -> 1.74%, so it
+        # buys roughly a factor of two in accuracy for a factor of four in
+        # wall clock. If that is too expensive for a screening sweep, the way
+        # to buy it back is a shorter run WITH ITS TOLERANCES RE-DERIVED from
+        # the table above - not a wider bound on this one.
         #
-        # So: use this profile to screen for LARGE effects and to keep the
-        # pipeline exercised. Do not set a number from it against the StarCCM+
-        # benchmark, do not compare it with the 500- and 750-iteration results
-        # already in the run history, and do not read a small delta off two
-        # runs at this length and believe it.
+        # THE OLD +/-15% ERROR BAR ON Cl IS GONE, and it is worth being precise
+        # about why: it was a property of the slow limit cycle, which this
+        # configuration does not have. Do not carry the old number forward, and
+        # do not assume this one transfers to a different mesh or freestream.
         #
-        # FOR A TRUSTWORTHY ABSOLUTE Cl, raise max_iterations on that one run
-        # and put drift_tol back. Do not widen a bound to make a gate green.
-        #
-        # THE GENERAL LESSON, which cost a night to learn: the transient gets
-        # longer as the mesh gets finer, so an iteration count calibrated on
-        # one mesh is not evidence about a finer one. Cd is far less affected
-        # than Cl at every stop measured.
-        #
-        # WRITE_INTERVAL MUST DIVIDE MAX_ITERATIONS. It did not: 500 into 750
-        # wrote fields at iteration 500 and then never again, because
+        # WRITE_INTERVAL MUST DIVIDE MAX_ITERATIONS. It did not once: 500 into
+        # 750 wrote fields at iteration 500 and then never again, because
         # simpleFoam does not force a write at endTime unless residualControl
-        # stops it first. The 13.28M run therefore finished cleanly with its
-        # newest field data 250 iterations stale, which is invisible until
-        # someone opens the case in ParaView and reads a coefficient off the
-        # wrong time. Coefficients were unaffected - the function objects
-        # write every timestep to postProcessing/ - so nothing in the reported
-        # numbers was wrong, only the fields you can look at.
+        # stops it first. That run finished cleanly with its newest field data
+        # 250 iterations stale, which is invisible until someone opens the case
+        # in ParaView and reads a coefficient off the wrong time. Coefficients
+        # were unaffected - the function objects write every timestep to
+        # postProcessing/ - so only the fields you can look at were wrong.
         #
-        # 125 divides 250, so this writes at 125 and at 250. purgeWrite 2 keeps
-        # both. If either number changes, keep the division exact.
+        # 500 divides 1000, so this writes at 500 and at 1000. purgeWrite 2
+        # keeps both. If either number changes, keep the division exact.
+        #
+        # solve.average_fields is averaged from max_iterations - plateau_window,
+        # i.e. 800 here, so pMean/UMean span the same 200 iterations the
+        # reported Cd and Cl do - about 12 correlation times.
         "solve": {
-            "max_iterations": 250,
+            "max_iterations": 1000,
             "n_ranks": 40,
-            # The averaging window, and at 250 iterations it is also the whole
-            # of what this profile reports: Cd and Cl are the mean over the
-            # last 50. Two windows still fit (100 of 250), so the drift is
-            # measurable and gets reported - it just no longer gates.
-            "plateau_window": 50,
-            # None, not a large number. See the block above and the field
-            # comment in schema.SolveConfig: a huge tolerance would record
-            # 'converged' for a run nobody judged; None records the truth.
-            "drift_tol": None,
+            "plateau_window": 200,
+            # Measured, not chosen. See the sweep above: Cl's worst drift over
+            # 1301 stopping points of a settled run is 2.21%.
+            "drift_tol": 0.025,
             # Never write only at the end, and never on an interval that does
             # not divide max_iterations - see above.
-            "write_interval": 125,
+            "write_interval": 500,
         },
     },
 }
