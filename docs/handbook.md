@@ -1197,43 +1197,43 @@ one un-testable boundary is kept as small as possible.
 51,762-cell mesh (4 ranks):**
 
 ```
-simdev run cases/car/config.yaml --run-dir <run> --profile car_smoke   # prepare+mesh+solve+post: ~62 s wall
-simdev images <run>                                                    # sample 1.5 s, render 191.9 s, 350/364 images
+simdev run cases/car/config.yaml --run-dir <run> --profile car_smoke   # prepare+mesh+solve+post: ~57 s wall
+simdev images <run>                                                    # sample 1.4 s, render 202.1 s, 364/364 images
 simdev report <run>
 ```
 
 - Sampling (`postProcess -dict system/sampleSurfaces -latestTime`, 70 planes +
-  1 merged patch surface): **1.5 s**.
-- Rendering (350 PNGs under `/usr/bin/python3 viz/pv_render.py`):
-  **191.9 s**, ≈0.55 s/image.
-- Images written: **350 of 364** planned. The 14 missing are the 7 `surface`
-  views (front/rear/left/right/top/bottom/iso) × 2 fields (cp, yplus) — a real
-  bug found by this run, not a mesh-coverage note; see "Known loose ends"
-  above.
-- On-disk size of the sampled surfaces: **5.1 MB**
-  (`postProcessing/surfaces/50/`, 70 `.vtp` files) — **not**
+  1 merged patch surface): **1.4 s**.
+- Rendering (364 PNGs under `/usr/bin/python3 viz/pv_render.py`):
+  **202.1 s**, ≈0.56 s/image.
+- Images written: **364 of 364** planned — the full suite, including all
+  seven `surface` views (front/rear/left/right/top/bottom/iso) for both `cp`
+  and `yplus`.
+- On-disk size of the sampled surfaces: **5.5 MB total** — **not**
   `results/samples/`, which the spec originally named but the implementation
-  never populates. `viz/sample.py::run_sampling` writes through OpenFOAM's own
-  `postProcessing/<functionObjectName>/<time>/` convention and
-  `images.py`/`plan.py` read the samples from there directly; `results/`
-  holds only `render_plan.json`, `views.yaml`, `images.json`, the rendered
-  PNGs under `results/images/`, and `index.html`.
+  never creates. `viz/sample.py::run_sampling` reads samples straight from
+  OpenFOAM's own `postProcessing/<functionObjectName>/<time>/` output, in
+  **two separate directories** because they are two separate function
+  objects sampling two different field lists: `postProcessing/surfaces/50/`
+  (5.1 MB, 70 slice `.vtp` files — vorticityMean, Lambda2Mean) and
+  `postProcessing/patchSurfaces/50/` (448 KB, the one merged `vehicle.vtp` —
+  yPlus, which exists only on walls). `results/` itself holds only
+  `render_plan.json`, `views.yaml`, `images.json`, the rendered PNGs under
+  `results/images/` (12 MB), and `index.html`.
 - **These numbers are from the 51,762-cell smoke mesh, not the ~20 M-cell
   `car` production mesh.** They exercise the plumbing end to end but do not
   answer what sampling or rendering costs at production resolution — no
   production mesh has ever been solved (see "Not verified" above), so that
   number stays unmeasured. Do not scale these linearly and call it an
   estimate for `car`.
-- `results/index.html` was opened and checked against the run: the 350
-  written images are correctly linked (verified their `src=` paths resolve to
-  real PNG files on disk); the 14 unwritten ones are also linked and 404,
-  because the page is built from the render plan, not from what actually got
-  drawn.
+- `results/index.html` was opened and checked against the run: all 364
+  `src=` links resolve to real PNG files on disk (`views 5edff6c71baa · 364
+  images · sampled in 1.4s, rendered in 202.1s`) — zero dead links.
 
 Because the real render time is only known at smoke scale, §6.8's streamlines
 question stays undecided the honest way: the flag remains `off`
-(`viz/pv_render.py` warns and no-ops if it is set to anything else). 191.9 s
-for 350 images on a mesh two orders of magnitude smaller than production is
+(`viz/pv_render.py` warns and no-ops if it is set to anything else). 202.1 s
+for 364 images on a mesh two orders of magnitude smaller than production is
 not evidence that a production render is comfortable.
 
 ---
@@ -1370,7 +1370,6 @@ compile; `simpleFoam` runs and writes coefficients.
 | CAD attitude | A heavy-understeer pose (10° body slip, 14–22° steer). Intentional; the user plans to revisit it for later driving states |
 | Production wall clock | 14.78 s/iter measured, so 2000 iterations is ~8.6 h, not the 5 h that was wanted. Solver numerics were measured and are a dead end (~2% safely, and `nNonOrthogonalCorrectors 0` diverges) - see §6, "Make the solve faster". Only cells and iterations are left |
 | `car_smoke` mesh limits | `trust_check_mesh_verdict: false`, skewness 20, non-ortho 75. Almost no quality net, by design |
-| The 7 `surface` (front/rear/left/right/top/bottom/iso) images are not drawn | Found on the first real `images` run (2026-09-01, `car_smoke`). `viz/sample.py::run_sampling` globs only `postProcessing/surfaces/*` for its return value, but the merged `vehicle` patch surface a `surfaces`-type function object named `patchSurfaces` writes lands in `postProcessing/patchSurfaces/*` instead — a different function-object name means a different `postProcessing/<name>/` directory. `find_sample(samples_root, "vehicle")` then finds nothing, `images` logs `note: 7 surfaces produced no sample and were not drawn`, and `results/index.html` links 14 images (7 surfaces × cp, yplus) that were never written. The 350 slice images are unaffected — they sample correctly from `postProcessing/surfaces/*` |
 
 ### Deferred, with the hook already in place
 

@@ -294,12 +294,21 @@ So the frame arithmetic lives in exactly one place — the renderer — with `Ω
 ```
 solve  (decomposed, ~20 M cells, never reconstructed)
    │
-   ├─ postProcess -parallel -latestTime  ──►  vorticity, Lambda2  (volume fields)
-   │
-   ├─ postProcess -parallel -func surfaces ──►  results/samples/**.vtp   (~50 MB)
+   ├─ postProcess -dict system/sampleSurfaces -latestTime, TWO function
+   │  objects, each landing under OpenFOAM's own postProcessing/<name>/<time>/:
+   │  ├─ surfaces        ──► postProcessing/surfaces/<time>/**.vtp        (slices; vorticityMean, Lambda2Mean)
+   │  └─ patchSurfaces    ──► postProcessing/patchSurfaces/<time>/vehicle.vtp  (merged patch surface; yPlus)
    │
    └─ /usr/bin/python3 viz/pv_render.py render_plan.json ──►  results/images/**.png
 ```
+
+Confirmed against a real run (2026-09-01): there is no `results/samples/`.
+`viz/sample.py::run_sampling` reads both directories directly from
+`postProcessing/` rather than copying anything into `results/` — a
+`SampleRoots(surfaces, patches)` pair, not one merged directory, because the
+two function objects sample different field lists and OpenFOAM keeps their
+output apart by construction. `results/` holds only `render_plan.json`,
+`views.yaml`, `images.json`, `results/images/**.png` and `index.html`.
 
 `mesh` decomposes once and nothing ever calls `reconstructPar`
 (`docs/handbook.md` §"Parallel strategy"). Sampling in parallel respects that:
@@ -628,35 +637,16 @@ runs on a machine with neither.
   are assumptions any more.
 - **Sampling cost, measured only at smoke scale.** On the `car_smoke` profile
   (51,762 cells, 4 ranks decomposed, 70 planes + 1 merged patch surface),
-  `postProcess -dict system/sampleSurfaces -latestTime` took **1.5 s**, and
-  rendering the resulting 350 PNGs under `/usr/bin/python3 viz/pv_render.py`
-  took **191.9 s** (≈0.55 s/image). The on-disk sample archive was **5.1 MB**
-  in `postProcessing/surfaces/50/` — note that is where the samples actually
-  land; `results/samples/` (§6.1's diagram) is never created, because
-  `viz/sample.py` reads the samples from OpenFOAM's own
-  `postProcessing/<functionObjectName>/<time>/` output rather than copying
-  them into `results/`. **This does not resolve the risk as originally
-  framed.** The risk was sampling cost on the ~20 M-cell `car` production
-  mesh, and no production mesh has ever been solved (handbook §9, "Not
-  verified", item 1) — that number is still unmeasured, because there is
-  nothing to measure it against yet. Do not scale the smoke-scale number
-  linearly and report it as a production estimate.
-- **New: the merged `vehicle` patch surface is not found by the `images`
-  stage, found 2026-09-01 on the first real run.** The 7 `surface` views
-  (front/rear/left/right/top/bottom/iso) × 2 fields (cp, yplus) — 14 of 364
-  planned images — were not drawn. `viz/sample.py::run_sampling` returns
-  `sorted((run_dir / "postProcessing" / "surfaces").glob("*"))[-1]` as
-  `samples_root`, but the `surfaces`-type function object producing the
-  merged `vehicle` patch surface is named `patchSurfaces` in
-  `sampleSurfaces.jinja`, and OpenFOAM writes each function object's output
-  under `postProcessing/<its own name>/<time>/` — so `vehicle.vtp` lands in
-  `postProcessing/patchSurfaces/50/`, a directory `run_sampling` never looks
-  in. `find_sample(samples_root, "vehicle")` then finds nothing, `images`
-  logs the miss as a note rather than failing (correctly — these are
-  pictures, not a gate), and `results/index.html` still links all 364
-  filenames from the render plan, so the 14 missing ones 404. The 350 slice
-  images are unaffected. Not fixed here — this task is documentation-only —
-  but it is a real, measured defect and not a mesh-coverage artifact.
+  `postProcess -dict system/sampleSurfaces -latestTime` took **1.4 s**, and
+  rendering the resulting 364 PNGs under `/usr/bin/python3 viz/pv_render.py`
+  took **202.1 s** (≈0.56 s/image) — the full 364/364 suite, all seven
+  `surface` views included (see §6.1 for where the two sample directories
+  actually land; `results/samples/` does not exist). **This does not resolve
+  the risk as originally framed.** The risk was sampling cost on the ~20
+  M-cell `car` production mesh, and no production mesh has ever been solved
+  (handbook §9, "Not verified", item 1) — that number is still unmeasured,
+  because there is nothing to measure it against yet. Do not scale the
+  smoke-scale number linearly and report it as a production estimate.
 - **`lambda2`'s default colour range is a guess.** Expect to tune it once
   against a real field; the range is in a versioned file precisely so the
   tuning is recorded rather than remembered.

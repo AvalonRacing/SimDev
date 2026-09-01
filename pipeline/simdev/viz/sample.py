@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -12,6 +13,25 @@ from simdev.render.render import env
 from simdev.run.runner import Runner, StageError
 
 SAMPLE_DICT = "system/sampleSurfaces"
+
+
+@dataclass(frozen=True)
+class SampleRoots:
+    """Where the two sampling function objects in sampleSurfaces.jinja land.
+
+    Deliberately two directories, not one. `surfaces` and `patchSurfaces` are
+    separate function objects because they sample different field lists (the
+    slices carry vorticityMean/Lambda2Mean; the merged vehicle patch carries
+    yPlus, which exists only on walls) - see sampleSurfaces.jinja. OpenFOAM
+    writes each function object's output under
+    postProcessing/<its own name>/<time>/, so one glob root can only ever
+    find one of them. A single `Path` return here is what let the images
+    stage silently draw 350 of 364 images: every 'surface' view samples
+    'vehicle', and 'vehicle' lives under patchSurfaces, not surfaces.
+    """
+
+    surfaces: Path
+    patches: Path
 
 
 def render_sample_dict(
@@ -44,14 +64,14 @@ def render_sample_dict(
     return target
 
 
-def run_sampling(run_dir: Path, n_ranks: int) -> Path:
+def run_sampling(run_dir: Path, n_ranks: int) -> SampleRoots:
     """Cut every plane and patch at the latest written time.
 
-    Returns the directory the surfaces landed in. Raises rather than guessing
-    when nothing was written: an empty sample directory after a successful
-    postProcess means the fields it wanted were not in the time directory,
-    which is a different problem from a failed command and wants a different
-    fix.
+    Returns the two directories the samples landed in - see `SampleRoots`.
+    Raises rather than guessing when either is empty: an empty sample
+    directory after a successful postProcess means the fields it wanted were
+    not in the time directory, which is a different problem from a failed
+    command and wants a different fix.
     """
     run_dir = Path(run_dir)
     before = _force_coeff_times(run_dir)
@@ -74,14 +94,23 @@ def run_sampling(run_dir: Path, n_ranks: int) -> Path:
             "results/report.tsv"
         ])
 
-    roots = sorted((run_dir / "postProcessing" / "surfaces").glob("*"))
-    if not roots:
+    surfaces_roots = sorted((run_dir / "postProcessing" / "surfaces").glob("*"))
+    if not surfaces_roots:
         raise StageError([
             "postProcess wrote no surfaces. The usual cause is that the "
             "latest time directory holds no pMean/UMean - a run stopped "
             "before fieldAverage's timeStart has no averaged fields to cut"
         ])
-    return roots[-1]
+
+    patch_roots = sorted((run_dir / "postProcessing" / "patchSurfaces").glob("*"))
+    if not patch_roots:
+        raise StageError([
+            "postProcess wrote no patchSurfaces. The usual cause is the same "
+            "as an empty surfaces directory: the latest time directory holds "
+            "no pMean/UMean/yPlus for the merged vehicle surface to sample"
+        ])
+
+    return SampleRoots(surfaces=surfaces_roots[-1], patches=patch_roots[-1])
 
 
 def _force_coeff_times(run_dir: Path) -> set[str]:

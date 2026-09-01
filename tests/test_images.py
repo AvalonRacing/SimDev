@@ -10,6 +10,7 @@ from simdev.run.runner import StageError
 from simdev.run.status import StageStatus, read_status, write_status
 from simdev.stages.images import images
 from simdev.stages.prepare import prepare
+from simdev.viz.sample import SampleRoots
 
 CASE: dict = {
     "name": "ahmed",
@@ -96,7 +97,10 @@ def test_the_plan_covers_the_configured_planes(run_dir: Path, monkeypatch) -> No
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     images(run_dir)
     plan = json.loads((run_dir / "results" / "render_plan.json").read_text())
@@ -110,7 +114,10 @@ def test_axes_and_fields_narrow_the_work(run_dir: Path, monkeypatch) -> None:
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     images(run_dir, axes=["x"], fields=["cp"])
     plan = json.loads((run_dir / "results" / "render_plan.json").read_text())
@@ -123,7 +130,10 @@ def test_the_views_file_travels_with_the_pictures(run_dir: Path, monkeypatch) ->
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     record = images(run_dir)
     assert (run_dir / "results" / "views.yaml").exists()
@@ -137,7 +147,10 @@ def test_slices_that_miss_the_car_are_reported(run_dir: Path, monkeypatch) -> No
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     record = images(run_dir)
     # The Ahmed body is 1.044 m long; the tiny views file spans 0.2 m.
@@ -150,19 +163,34 @@ def test_the_vehicle_sample_is_used_for_every_surface_view(
     """Task 13 samples ONE combined 'vehicle' surface listing every force
     patch - not one sample per patch. Every one of the seven surface views is
     an overall view of the whole car, so each surface entry's sample must be
-    that one file, not whichever per-patch sample happened to exist first."""
+    that one file, not whichever per-patch sample happened to exist first.
+
+    REGRESSION (found on the first real end-to-end run, 2026-09-01): 'vehicle'
+    lives under postProcessing/patchSurfaces/<time>/, a SEPARATE directory
+    from postProcessing/surfaces/<time>/ where the slice samples land -
+    they are two different OpenFOAM function objects (see
+    sampleSurfaces.jinja). The two roots are built here with that exact
+    layout, matching what the real run produced; putting vehicle.vtp under
+    the surfaces root instead - as an earlier version of this test did - made
+    it indistinguishable from a bug that silently drew 350 of 364 images."""
     from simdev.stages import images as module
+    from simdev.viz.sample import SampleRoots
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))
-    samples_root = run_dir / "postProcessing" / "surfaces" / "400"
-    samples_root.mkdir(parents=True)
-    (samples_root / "vehicle.vtp").write_text("not a real vtp", encoding="utf-8")
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: samples_root)
+    surfaces_root = run_dir / "postProcessing" / "surfaces" / "400"
+    surfaces_root.mkdir(parents=True)
+    patches_root = run_dir / "postProcessing" / "patchSurfaces" / "400"
+    patches_root.mkdir(parents=True)
+    (patches_root / "vehicle.vtp").write_text("not a real vtp", encoding="utf-8")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(surfaces=surfaces_root, patches=patches_root),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     images(run_dir)
     plan = json.loads((run_dir / "results" / "render_plan.json").read_text())
     for entry in plan["surfaces"]:
-        assert entry["sample"] == str(samples_root / "vehicle.vtp")
+        assert entry["sample"] == str(patches_root / "vehicle.vtp")
 
 
 def test_a_solve_that_never_ran_is_refused(run_dir: Path) -> None:
@@ -181,7 +209,10 @@ def test_a_gate_failed_solve_is_accepted(run_dir: Path, monkeypatch) -> None:
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "gate_failed", "h", ["did not plateau"], {}))
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     images(run_dir)  # must not raise
 
@@ -221,7 +252,10 @@ def test_the_window_comes_from_result_json_not_post_status(
             {"cd_mean": 0.3, "cl_mean": -0.1, "verdict": "converged"},
         ),
     )
-    monkeypatch.setattr(module, "run_sampling", lambda *a, **k: run_dir / "nowhere")
+    monkeypatch.setattr(
+        module, "run_sampling",
+        lambda *a, **k: SampleRoots(run_dir / "nowhere", run_dir / "nowhere"),
+    )
     monkeypatch.setattr(module, "_render", lambda *a, **k: {"written": 0, "missing": []})
     record = images(run_dir)
     plan = json.loads((run_dir / "results" / "render_plan.json").read_text())

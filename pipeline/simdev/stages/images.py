@@ -143,11 +143,11 @@ def images(
     render_sample_dict(spec, run_dir, plan["slices"])
 
     sampled_at = time.monotonic()
-    samples_root = run_sampling(run_dir, spec.solve.n_ranks)
+    roots = run_sampling(run_dir, spec.solve.n_ranks)
     sample_seconds = time.monotonic() - sampled_at
 
     for entry in plan["slices"]:
-        found = find_sample(samples_root, entry["name"])
+        found = find_sample(roots.surfaces, entry["name"])
         entry["sample"] = str(found) if found else None
 
     # ONE combined 'vehicle' surface, not one per patch (Task 13). The seven
@@ -157,7 +157,13 @@ def images(
     # single `patch`-type surface listing every force patch. Picking whichever
     # per-patch sample sorted first would draw one part of the car - the
     # bodywork alone, say - labelled as the entire vehicle.
-    found = find_sample(samples_root, "vehicle")
+    #
+    # Looked for under roots.patches, NOT roots.surfaces: 'vehicle' is
+    # written by the separate `patchSurfaces` function object (different
+    # field list - yPlus is wall-only), and OpenFOAM writes each function
+    # object's output under its own postProcessing/<name>/<time>/ directory.
+    # See SampleRoots in viz/sample.py.
+    found = find_sample(roots.patches, "vehicle")
     for entry in plan["surfaces"]:
         entry["sample"] = str(found) if found else None
 
