@@ -446,12 +446,27 @@ to the datum, so the car sits in the same pixels every time:
 | y | car's right (−y) | +y | +z | nose to the right |
 | z | above | −z | +x | plan view, nose up |
 
-Surface views, in the car's own frame (nose +x, up +z, therefore car-left
-= +y — **confirm against the CAD once during implementation**):
+**The surface views are in the car frame too, on the same terms as the
+slices** — focal point on the datum, fixed `CameraParallelScale`, direction
+vectors in car axes. Nothing about them refers to the domain. That is what
+makes a `front.png` from a cornering state and one from a straight-line state
+the same picture of two different flows rather than two different pictures.
+Because the geometry is never transformed, car axes *are* mesh axes and this
+costs nothing to arrange; the datum is what supplies the centring.
 
-`front` (−x dir), `rear` (+x), `left` (from +y), `right` (from −y),
-`top` (−z, up +x), `bottom` (+z, up +x), `iso` (from front-left-above,
-(+1,+1,+1)/√3, up +z).
+Nose is +x and up is +z, so **car-left is +y** (confirmed by the user against
+the CAD). The yawed, steered attitude baked into `CAD/Testcase` does not
+change that: the attitude is in the geometry, not in the frame.
+
+| View | Camera direction | Up | Sees |
+|---|---|---|---|
+| `front` | −x | +z | the nose |
+| `rear` | +x | +z | the wing |
+| `left` | −y (camera at +y) | +z | the car's left flank |
+| `right` | +y (camera at −y) | +z | the car's right flank |
+| `top` | −z | +x | plan view, nose up |
+| `bottom` | +z | +x | floor, nose up |
+| `iso` | (−1,−1,−1)/√3 (camera front-left-above) | +z | three-quarter from the car's left |
 
 ### 6.7 Every image is stamped
 
