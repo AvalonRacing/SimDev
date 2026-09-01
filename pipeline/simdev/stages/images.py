@@ -14,6 +14,7 @@ from simdev.run.status import StageStatus, read_status, write_status
 from simdev.stages.common import load_spec
 from simdev.viz.plan import build_render_plan
 from simdev.viz.sample import find_sample, render_sample_dict, run_sampling
+from simdev.viz.sheet import write_contact_sheet
 from simdev.viz.views import DEFAULT_VIEWS_PATH, load_views
 
 STAGE = "images"
@@ -187,6 +188,7 @@ def images(
         "reasons": reasons,
     }
     (results / "images.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    write_contact_sheet(results, plan, record)
 
     write_status(
         run_dir,
