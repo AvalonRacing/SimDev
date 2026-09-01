@@ -45,4 +45,5 @@ simdev = ["render/templates/*.jinja"]
 testpaths = ["tests"]
 markers = [
     "openfoam: requires a working OpenFOAM installation",
+    "paraview: requires a working ParaView python (see cli.py::_doctor)",
 ]
