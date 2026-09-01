@@ -234,3 +234,42 @@ def build_force_report(
     reasons.extend(cop.reasons)
 
     return ForceReport(force, moment, cop, groups, reasons)
+
+
+def cop_history(
+    forces: pd.DataFrame,
+    moments: pd.DataFrame,
+    c_of_r: tuple[float, float, float],
+    force_scale: float,
+    axles: tuple[float, float] | None,
+) -> pd.DataFrame:
+    """COP_x and front balance per iteration, for the plot.
+
+    Balance is the number that actually gets tuned, and whether it swings
+    half a percent or five across the limit cycle is invisible in a windowed
+    mean. Guarded iterations come back NaN so the trace breaks rather than
+    spiking - matplotlib draws a gap, which is the honest picture of an
+    iteration where the denominator was noise.
+    """
+    merged = forces.merge(moments, on="Time", suffixes=("_f", "_m"))
+    rows = []
+    for _, row in merged.iterrows():
+        cop = centre_of_pressure(
+            (row["x_f"], row["y_f"], row["z_f"]),
+            (row["x_m"], row["y_m"], row["z_m"]),
+            c_of_r,
+            force_scale,
+            axles=axles,
+        )
+        rows.append(
+            {
+                "Time": row["Time"],
+                "COP_x": float("nan") if cop.x is None else cop.x,
+                "balance_front_pct": (
+                    float("nan")
+                    if cop.balance_front_pct is None
+                    else cop.balance_front_pct
+                ),
+            }
+        )
+    return pd.DataFrame(rows)

@@ -264,6 +264,43 @@ def plot_component_forces(
     return out_path
 
 
+def plot_balance(
+    history: pd.DataFrame, out_path: Path, window: tuple[int, int]
+) -> Path:
+    """COP_x and front aero balance against iteration.
+
+    Two panels sharing an x-axis, with the averaging window shaded, on the
+    same reasoning as plot_force_history: the transient is drawn but the axis
+    is scaled from the settled region, or the only part anyone reads is a
+    flat line one pixel thick.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    figure, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+
+    start = settled_from(history, window)
+    settled = history[history["Time"] >= start]
+
+    for axis, column, label in (
+        (axes[0], "COP_x", "COP$_x$ [m]"),
+        (axes[1], "balance_front_pct", "front balance [%]"),
+    ):
+        axis.plot(history["Time"], history[column], linewidth=0.8)
+        axis.axvspan(window[0], window[1], alpha=0.12, label="averaging window")
+        axis.set_ylabel(label)
+        axis.grid(True, alpha=0.3)
+        values = settled[column].dropna()
+        if not values.empty:
+            pad = max(float(values.std()) * 4.0, 1e-6)
+            axis.set_ylim(float(values.mean()) - pad, float(values.mean()) + pad)
+
+    axes[0].legend(loc="upper right", fontsize="small")
+    axes[1].set_xlabel("iteration")
+    figure.tight_layout()
+    figure.savefig(out_path, dpi=140)
+    plt.close(figure)
+    return out_path
+
+
 def plot_residuals(df: pd.DataFrame, out_path: Path) -> Path:
     fig, axis = plt.subplots(figsize=(9, 4))
 

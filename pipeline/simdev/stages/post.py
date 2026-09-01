@@ -5,8 +5,11 @@ from pathlib import Path
 
 from simdev.gates.convergence import check_convergence
 from simdev.gates.yplus import check_y_plus
-from simdev.report.forces import build_force_report, window_mean
+from simdev.report.forces import (
+    axles_from_prepare, build_force_report, cop_history, window_mean,
+)
 from simdev.report.plots import (
+    plot_balance,
     plot_component_forces,
     plot_force_history,
     plot_residuals,
@@ -16,6 +19,7 @@ from simdev.report.tsv import write_report
 from simdev.run.parsers import (
     read_component_coeffs,
     read_force_coeffs,
+    read_force_vectors,
     read_y_plus,
     read_y_plus_area,
 )
@@ -87,6 +91,22 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
     # Never fatal: a run made before the `forces` object existed still has
     # coefficients, a y+ verdict and a flow field worth keeping.
     force_report = build_force_report(run_dir, spec, convergence.window)
+
+    # The balance history. A windowed mean hides whether it swings half a
+    # percent or five across the limit cycle; skipped for runs made before
+    # the 'forces' function object existed, same guard as force_report above.
+    if force_report.force is not None:
+        plot_balance(
+            cop_history(
+                read_force_vectors(find_latest(run_dir, "forces/*/force.dat")),
+                read_force_vectors(find_latest(run_dir, "forces/*/moment.dat")),
+                tuple(spec.forces.c_of_r),
+                0.5 * spec.flow.rho * spec.flow.u_inf**2 * spec.a_ref_effective,
+                axles_from_prepare(run_dir),
+            ),
+            results_dir / "balance.png",
+            convergence.window,
+        )
 
     record = ResultRecord(
         case_name=spec.name,
