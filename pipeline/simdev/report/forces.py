@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from simdev.config.schema import CaseSpec
 
 # Below this, in coefficient terms, the denominator of a COP ratio is noise
 # and the ratio it produces is a large number with no meaning. Report nothing
@@ -147,3 +150,87 @@ def group_coefficients(
         out[group] = totals
 
     return out
+
+
+@dataclass(frozen=True)
+class ForceReport:
+    """Everything report.tsv needs beyond what post already computes.
+
+    `force`, `moment` and `cop` are None together: they all come from the
+    same two files, and a run made before the forces object existed has
+    neither. That is a gap in the record, not a failed run.
+    """
+
+    force: tuple[float, float, float] | None
+    moment: tuple[float, float, float] | None
+    cop: CentreOfPressure | None
+    groups: dict[str, dict[str, float]] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+
+
+def axles_from_prepare(run_dir: Path) -> tuple[float, float] | None:
+    """Mean front and rear wheel-centre x, as prepare measured them.
+
+    Steering rotates a wheel about its own steering axis and moves the centre
+    by millimetres in x, so this is stable enough to divide by - which is why
+    the balance denominator comes from here rather than from the geometry
+    bounding box, which moves with the bodywork.
+
+    None when the case has no wheels. The Ahmed body must not be given an
+    invented wheelbase so that a balance column can be filled in.
+    """
+    from simdev.run.status import read_status
+
+    status = read_status(run_dir, "prepare")
+    if status is None:
+        return None
+    wheels = status.detail.get("wheels") or {}
+    front = [w["origin"][0] for name, w in wheels.items() if name.startswith("F")]
+    rear = [w["origin"][0] for name, w in wheels.items() if name.startswith("R")]
+    if not front or not rear:
+        return None
+    return (sum(front) / len(front), sum(rear) / len(rear))
+
+
+def build_force_report(
+    run_dir: Path, spec: "CaseSpec", window: tuple[int, int]
+) -> ForceReport:
+    """Window means of F and M, the COP triple, and the group coefficients."""
+    from simdev.run.parsers import read_component_coeffs, read_force_vectors
+    from simdev.stages.common import find_latest
+
+    reasons: list[str] = []
+
+    groups = group_coefficients(
+        read_component_coeffs(run_dir), spec.post.groups, window
+    )
+
+    try:
+        force_frame = read_force_vectors(
+            find_latest(run_dir, "forces/*/force.dat")
+        )
+        moment_frame = read_force_vectors(
+            find_latest(run_dir, "forces/*/moment.dat")
+        )
+    except (FileNotFoundError, ValueError) as error:
+        reasons.append(
+            "no dimensional forces: could not read the 'forces' function "
+            f"object ({error}). Runs made before it was added to controlDict "
+            "have coefficients but no newtons"
+        )
+        return ForceReport(None, None, None, groups, reasons)
+
+    force = tuple(window_mean(force_frame, axis, window) for axis in "xyz")
+    moment = tuple(window_mean(moment_frame, axis, window) for axis in "xyz")
+
+    # The force a unit coefficient would produce. Only sets the COP guard.
+    force_scale = (
+        0.5 * spec.flow.rho * spec.flow.u_inf**2 * spec.a_ref_effective
+    )
+    cop = centre_of_pressure(
+        force, moment, tuple(spec.forces.c_of_r), force_scale,
+        axles=axles_from_prepare(run_dir),
+    )
+    reasons.extend(cop.reasons)
+
+    return ForceReport(force, moment, cop, groups, reasons)
