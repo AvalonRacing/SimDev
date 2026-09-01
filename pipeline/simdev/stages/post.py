@@ -19,7 +19,6 @@ from simdev.report.tsv import write_report
 from simdev.run.parsers import (
     read_component_coeffs,
     read_force_coeffs,
-    read_force_vectors,
     read_y_plus,
     read_y_plus_area,
 )
@@ -98,8 +97,8 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
     if force_report.force is not None:
         plot_balance(
             cop_history(
-                read_force_vectors(find_latest(run_dir, "forces/*/force.dat")),
-                read_force_vectors(find_latest(run_dir, "forces/*/moment.dat")),
+                force_report.force_frame,
+                force_report.moment_frame,
                 tuple(spec.forces.c_of_r),
                 0.5 * spec.flow.rho * spec.flow.u_inf**2 * spec.a_ref_effective,
                 axles_from_prepare(run_dir),
@@ -122,6 +121,8 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
         window_end=convergence.window[1],
         n_iterations=convergence.n_iterations,
         n_cells=n_cells,
+        cd_amplitude=convergence.amplitudes.get("Cd"),
+        cl_amplitude=convergence.amplitudes.get("Cl"),
         yplus_passed=y_plus_gate.passed,
         # Selected, not coerced. The gate's detail also carries each patch's
         # unweighted face mean and a string naming which basis it judged on,
@@ -167,8 +168,8 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
             "window_start": record.window_start,
             "window_end": record.window_end,
             "n_iterations": record.n_iterations,
-            "cd_amplitude": convergence.amplitudes.get("Cd"),
-            "cl_amplitude": convergence.amplitudes.get("Cl"),
+            "cd_amplitude": record.cd_amplitude,
+            "cl_amplitude": record.cl_amplitude,
             "yplus_passed": record.yplus_passed,
             "n_cells": record.n_cells,
             "Fx": record.fx, "Fy": record.fy, "Fz": record.fz,

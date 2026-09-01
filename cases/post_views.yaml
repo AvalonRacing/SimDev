@@ -66,4 +66,10 @@ camera:
 # off | lic | seeded. Off by default until the cost is measured on a real
 # case: the sampled slices carry U_rel as a vector, so this needs no return
 # to the volume, but it is still 350 extra filter evaluations.
+#
+# QUOTED ON PURPOSE - do not "clean this up". YAML 1.1 reads a bare `off` as
+# the boolean False, not the string "off", which is exactly the bug that
+# broke this file once already (see viz/views.py::load_views). Unquoting it
+# looks harmless and changes nothing until the next `raw.get("streamlines")`
+# call gets False back instead of "off".
 streamlines: "off"

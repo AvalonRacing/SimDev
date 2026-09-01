@@ -29,6 +29,12 @@ class ResultRecord:
     n_cells: int
     yplus_passed: bool
     yplus: dict[str, float] = field(default_factory=dict)
+    # Peak-to-peak swing over the averaging window, coefficient units. None
+    # on a run whose convergence was never judged. Defaulted so a
+    # result.json written before these fields existed still loads - see
+    # tests/test_results.py.
+    cd_amplitude: float | None = None
+    cl_amplitude: float | None = None
     # Dimensional forces and moments, newtons and newton-metres, window means.
     # None on a run made before the `forces` function object existed.
     fx: float | None = None

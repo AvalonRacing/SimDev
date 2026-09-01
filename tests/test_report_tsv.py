@@ -6,6 +6,7 @@ import pytest
 
 from simdev.report.tsv import (
     FIXED_COLUMNS,
+    _format,
     aggregate_reports,
     read_report,
     report_columns,
@@ -108,3 +109,66 @@ def test_aggregate_skips_a_run_with_no_report(tmp_path: Path) -> None:
     write_report(tmp_path / "car-01", ROW, ["body", "wing", "other"])
     header, rows = aggregate_reports([tmp_path / "car-01", tmp_path / "nothing"])
     assert len(rows) == 1
+
+
+def test_an_infinite_value_is_an_empty_field_not_inf() -> None:
+    """Same rule as NaN: an infinity in a spreadsheet cell is a value that
+    will propagate through any formula that touches it. It must come out
+    as a gap, exactly like NaN and None do."""
+    assert _format(float("inf")) == ""
+    assert _format(float("-inf")) == ""
+
+
+def test_infinite_value_round_trips_as_empty(tmp_path: Path) -> None:
+    row = dict(ROW, cd=float("inf"), cl=float("-inf"))
+    write_report(tmp_path, row, ["body", "wing", "other"])
+    fields = read_report(tmp_path)
+    assert fields["cd"] == ""
+    assert fields["cl"] == ""
+
+
+def test_a_bool_renders_as_true_false_not_one_zero() -> None:
+    """The subtle one: isinstance(True, int) is True in Python, so if the
+    bool branch in _format were ever reordered after the float branch,
+    `converged` would silently start rendering as "1"/"0" in every pasted
+    row instead of "true"/"false"."""
+    assert _format(True) == "true"
+    assert _format(False) == "false"
+    assert _format(True) != "1"
+    assert _format(False) != "0"
+
+
+def test_bool_round_trips_as_true_false_in_the_tsv(tmp_path: Path) -> None:
+    row = dict(ROW, converged=True, yplus_passed=False)
+    write_report(tmp_path, row, ["body", "wing", "other"])
+    fields = read_report(tmp_path)
+    assert fields["converged"] == "true"
+    assert fields["yplus_passed"] == "false"
+
+
+def test_aggregate_widens_columns_for_a_run_with_an_extra_group(
+    tmp_path: Path,
+) -> None:
+    """Columns are unioned in first-seen order. A second run that declares a
+    group the first run did not must widen the table, not get truncated to
+    the first run's columns - and the first run's row must show a gap
+    (empty cell), not the second run's data, in the column it never had."""
+    write_report(tmp_path / "car-01", dict(ROW, run="car-01"), ["body", "wing"])
+    write_report(
+        tmp_path / "car-02",
+        dict(ROW, run="car-02", cd_diffuser=0.11, cl_diffuser=-0.44),
+        ["body", "wing", "diffuser"],
+    )
+    header, rows = aggregate_reports([tmp_path / "car-01", tmp_path / "car-02"])
+
+    assert "cd_diffuser" in header
+    assert "cl_diffuser" in header
+
+    row1 = dict(zip(header, rows[0]))
+    row2 = dict(zip(header, rows[1]))
+    # car-01 never declared a diffuser group: its cell is a gap, not
+    # truncated out of the row and not car-02's value.
+    assert row1["run"] == "car-01" and row1["cd_diffuser"] == ""
+    assert row2["run"] == "car-02" and row2["cd_diffuser"] == "0.11"
+    assert len(rows[0]) == len(header)
+    assert len(rows[1]) == len(header)

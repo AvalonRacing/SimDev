@@ -20,7 +20,6 @@ def _plan(frame=None):
         views=VIEWS,
         datum=DATUM,
         frame=frame,
-        samples_dir=Path("results/samples"),
         images_dir=Path("results/images"),
         stamp=STAMP,
     )
@@ -51,6 +50,18 @@ def test_the_plan_is_json_serialisable() -> None:
     """It crosses a process boundary into an interpreter that cannot import
     simdev, so it has to be plain data."""
     json.dumps(_plan())
+
+
+def test_no_entry_is_seeded_with_a_sample_path() -> None:
+    """"sample" is filled in later, by images.py's on-disk discovery
+    (find_sample) - never by the plan builder. A path seeded here and never
+    overwritten (a caller that skips that discovery step) would be a
+    results/samples/... path nothing produced. Slices and surfaces must
+    agree on this: neither carries the key until discovery runs.
+    """
+    plan = _plan()
+    assert all("sample" not in s for s in plan["slices"])
+    assert all("sample" not in s for s in plan["surfaces"])
 
 
 def test_every_plane_gets_every_slice_field() -> None:

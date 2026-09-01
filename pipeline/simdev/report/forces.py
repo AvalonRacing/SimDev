@@ -166,6 +166,14 @@ class ForceReport:
     cop: CentreOfPressure | None
     groups: dict[str, dict[str, float]] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
+    # The full per-iteration frames this report was built from - the same
+    # force.dat and moment.dat that gave `force` and `moment` their window
+    # means. Carried here so a caller building the COP history plot (which
+    # needs every iteration, not the mean) can reuse them instead of
+    # re-resolving and re-parsing the identical files with a second
+    # find_latest call site. None exactly when `force`/`moment`/`cop` are.
+    force_frame: pd.DataFrame | None = None
+    moment_frame: pd.DataFrame | None = None
 
 
 def axles_from_prepare(run_dir: Path) -> tuple[float, float] | None:
@@ -233,7 +241,10 @@ def build_force_report(
     )
     reasons.extend(cop.reasons)
 
-    return ForceReport(force, moment, cop, groups, reasons)
+    return ForceReport(
+        force, moment, cop, groups, reasons,
+        force_frame=force_frame, moment_frame=moment_frame,
+    )
 
 
 def cop_history(

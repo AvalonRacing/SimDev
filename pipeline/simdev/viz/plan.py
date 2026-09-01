@@ -87,7 +87,6 @@ def build_render_plan(
     views: Views,
     datum: tuple[float, float, float],
     frame: Mapping[str, Any] | None,
-    samples_dir: Path,
     images_dir: Path,
     stamp: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -138,7 +137,13 @@ def build_render_plan(
                 "offset": offset,
                 "point": point,
                 "normal": [1.0 if i == index else 0.0 for i in range(3)],
-                "sample": str(samples_dir / f"{name}"),
+                # "sample" is not seeded here: images.py fills it in for
+                # every slice and every surface once it has actually found
+                # the file on disk (find_sample), and overwrites whatever
+                # this function wrote before the plan is ever read. Seeding
+                # it here would carry a results/samples/... path nothing
+                # produced, and a caller that skips that discovery step -
+                # a future `simdev compare`, say - would silently ship it.
                 "camera": _camera(
                     (focal[0], focal[1], focal[2]),
                     direction,

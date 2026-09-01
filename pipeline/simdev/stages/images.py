@@ -104,7 +104,6 @@ def images(
         views=views,
         datum=datum,
         frame=prepare_status.detail.get("corner_frame"),
-        samples_dir=results / "samples",
         images_dir=results / "images",
         stamp={
             "run": run_dir.name,
