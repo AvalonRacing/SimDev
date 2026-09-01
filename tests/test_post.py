@@ -44,6 +44,8 @@ def run_dir(tmp_path: Path) -> Path:
     for name, fixture in (
         ("forceCoeffs", "coefficient.dat"),
         ("yPlus", "yPlus.dat"),
+        ("forces", "force.dat"),
+        ("forces", "moment.dat"),
     ):
         out = target / "postProcessing" / name / "0"
         out.mkdir(parents=True, exist_ok=True)
@@ -206,3 +208,52 @@ def test_post_still_works_with_no_component_objects(run_dir: Path) -> None:
     _mark_solve(run_dir, "ok")
     post(run_dir)
     assert (run_dir / "results" / "result.json").exists()
+
+
+# --- the paste target -------------------------------------------------------
+
+
+def test_post_writes_the_paste_target(run_dir: Path) -> None:
+    _mark_solve(run_dir, "ok")
+    post(run_dir)
+    text = (run_dir / "results" / "report.tsv").read_text(encoding="utf-8")
+    # NOT text.strip().splitlines(): the Ahmed fixture has no wheels, so
+    # balance_front_pct - the last column - is legitimately empty, and a
+    # blanket strip() on the whole file eats that trailing tab along with
+    # the final newline, silently dropping a column from the data line.
+    header, data = text.rstrip("\n").split("\n")
+    assert "balance_front_pct" in header.split("\t")
+    assert len(header.split("\t")) == len(data.split("\t"))
+
+
+def test_post_records_the_cop_convention(run_dir: Path) -> None:
+    """So a later reader cannot mistake the triple for one point."""
+    _mark_solve(run_dir, "ok")
+    assert post(run_dir).cop_convention == "ratio"
+
+
+def test_post_survives_a_run_with_no_forces_object(run_dir: Path) -> None:
+    import shutil as _shutil
+
+    _shutil.rmtree(run_dir / "postProcessing" / "forces")
+    _mark_solve(run_dir, "ok")
+    record = post(run_dir)
+    assert record.fz is None
+    assert record.cd_mean != 0.0
+    assert (run_dir / "results" / "report.tsv").exists()
+
+
+def test_an_old_result_json_still_loads(run_dir: Path, tmp_path: Path) -> None:
+    """New fields are defaulted, so a record written before them still reads."""
+    import json
+
+    from simdev.report.results import read_result
+
+    _mark_solve(run_dir, "ok")
+    post(run_dir)
+    path = run_dir / "results" / "result.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for key in ("fx", "fy", "fz", "cop_x", "cop_convention", "groups"):
+        payload.pop(key, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert read_result(run_dir).fz is None

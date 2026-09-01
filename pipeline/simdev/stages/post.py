@@ -5,12 +5,14 @@ from pathlib import Path
 
 from simdev.gates.convergence import check_convergence
 from simdev.gates.yplus import check_y_plus
+from simdev.report.forces import build_force_report, window_mean
 from simdev.report.plots import (
     plot_component_forces,
     plot_force_history,
     plot_residuals,
 )
 from simdev.report.results import ResultRecord, write_result
+from simdev.report.tsv import write_report
 from simdev.run.parsers import (
     read_component_coeffs,
     read_force_coeffs,
@@ -81,6 +83,11 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
     except FileNotFoundError:
         pass
 
+    # Dimensional forces, the COP triple and the per-group coefficients.
+    # Never fatal: a run made before the `forces` object existed still has
+    # coefficients, a y+ verdict and a flow field worth keeping.
+    force_report = build_force_report(run_dir, spec, convergence.window)
+
     record = ResultRecord(
         case_name=spec.name,
         spec_hash=spec.spec_hash(),
@@ -105,9 +112,60 @@ def post(run_dir: Path, force: bool = False) -> ResultRecord:
             for k, v in y_plus_gate.detail.items()
             if k.endswith("_avg_yplus")
         },
-        reasons=[*convergence.reasons, *y_plus_gate.reasons],
+        fx=force_report.force[0] if force_report.force else None,
+        fy=force_report.force[1] if force_report.force else None,
+        fz=force_report.force[2] if force_report.force else None,
+        mx=force_report.moment[0] if force_report.moment else None,
+        my=force_report.moment[1] if force_report.moment else None,
+        mz=force_report.moment[2] if force_report.moment else None,
+        cs_mean=window_mean(forces, "Cs", convergence.window),
+        cop_x=force_report.cop.x if force_report.cop else None,
+        cop_y=force_report.cop.y if force_report.cop else None,
+        cop_z=force_report.cop.z if force_report.cop else None,
+        balance_front_pct=(
+            force_report.cop.balance_front_pct if force_report.cop else None
+        ),
+        groups=force_report.groups,
+        reasons=[*convergence.reasons, *y_plus_gate.reasons, *force_report.reasons],
     )
     write_result(run_dir, record)
+
+    # The paste target. Everything above is for machines; this line is the
+    # one a person copies into a sheet, so it carries its own trustworthiness
+    # alongside the numbers.
+    group_names = list(spec.post.groups)
+    write_report(
+        run_dir,
+        {
+            "run": run_dir.name,
+            "case_name": record.case_name,
+            "driving_state": spec.driving_state,
+            "spec_hash": record.spec_hash,
+            "timestamp": record.timestamp,
+            "verdict": record.verdict,
+            "converged": record.converged,
+            "window_start": record.window_start,
+            "window_end": record.window_end,
+            "n_iterations": record.n_iterations,
+            "cd_amplitude": convergence.amplitudes.get("Cd"),
+            "cl_amplitude": convergence.amplitudes.get("Cl"),
+            "yplus_passed": record.yplus_passed,
+            "n_cells": record.n_cells,
+            "Fx": record.fx, "Fy": record.fy, "Fz": record.fz,
+            "Mx": record.mx, "My": record.my, "Mz": record.mz,
+            "cd": record.cd_mean, "cd_std": record.cd_std,
+            "cl": record.cl_mean, "cl_std": record.cl_std,
+            "cs": record.cs_mean,
+            "COP_x": record.cop_x, "COP_y": record.cop_y, "COP_z": record.cop_z,
+            "balance_front_pct": record.balance_front_pct,
+            **{
+                f"{c.lower()}_{g}": values[c]
+                for g, values in record.groups.items()
+                for c in ("Cd", "Cl")
+            },
+        },
+        group_names,
+    )
 
     write_status(
         run_dir,
