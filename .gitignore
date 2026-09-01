@@ -73,3 +73,8 @@ CAD/
 # chain did. The .sim itself is 47 MB of run data and falls under the rule at
 # the top of this file; git would keep it forever.
 benchmark_old_pipeline/*.sim
+
+# Claude Code worktrees (isolated workspaces, never part of the repo)
+.claude/worktrees/
+# Subagent-driven-development scratch: ledgers, briefs, review packages
+.superpowers/
