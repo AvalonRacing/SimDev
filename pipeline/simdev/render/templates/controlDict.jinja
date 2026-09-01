@@ -48,6 +48,38 @@ functions
         CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
     }
 
+    // FORCES IN NEWTONS AND MOMENTS IN NEWTON-METRES.
+    //
+    // forceCoeffs above reports coefficients only, and a report that gets
+    // pasted into a spreadsheet wants dimensional numbers. Recovering them
+    // from Cd/Cs/Cl would mean assuming how OpenFOAM maps CmRoll, CmPitch
+    // and CmYaw onto Cartesian axes; this object writes x, y and z
+    // components directly and there is nothing left to guess.
+    //
+    // AGGREGATE ONLY. The per-patch split the report needs is a split of
+    // *coefficients*, which forceCoeffs_<patch> below already supplies.
+    // Eleven more force objects would add eleven directories and no
+    // information.
+    //
+    // v2412 writes force.dat and moment.dat as ten tab-separated columns:
+    // Time, then total, pressure and viscous vector triples in that order
+    // (forces.C::writeIntegratedDataFileHeader). No porosity here, so there
+    // is no fourth triple. run/parsers.py::read_force_vectors depends on it.
+    forces
+    {
+        type            forces;
+        libs            ("libforces.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        log             false;
+
+        patches         ({% for p in force_patches %}{{ p }} {% endfor %});
+
+        rho             rhoInf;
+        rhoInf          {{ spec.flow.rho }};
+        CofR            ({{ spec.forces.c_of_r[0] }} {{ spec.forces.c_of_r[1] }} {{ spec.forces.c_of_r[2] }});
+    }
+
     // The same coefficients again, one function object per force patch.
     //
     // The aggregate above says the car's Cl oscillates; it cannot say which
