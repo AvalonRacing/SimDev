@@ -9,6 +9,7 @@ from pydantic import ValidationError as SchemaValidationError
 
 from simdev.config.validate import ValidationError
 from simdev.report.results import aggregate
+from simdev.report.tsv import aggregate_reports
 from simdev.run.runner import StageError
 from simdev.stages.mesh import mesh
 from simdev.stages.post import post
@@ -62,6 +63,16 @@ def _parser() -> argparse.ArgumentParser:
     agg = subparsers.add_parser("aggregate")
     agg.add_argument("run_dirs", type=Path, nargs="+")
     agg.add_argument("--out", type=Path, default=None)
+
+    rep = subparsers.add_parser(
+        "report",
+        help=(
+            "stack per-run results/report.tsv files into one table. Combines "
+            "on read; never appends to a shared file"
+        ),
+    )
+    rep.add_argument("run_dirs", type=Path, nargs="+")
+    rep.add_argument("--out", type=Path, default=None)
 
     return parser
 
@@ -150,6 +161,26 @@ def main(argv: list[str] | None = None) -> int:
             if args.out:
                 frame.to_csv(args.out, index=False)
             print(frame.to_string(index=False))
+            return 0
+
+        if args.command == "report":
+            header, rows = aggregate_reports(args.run_dirs)
+            missing = [
+                str(d) for d in args.run_dirs
+                if not (Path(d) / "results" / "report.tsv").exists()
+            ]
+            if missing:
+                # Loudly. A run quietly absent from a comparison table is how
+                # a conclusion gets drawn from half the evidence.
+                print(
+                    "warning: no results/report.tsv, skipped: "
+                    + ", ".join(missing),
+                    file=sys.stderr,
+                )
+            text = "\n".join("\t".join(r) for r in [header, *rows]) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+            print(text, end="")
             return 0
 
         if args.command in ("prepare", "run"):

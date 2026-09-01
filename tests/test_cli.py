@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from simdev.cli import main
+from simdev.cli import main, _parser
 
 CASE = Path(__file__).parent / "fixtures" / "ahmed.yaml"
 
@@ -67,3 +67,26 @@ def test_unknown_subcommand_exits_nonzero() -> None:
     with pytest.raises(SystemExit) as exc:
         main(["nonsense"])
     assert exc.value.code != 0
+
+
+def test_report_stacks_runs_on_read(tmp_path: Path, capsys) -> None:
+    from simdev.report.tsv import write_report
+
+    for name in ("car-01", "car-02"):
+        write_report(tmp_path / name, {"run": name, "cd": 0.99}, ["body"])
+    code = main([
+        "report", str(tmp_path / "car-01"), str(tmp_path / "car-02"),
+        "--out", str(tmp_path / "summary.tsv"),
+    ])
+    assert code == 0
+    text = (tmp_path / "summary.tsv").read_text(encoding="utf-8")
+    assert len(text.strip().splitlines()) == 3  # header + two runs
+
+
+def test_report_says_which_runs_it_skipped(tmp_path: Path, capsys) -> None:
+    """Silently dropping a run from a comparison table is how one goes missing."""
+    from simdev.report.tsv import write_report
+
+    write_report(tmp_path / "car-01", {"run": "car-01"}, [])
+    main(["report", str(tmp_path / "car-01"), str(tmp_path / "car-99")])
+    assert "car-99" in capsys.readouterr().err
