@@ -49,9 +49,19 @@ AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 def slice_name(axis: str, offset: float) -> str:
     """Signed, fixed-width, three decimals: `x_+0.120`, `x_-0.300`.
 
-    Signed and zero-padded so the names sort in geometric order and two runs'
-    image directories line up file for file. That alignment is the whole
-    reason a later side-by-side tool is a small job.
+    Two runs with identical offsets always produce identical names, enabling
+    file-by-file alignment across runs. That alignment is the whole reason
+    a later side-by-side tool is a small job.
+
+    IMPORTANT: Lexicographic order is NOT geometric order. The format uses
+    '+' (ASCII 43) for positive and '-' (ASCII 45) for negative, so all
+    positive values sort before all negative ones: ['x_+0.000', 'x_+0.300',
+    'x_-0.020', 'x_-0.300']. Furthermore, within negatives, 'x_-0.020' sorts
+    before 'x_-0.300' (larger magnitudes sort later). Any task that needs
+    geometric order (smallest to largest offset) must sort on the numeric
+    offset, not on these names. A contact sheet builder sorting by these names
+    would put the nose at frame top, skip ahead to +x, then jump to -x and
+    walk backward.
     """
     return f"{axis}_{offset:+.3f}"
 

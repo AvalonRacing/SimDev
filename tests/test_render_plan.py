@@ -26,21 +26,25 @@ def _plan(frame=None):
     )
 
 
-def test_slice_names_sort_and_align_across_runs() -> None:
-    """Signed, fixed width. Two runs' directories must line up name for name."""
+def test_slice_names_are_stable_across_runs() -> None:
+    """Same offset always yields same name, enabling file-by-file alignment across runs.
+
+    The name format is signed, fixed-width, three decimals. Lexicographic order
+    is NOT geometric order ('+' is ASCII 43, '-' is 45, so positives sort first),
+    but that's okay: the property that matters is identity, not sorting.
+    Two runs comparing a slice at x=-0.30 both call slice_name("x", -0.30) and
+    both get "x_-0.300", so their image directories align file-by-file.
+    """
+    # Exact format for positive, negative, and zero
     assert slice_name("x", 0.12) == "x_+0.120"
     assert slice_name("x", -0.3) == "x_-0.300"
-    # Two runs with the same offsets generate identical names in identical order.
-    # When sorted, both runs' directories will have files in the same order,
-    # enabling file-by-file alignment, even though the order is not geometric
-    # (positive before negative due to ASCII value of + vs -).
+    assert slice_name("z", 0.0) == "z_+0.000"
+
+    # Cross-run identity: same offset always yields same name
     offsets = [-0.30, -0.02, 0.0, 0.30]
     names1 = [slice_name("x", o) for o in offsets]
     names2 = [slice_name("x", o) for o in offsets]
-    # Same offsets -> same names
-    assert names1 == names2
-    # Both sorts will agree
-    assert sorted(names1) == sorted(names2)
+    assert names1 == names2, "Run 1 and run 2 generate identical names"
 
 
 def test_the_plan_is_json_serialisable() -> None:
