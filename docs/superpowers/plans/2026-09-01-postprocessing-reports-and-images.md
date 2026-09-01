@@ -1880,12 +1880,23 @@ fields:
   # a scale fitted per run makes a 5% change look identical to a 0.5% one.
   # Values outside clamp to the end colour and the clamped fraction is
   # recorded, so a badly chosen limit is visible rather than merely invisible.
-  cp:      {limits: [-3.0, 1.0],       colormap: coolwarm}
-  cpt:     {limits: [-3.0, 1.0],       colormap: coolwarm}
-  U:       {limits: [0.0, 22.5],       colormap: viridis}    # 1.5 x u_inf
-  vort:    {limits: [0.0, 2000.0],     colormap: inferno}
-  lambda2: {limits: [-50000.0, 0.0],   colormap: inferno}
-  yplus:   {limits: [0.0, 5.0],        colormap: viridis}    # the gate band
+  #
+  # COLOURMAPS ARE THE STARCCM+ ONES, by preference and for continuity with
+  # the archive: the old pipeline's simConfig.txt offered exactly `thermal`
+  # and `spectrum`, and every scene was exported with `spectrum` - so a plane
+  # from the old pipeline and one from this pipeline read the same way.
+  #
+  # `spectrum` is a rainbow and rainbows band perceptually: equal steps in
+  # value are not equal steps in apparent colour. That cost is accepted
+  # deliberately, because a map the team already reads fluently is worth more
+  # than one that is technically better and unfamiliar. It is one line per
+  # field to change if that stops being true.
+  cp:      {limits: [-3.0, 1.0],       colormap: spectrum}
+  cpt:     {limits: [-3.0, 1.0],       colormap: spectrum}
+  U:       {limits: [0.0, 22.5],       colormap: spectrum}   # 1.5 x u_inf
+  vort:    {limits: [0.0, 2000.0],     colormap: spectrum}
+  lambda2: {limits: [-50000.0, 0.0],   colormap: spectrum}
+  yplus:   {limits: [0.0, 5.0],        colormap: spectrum}   # the gate band
 
 camera:
   # Parallel projection half-height, per slice axis. Never "fit to data".
@@ -1960,6 +1971,28 @@ def test_the_digest_changes_with_the_file(tmp_path: Path) -> None:
     assert load_views(first).digest != load_views(second).digest
 
 
+def test_the_shipped_definition_uses_the_starccm_colourmaps() -> None:
+    views = load_views(REPO / "cases" / "post_views.yaml")
+    assert {s.colormap for s in views.fields.values()} <= {"spectrum", "thermal"}
+
+
+def test_an_unknown_colormap_is_rejected(tmp_path: Path) -> None:
+    """ParaView ignores an unknown preset silently and keeps its default.
+
+    Caught here or not at all: the symptom downstream is 364 pictures in the
+    wrong colours and no error anywhere.
+    """
+    path = tmp_path / "views.yaml"
+    path.write_text(
+        (REPO / "cases" / "post_views.yaml")
+        .read_text(encoding="utf-8")
+        .replace("colormap: spectrum}", "colormap: chartreuse}", 1),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown colormap"):
+        load_views(path)
+
+
 def test_an_unknown_streamline_mode_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "views.yaml"
     path.write_text(
@@ -2020,6 +2053,15 @@ DEFAULT_VIEWS_PATH = (
 SLICE_FIELDS: tuple[str, ...] = ("cp", "cpt", "U", "vort", "lambda2")
 SURFACE_FIELDS: tuple[str, ...] = ("cp", "yplus")
 STREAMLINE_MODES: tuple[str, ...] = ("off", "lic", "seeded")
+
+# The StarCCM+ colourmaps, named as the old pipeline's simConfig.txt named
+# them. viz/pv_render.py maps them onto ParaView presets.
+#
+# VALIDATED HERE, IN THE VENV, because the failure downstream is silent:
+# ParaView's ApplyPreset returns without complaint on a preset name it does
+# not know and leaves the default map in place. A typo would produce 364
+# pictures in the wrong colours with nothing anywhere saying so.
+COLORMAPS: tuple[str, ...] = ("spectrum", "thermal")
 
 
 @dataclass(frozen=True)
@@ -2083,6 +2125,15 @@ def load_views(path: Path) -> Views:
         )
         for name, v in raw["fields"].items()
     }
+
+    unknown = sorted({s.colormap for s in fields.values()} - set(COLORMAPS))
+    if unknown:
+        raise ValueError(
+            f"{path}: unknown colormap {', '.join(unknown)}. Known: "
+            f"{', '.join(COLORMAPS)}. ParaView ignores a preset name it does "
+            "not recognise without raising, so this is checked here rather "
+            "than discovered in the pictures"
+        )
 
     missing = [f for f in (*SLICE_FIELDS, *SURFACE_FIELDS) if f not in fields]
     if missing:
@@ -3193,8 +3244,6 @@ from paraview.simple import (  # type: ignore[import-not-found]
     XMLPolyDataReader,
 )
 
-# Friendly name -> ParaView preset. Kept here rather than in the yaml so the
-# view file stays about the picture rather than about ParaView.
 # View-file field name -> the array name actually present on the sampled
 # surface. cp, cpt, U and vort are built by the Calculators below and are
 # named to match; Lambda2Mean comes from the OpenFOAM function object and
@@ -3202,11 +3251,23 @@ from paraview.simple import (  # type: ignore[import-not-found]
 # renders a uniformly grey picture with no error.
 ARRAY_NAMES = {"lambda2": "Lambda2Mean", "yplus": "yPlus"}
 
+# StarCCM+ colourmap -> ParaView preset. Kept here rather than in the yaml so
+# the view file stays about the picture rather than about ParaView.
+#
+#   spectrum  "Blue to Red Rainbow" is two stops, blue to red, interpolated
+#             in HSV - which is exactly the blue-cyan-green-yellow-red ramp
+#             StarCCM+ draws. Verified against the preset's own ColorSpace,
+#             not assumed from its name.
+#
+#   thermal   "Black-Body Radiation": black, red, orange, white.
+#
+# DO NOT USE THE PRESET LITERALLY NAMED "Spectrum". It is an IndexedColors
+# preset with no RGBPoints at all - a categorical palette meant for
+# annotations - so colouring a continuous scalar field with it produces
+# banded nonsense. The name is the only thing about it that fits.
 PRESETS = {
-    "coolwarm": "Cool to Warm",
-    "viridis": "Viridis (matplotlib)",
-    "inferno": "Inferno (matplotlib)",
-    "plasma": "Plasma (matplotlib)",
+    "spectrum": "Blue to Red Rainbow",
+    "thermal": "Black-Body Radiation",
 }
 
 
@@ -3316,7 +3377,15 @@ def _draw(source, field, style, camera, out_path, resolution, stamp_lines):
     ColorBy(display, ("POINTS", field))
 
     lut = GetColorTransferFunction(field)
-    lut.ApplyPreset(PRESETS.get(style["colormap"], style["colormap"]), True)
+    # Strict. ApplyPreset does not raise on a name it does not know, it just
+    # leaves the default map in place - so an unmapped name has to fail here
+    # or it will not fail anywhere.
+    if style["colormap"] not in PRESETS:
+        raise KeyError(
+            f"no ParaView preset for colormap {style['colormap']!r}; "
+            f"known: {', '.join(sorted(PRESETS))}"
+        )
+    lut.ApplyPreset(PRESETS[style["colormap"]], True)
     low, high = style["limits"]
     lut.RescaleTransferFunction(low, high)
 
@@ -3528,12 +3597,12 @@ planes:
   y: {from: 0.0, to: 0.0, step: 0.1}
   z: {from: 0.0, to: 0.0, step: 0.1}
 fields:
-  cp:      {limits: [-3.0, 1.0], colormap: coolwarm}
-  cpt:     {limits: [-3.0, 1.0], colormap: coolwarm}
-  U:       {limits: [0.0, 60.0], colormap: viridis}
-  vort:    {limits: [0.0, 2000.0], colormap: inferno}
-  lambda2: {limits: [-50000.0, 0.0], colormap: inferno}
-  yplus:   {limits: [0.0, 300.0], colormap: viridis}
+  cp:      {limits: [-3.0, 1.0], colormap: spectrum}
+  cpt:     {limits: [-3.0, 1.0], colormap: spectrum}
+  U:       {limits: [0.0, 60.0], colormap: spectrum}
+  vort:    {limits: [0.0, 2000.0], colormap: spectrum}
+  lambda2: {limits: [-50000.0, 0.0], colormap: spectrum}
+  yplus:   {limits: [0.0, 300.0], colormap: thermal}
 camera:
   parallel_scale: {x: 0.4, y: 0.6, z: 0.6}
   focus_height: 0.15
