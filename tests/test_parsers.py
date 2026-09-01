@@ -9,6 +9,7 @@ from simdev.run.parsers import (
     parse_check_mesh,
     parse_layer_summary,
     read_force_coeffs,
+    read_force_vectors,
     read_y_plus,
     read_y_plus_area,
 )
@@ -243,3 +244,37 @@ def test_read_y_plus_area_does_not_depend_on_the_header_shape(
         encoding="utf-8",
     )
     assert read_y_plus_area(tmp_path) == pytest.approx({"ground": 12.40})
+
+
+# --- force/moment vectors --------------------------------------------------
+
+
+def test_read_force_vectors_takes_the_total_column() -> None:
+    frame = read_force_vectors(FIXTURES / "force.dat")
+    assert list(frame["Time"]) == [1.0, 2.0, 3.0]
+    assert frame["z"].iloc[-1] == pytest.approx(-30.0)
+    assert frame["x"].iloc[0] == pytest.approx(1.0)
+
+
+def test_read_force_vectors_sums_when_there_is_no_total() -> None:
+    """Older builds write pressure and viscous only.
+
+    The total is recoverable by addition, so the layout is accepted rather
+    than rejected - but it is recognised by column count, never assumed.
+    """
+    frame = read_force_vectors(FIXTURES / "force_two_triples.dat")
+    assert frame["z"].iloc[0] == pytest.approx(-10.0)
+    assert frame["x"].iloc[0] == pytest.approx(1.0)
+
+
+def test_read_force_vectors_refuses_an_unknown_layout(tmp_path: Path) -> None:
+    """A width this parser has not been taught is an error, not a guess.
+
+    read_y_plus_area already learned this: a header whose token count
+    disagrees with the data does not raise, it silently yields NaN, and a NaN
+    that reaches a report reads as a number nobody checked.
+    """
+    bad = tmp_path / "force.dat"
+    bad.write_text("# Time total_x\n1\t2.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has not been taught"):
+        read_force_vectors(bad)
