@@ -518,6 +518,16 @@ class PostConfig(BaseModel):
     yplus_min: float
     yplus_max: float
     max_fraction_outside: float = 0.1
+    # Named bundles of force-bearing patches, for the per-group coefficients
+    # in results/report.tsv.
+    #
+    # Empty means "no grouping", which is what the Ahmed case wants: it has
+    # one force patch and nothing to attribute. When it is non-empty,
+    # validate() requires it to cover every force patch exactly once, so
+    # cd_body + cd_wing + cd_other == cd holds and a pasted row checks
+    # itself. A partial grouping would produce columns that quietly do not
+    # add up, which is worse than no columns.
+    groups: dict[str, tuple[str, ...]] = {}
 
 
 class PatchSpec(BaseModel):

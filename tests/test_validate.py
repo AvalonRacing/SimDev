@@ -255,3 +255,39 @@ def test_a_freestream_too_quiet_to_sustain_turbulence_warns() -> None:
         _spec({"flow": {"u_inf": 40.0, "turbulence_length_scale": 1.0e-6}})
     )
     assert len([w for w in warnings if "nu_t/nu" in w]) == 1
+
+
+# --- force groups ------------------------------------------------------
+
+
+def test_a_patch_in_no_group_is_an_error() -> None:
+    spec = _spec({"post": {"groups": {"body": ["body"]}},
+                  "geometry": {"patches": [
+                      {"name": "body", "role": "body"},
+                      {"name": "wing", "role": "body"},
+                      {"name": "ground", "role": "ground"},
+                      {"name": "inlet", "role": "inlet"},
+                      {"name": "outlet", "role": "outlet"},
+                      {"name": "farfield", "role": "farfield"},
+                  ]}})
+    with pytest.raises(ValidationError, match="is in no post group"):
+        validate(spec)
+
+
+def test_a_patch_in_two_groups_is_an_error() -> None:
+    spec = _spec({"post": {"groups": {"a": ["body"], "b": ["body", "wing"]}},
+                  "geometry": {"patches": [
+                      {"name": "body", "role": "body"},
+                      {"name": "wing", "role": "body"},
+                      {"name": "ground", "role": "ground"},
+                      {"name": "inlet", "role": "inlet"},
+                      {"name": "outlet", "role": "outlet"},
+                      {"name": "farfield", "role": "farfield"},
+                  ]}})
+    with pytest.raises(ValidationError, match="more than one post group"):
+        validate(spec)
+
+
+def test_no_groups_at_all_is_fine() -> None:
+    """Ahmed declares none and must not be forced to."""
+    validate(_spec())

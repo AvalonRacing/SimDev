@@ -908,3 +908,22 @@ geometry:
     - {name: inlet, role: inlet}
     - {name: outlet, role: outlet}
     - {name: farfield, role: farfield}
+
+post:
+  # WHAT THE REPORT ATTRIBUTES FORCES TO, AND WHY IT IS ONLY THREE BUCKETS.
+  #
+  # Body and Wing are the surfaces under development; everything else on this
+  # car is an aero dummy that does not represent the real vehicle, so its
+  # coefficient is a bookkeeping remainder rather than something to design
+  # against. Splitting `other` further is a config change and costs nothing,
+  # but eleven columns nobody reads is how a report stops being read.
+  #
+  # Every force-bearing patch appears exactly once - validate() requires it -
+  # so cd_body + cd_wing + cd_other == cd, and a row pasted into a sheet
+  # checks its own arithmetic.
+  groups:
+    body:  [Body]
+    wing:  [Wing]
+    other: [Chassis,
+            SUS_FL, SUS_FR, SUS_RL, SUS_RR,
+            Tire_FL, Tire_FR, Tire_RL, Tire_RR]

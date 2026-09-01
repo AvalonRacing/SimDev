@@ -110,3 +110,40 @@ def centre_of_pressure(
             )
 
     return CentreOfPressure(cop_x, cop_y, cop_z, balance, reasons)
+
+
+COEFFICIENTS = ("Cd", "Cl")
+
+
+def group_coefficients(
+    components: Mapping[str, pd.DataFrame],
+    groups: Mapping[str, Sequence[str]],
+    window: tuple[int, int],
+) -> dict[str, dict[str, float]]:
+    """Window-mean Cd and Cl per group, summed from the per-patch objects.
+
+    controlDict gives every forceCoeffs_<patch> the vehicle's own Aref, lRef
+    and CofR, so each patch's Cd and Cl is its SHARE of the vehicle
+    coefficient and groups are plain sums. That is what makes
+    cd_body + cd_wing + cd_other == cd hold to floating point, and it is why
+    per-patch reference areas would have been useless here: eleven numbers on
+    eleven scales that add up to nothing.
+
+    A patch with no data makes its whole group NaN rather than summing what
+    happens to be present. A group that silently omits a member disagrees
+    with the total by an amount nobody can see.
+    """
+    out: dict[str, dict[str, float]] = {}
+
+    for group, patches in groups.items():
+        totals = {c: 0.0 for c in COEFFICIENTS}
+        for patch in patches:
+            frame = components.get(patch)
+            if frame is None:
+                totals = {c: float("nan") for c in COEFFICIENTS}
+                break
+            for coefficient in COEFFICIENTS:
+                totals[coefficient] += window_mean(frame, coefficient, window)
+        out[group] = totals
+
+    return out
