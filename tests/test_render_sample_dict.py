@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,20 @@ import pytest
 from simdev.config.resolve import resolve
 from simdev.render.context import solver_function_names
 from simdev.viz.sample import render_sample_dict
+
+
+def _function_object_names(control: str) -> set[str]:
+    """Every top-level function-object name a rendered controlDict declares.
+
+    Inside `functions { ... }`, each object is a line holding exactly four
+    leading spaces and a bare name, immediately followed by a line whose
+    first non-space character is `{` at that same four-space indent.
+    Everything *inside* an object - CofR's own numbers, fieldAverage's
+    per-field sub-dicts - sits at eight spaces or more and does not match, so
+    a plain regex over the rendered text is enough without a real dictionary
+    parser.
+    """
+    return set(re.findall(r"^ {4}(\w+)\n {4}\{", control, re.MULTILINE))
 
 BASE: dict = {
     "name": "ahmed",
@@ -70,7 +85,13 @@ def test_every_solve_time_function_object_is_disabled(tmp_path: Path) -> None:
 
 
 def test_the_controldict_and_the_suppression_list_agree(tmp_path: Path) -> None:
-    """The list is only protective if it names everything controlDict declares."""
+    """FORWARD DIRECTION: every name solver_function_names() lists is really
+    declared in controlDict. A name here that controlDict no longer has is
+    harmless - it just switches off an object that no longer exists - so this
+    direction alone is a weak guard. See
+    test_every_controldict_function_object_is_in_the_suppression_list below
+    for the direction that actually matters.
+    """
     from simdev.domain.box import BoxDomainBuilder
     from simdev.render.render import render_case
 
@@ -80,6 +101,55 @@ def test_the_controldict_and_the_suppression_list_agree(tmp_path: Path) -> None:
     control = (tmp_path / "system" / "controlDict").read_text(encoding="utf-8")
     for name in solver_function_names(spec):
         assert f"\n    {name}\n" in control, name
+
+
+def test_every_controldict_function_object_is_in_the_suppression_list(
+    tmp_path: Path,
+) -> None:
+    """REVERSE DIRECTION, AND THE ONE THAT ACTUALLY PROTECTS ANYTHING.
+
+    If someone adds a function object to controlDict.jinja months from now
+    and forgets to add its name to solver_function_names, it is never
+    emitted with `enabled false` in sampleSurfaces, so it runs again during
+    every sampling pass - precisely the fieldAverage / forceCoeffs hazard
+    this whole list exists to prevent (see functionObjectList.C:433: -dict
+    MERGES into the run's controlDict rather than replacing it). Forgetting
+    to update the list while editing the template is the realistic mistake,
+    not the reverse the other test checks.
+
+    BASE's solve.average_fields defaults to ('p', 'U') - see
+    config/schema.py SolveConfig.average_fields - so fieldAverage really is
+    declared in the rendered controlDict here and this check exercises it,
+    not just the always-on objects.
+    """
+    from simdev.domain.box import BoxDomainBuilder
+    from simdev.render.render import render_case
+
+    spec = _spec()
+    assert spec.solve.average_fields, "fixture must exercise fieldAverage too"
+    domain = BoxDomainBuilder().build(spec, ((0.0, -0.1945, 0.05), (1.044, 0.1945, 0.338)))
+    render_case(spec, domain, {"body": Path("body.stl")}, tmp_path)
+    control = (tmp_path / "system" / "controlDict").read_text(encoding="utf-8")
+
+    declared = _function_object_names(control)
+    # Prove the parser actually found the objects this fixture is known to
+    # produce before trusting it to guard anything - a parser that silently
+    # matched nothing would make the assertion below vacuous, which is the
+    # failure mode this test exists to remove, not reintroduce.
+    assert declared == {
+        "forceCoeffs",
+        "forces",
+        "forceCoeffs_body",
+        "yPlus",
+        "yPlusArea_body",
+        "yPlusArea_ground",
+        "fieldAverage",
+        "residuals",
+    }
+
+    allowed = set(solver_function_names(spec))
+    for name in declared:
+        assert name in allowed, name
 
 
 def test_derived_fields_are_declared_before_the_sampler(tmp_path: Path) -> None:
