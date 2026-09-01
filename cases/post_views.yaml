@@ -1,0 +1,69 @@
+# HOW EVERY PICTURE IS FRAMED, FOR EVERY RUN.
+#
+# This file is the "somewhere else" the slice positions live in. It is shared
+# by every run and versioned in git, and each run keeps a copy in
+# results/views.yaml with its digest in results/images.json - so any picture
+# can be traced to the definition that produced it.
+#
+# EDITING IT BREAKS COMPARABILITY WITH EVERY PICTURE ALREADY MADE. That is
+# the point of it being one file rather than a per-case block: the break is
+# visible, deliberate, and recorded in the history.
+#
+# Offsets are metres from the datum (see below), NOT absolute mesh
+# coordinates. The car spans roughly x -0.215..0.242, y -0.131..0.131,
+# z 0.000..0.130 about its datum, so every range below starts and ends
+# outside it.
+
+datum:
+  # Measured from the Chassis bounding box: centre in x and y, ground in z.
+  #
+  # Chassis and not the wheels, because steering angle moves a wheel. Chassis
+  # and not Body or Wing, because those are the surfaces under development
+  # and an anchor that moves when the thing being measured is redesigned
+  # anchors nothing. docs/handbook.md calls Chassis an aero dummy nobody
+  # iterates, which is exactly the property wanted here.
+  patches: [Chassis]
+
+planes:
+  # Fixed. NOT fitted to the geometry. A range that quietly extends to cover
+  # a longer wing produces a different picture wearing the same file name;
+  # the images stage warns when the car pokes outside instead.
+  x: {from: -0.30, to: 0.32, step: 0.02}   # 32 planes
+  y: {from: -0.20, to: 0.20, step: 0.02}   # 21 planes
+  z: {from:  0.00, to: 0.16, step: 0.01}   # 17 planes
+
+fields:
+  # Fixed limits, on the same reasoning as report/plots.py's FORCE_AXIS_LIMITS:
+  # a scale fitted per run makes a 5% change look identical to a 0.5% one.
+  # Values outside clamp to the end colour and the clamped fraction is
+  # recorded, so a badly chosen limit is visible rather than merely invisible.
+  #
+  # COLOURMAPS ARE THE STARCCM+ ONES, by preference and for continuity with
+  # the archive: the old pipeline's simConfig.txt offered exactly `thermal`
+  # and `spectrum`, and every scene was exported with `spectrum` - so a plane
+  # from the old pipeline and one from this pipeline read the same way.
+  #
+  # `spectrum` is a rainbow and rainbows band perceptually: equal steps in
+  # value are not equal steps in apparent colour. That cost is accepted
+  # deliberately, because a map the team already reads fluently is worth more
+  # than one that is technically better and unfamiliar. It is one line per
+  # field to change if that stops being true.
+  cp:      {limits: [-3.0, 1.0],       colormap: spectrum}
+  cpt:     {limits: [-3.0, 1.0],       colormap: spectrum}
+  U:       {limits: [0.0, 22.5],       colormap: spectrum}   # 1.5 x u_inf
+  vort:    {limits: [0.0, 2000.0],     colormap: spectrum}
+  lambda2: {limits: [-50000.0, 0.0],   colormap: spectrum}
+  yplus:   {limits: [0.0, 5.0],        colormap: spectrum}   # the gate band
+
+camera:
+  # Parallel projection half-height, per slice axis. Never "fit to data".
+  parallel_scale: {x: 0.35, y: 0.35, z: 0.30}
+  # Height above the datum the x- and y-slice cameras look at, so the car is
+  # centred in frame rather than sitting at the bottom above empty road.
+  focus_height: 0.06
+  resolution: [1600, 1200]
+
+# off | lic | seeded. Off by default until the cost is measured on a real
+# case: the sampled slices carry U_rel as a vector, so this needs no return
+# to the volume, but it is still 350 extra filter evaluations.
+streamlines: "off"
