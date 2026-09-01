@@ -610,13 +610,53 @@ runs on a machine with neither.
 - **The `pvpython` hang is unexplained.** Routing around it via
   `/usr/bin/python3` works today; a ParaView upgrade could change either
   behaviour. The `doctor` check is the early-warning.
-- **v2412 specifics are unverified**: `force.dat`/`moment.dat` column layout,
-  whether `fieldExpression` objects accept `field UMean`, and whether the
-  `yPlus` field is present in the time directory for sampling. All three are
-  fixture-or-verify tasks in the plan, not assumptions to build on.
-- **Sampling cost is unmeasured.** 70 planes on a 20 M-cell decomposed case;
-  the `--axes`/`--fields` flags are the mitigation, and the first real run gets
-  timed and the number recorded here.
+- **v2412 specifics, confirmed 2026-09-01 against a real run**
+  (`car_smoke`, OpenFOAM v2412, `CAD/Testcase`):
+  `postProcessing/forces/0/force.dat` is ten columns — `Time` plus
+  `total_x/y/z`, `pressure_x/y/z`, `viscous_x/y/z`, total first, exactly as
+  `run/parsers.py` assumes. `fieldExpression`'s `field` entry is mandatory (no
+  default), and `result` defaults to a bracketed name built from the type and
+  its field (e.g. `vorticity(UMean)`) if not set explicitly — both are set
+  explicitly in `sampleSurfaces.jinja` for exactly that reason. `postProcess
+  -dict` **merges** its dictionary into the run's `controlDict` rather than
+  replacing it (`functionObjectList.C:433`); `render/context.py::solver_function_names`
+  exists to enumerate every solve-time object so the sampling pass can
+  disable all of them, and `viz/sample.py::run_sampling` re-checks
+  `forceCoeffs` output timestamps after sampling as a belt-and-braces guard
+  against one slipping through. `yPlus` is present in the time directory
+  (`processor*/<time>/yPlus`) and sampled without issue. None of these three
+  are assumptions any more.
+- **Sampling cost, measured only at smoke scale.** On the `car_smoke` profile
+  (51,762 cells, 4 ranks decomposed, 70 planes + 1 merged patch surface),
+  `postProcess -dict system/sampleSurfaces -latestTime` took **1.5 s**, and
+  rendering the resulting 350 PNGs under `/usr/bin/python3 viz/pv_render.py`
+  took **191.9 s** (≈0.55 s/image). The on-disk sample archive was **5.1 MB**
+  in `postProcessing/surfaces/50/` — note that is where the samples actually
+  land; `results/samples/` (§6.1's diagram) is never created, because
+  `viz/sample.py` reads the samples from OpenFOAM's own
+  `postProcessing/<functionObjectName>/<time>/` output rather than copying
+  them into `results/`. **This does not resolve the risk as originally
+  framed.** The risk was sampling cost on the ~20 M-cell `car` production
+  mesh, and no production mesh has ever been solved (handbook §9, "Not
+  verified", item 1) — that number is still unmeasured, because there is
+  nothing to measure it against yet. Do not scale the smoke-scale number
+  linearly and report it as a production estimate.
+- **New: the merged `vehicle` patch surface is not found by the `images`
+  stage, found 2026-09-01 on the first real run.** The 7 `surface` views
+  (front/rear/left/right/top/bottom/iso) × 2 fields (cp, yplus) — 14 of 364
+  planned images — were not drawn. `viz/sample.py::run_sampling` returns
+  `sorted((run_dir / "postProcessing" / "surfaces").glob("*"))[-1]` as
+  `samples_root`, but the `surfaces`-type function object producing the
+  merged `vehicle` patch surface is named `patchSurfaces` in
+  `sampleSurfaces.jinja`, and OpenFOAM writes each function object's output
+  under `postProcessing/<its own name>/<time>/` — so `vehicle.vtp` lands in
+  `postProcessing/patchSurfaces/50/`, a directory `run_sampling` never looks
+  in. `find_sample(samples_root, "vehicle")` then finds nothing, `images`
+  logs the miss as a note rather than failing (correctly — these are
+  pictures, not a gate), and `results/index.html` still links all 364
+  filenames from the render plan, so the 14 missing ones 404. The 350 slice
+  images are unaffected. Not fixed here — this task is documentation-only —
+  but it is a real, measured defect and not a mesh-coverage artifact.
 - **`lambda2`'s default colour range is a guess.** Expect to tune it once
   against a real field; the range is in a versioned file precisely so the
   tuning is recorded rather than remembered.

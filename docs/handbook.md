@@ -1131,6 +1131,111 @@ Add to `stages/post.py` and, if it belongs in the record, to `ResultRecord`.
 Keep it in the record if you would ever want to compare it across runs; keep it
 as a file if it is only for looking at.
 
+### The report, the pictures, and what they cost
+
+**`results/report.tsv` — column order is a contract.** `simdev report` writes
+one tab-separated line per run and stacks them on read (never appends to a
+shared file — see §3.5). `report/tsv.py::FIXED_COLUMNS` is the layout:
+identity (`run`, `case_name`, `driving_state`, `spec_hash`, `timestamp`),
+trust-the-rest-of-the-line (`verdict`, `converged`, `window_start`,
+`window_end`, `n_iterations`, `cd_amplitude`, `cl_amplitude`, `yplus_passed`,
+`n_cells`), forces in newtons (`Fx`, `Fy`, `Fz`), moments about `c_of_r` in
+newton-metres (`Mx`, `My`, `Mz`), coefficients (`cd`, `cd_std`, `cl`, `cl_std`,
+`cs`), then COP and balance (`COP_x`, `COP_y`, `COP_z`,
+`balance_front_pct`), then per-group `cd_<g>`/`cl_<g>` pairs. **New columns go
+on the end; nothing is ever inserted or reordered** — someone has a
+spreadsheet with formulas pointing at column N, and `tests/test_report_tsv.py`
+pins the order so that stays true. An empty cell means "uncomputable" (e.g.
+COP below the force floor); it is never the string `"nan"`, which a
+spreadsheet would silently average into a summary.
+
+**COP is three diagnostics, not the coordinates of one point.** A net force
+plus a net moment defines a line of action, not a point, so
+`report/forces.py::centre_of_pressure` reports three separate readings and
+names them so nobody mistakes them for a single position:
+
+```
+COP_x = x_ref - M_y / F_z      # attributes all of M_y to downforce
+COP_y = y_ref + M_x / F_z
+COP_z = z_ref + M_y / F_x      # attributes all of M_y to drag
+```
+
+`COP_x` and `COP_z` **deliberately disagree** — both are reading the same
+pitching moment `M_y` through a different force, and there is no reason for
+`M_y / F_z` and `M_y / F_x` to land on the same coordinate unless the line of
+action happens to pass through both denominators' reference axis at once.
+`cop_convention: "ratio"` travels with the record so a later reader cannot
+mistake this for a fitted or measured point. `M_z` is not used for anything —
+its expansion (`M_z = r_x F_y - r_y F_x`) contains no `r_z` term, so it cannot
+constrain a vertical coordinate. Below `MIN_COEFFICIENT` (0.02) of the
+reference force, the corresponding COP is reported empty rather than as a
+huge, meaningless ratio — `reasons` on the record says why.
+
+**`cases/post_views.yaml` frames every picture.** Datum patches, plane
+positions and steps, field colour limits, and camera parallel-scale all live
+in this one file, versioned in git and shared by every run — not per-case.
+Each run copies it into `results/views.yaml` and hashes it into
+`results/images.json`'s `views_digest`, so any picture traces back to the
+definition that produced it. **Editing it breaks comparability with every
+picture already rendered** — a plane that moves, a colour range that widens,
+or a camera scale that changes produces a different picture wearing the same
+file name. That is why offsets and colour limits are fixed rather than fitted
+to the geometry per run: the `images` stage warns (rather than silently
+re-fitting) when the car pokes outside the configured slice range.
+
+**`images` needs an interpreter that can `import paraview.simple` — and that
+is *not* `pvpython`.** `pvpython` and `pvbatch` hang on this machine
+(measured: no output at a 150 s timeout, not even for `--version`), while the
+same ParaView install imports fine under the plain system interpreter. The
+default is `post.paraview_python = "/usr/bin/python3"`; `simdev doctor` checks
+it can `import paraview.simple` and says so explicitly if it can't. `viz/pv_render.py`
+runs under this interpreter and imports nothing from `simdev` (it has no
+venv), so it stays testable data-in/pictures-out from the venv side while the
+one un-testable boundary is kept as small as possible.
+
+**Measured, 2026-09-01, `car_smoke` profile, real geometry (`CAD/Testcase`),
+51,762-cell mesh (4 ranks):**
+
+```
+simdev run cases/car/config.yaml --run-dir <run> --profile car_smoke   # prepare+mesh+solve+post: ~62 s wall
+simdev images <run>                                                    # sample 1.5 s, render 191.9 s, 350/364 images
+simdev report <run>
+```
+
+- Sampling (`postProcess -dict system/sampleSurfaces -latestTime`, 70 planes +
+  1 merged patch surface): **1.5 s**.
+- Rendering (350 PNGs under `/usr/bin/python3 viz/pv_render.py`):
+  **191.9 s**, ≈0.55 s/image.
+- Images written: **350 of 364** planned. The 14 missing are the 7 `surface`
+  views (front/rear/left/right/top/bottom/iso) × 2 fields (cp, yplus) — a real
+  bug found by this run, not a mesh-coverage note; see "Known loose ends"
+  above.
+- On-disk size of the sampled surfaces: **5.1 MB**
+  (`postProcessing/surfaces/50/`, 70 `.vtp` files) — **not**
+  `results/samples/`, which the spec originally named but the implementation
+  never populates. `viz/sample.py::run_sampling` writes through OpenFOAM's own
+  `postProcessing/<functionObjectName>/<time>/` convention and
+  `images.py`/`plan.py` read the samples from there directly; `results/`
+  holds only `render_plan.json`, `views.yaml`, `images.json`, the rendered
+  PNGs under `results/images/`, and `index.html`.
+- **These numbers are from the 51,762-cell smoke mesh, not the ~20 M-cell
+  `car` production mesh.** They exercise the plumbing end to end but do not
+  answer what sampling or rendering costs at production resolution — no
+  production mesh has ever been solved (see "Not verified" above), so that
+  number stays unmeasured. Do not scale these linearly and call it an
+  estimate for `car`.
+- `results/index.html` was opened and checked against the run: the 350
+  written images are correctly linked (verified their `src=` paths resolve to
+  real PNG files on disk); the 14 unwritten ones are also linked and 404,
+  because the page is built from the render plan, not from what actually got
+  drawn.
+
+Because the real render time is only known at smoke scale, §6.8's streamlines
+question stays undecided the honest way: the flag remains `off`
+(`viz/pv_render.py` warns and no-ops if it is set to anything else). 191.9 s
+for 350 images on a mesh two orders of magnitude smaller than production is
+not evidence that a production render is comfortable.
+
 ---
 
 ## 7. The physics you need to know
@@ -1265,15 +1370,14 @@ compile; `simpleFoam` runs and writes coefficients.
 | CAD attitude | A heavy-understeer pose (10° body slip, 14–22° steer). Intentional; the user plans to revisit it for later driving states |
 | Production wall clock | 14.78 s/iter measured, so 2000 iterations is ~8.6 h, not the 5 h that was wanted. Solver numerics were measured and are a dead end (~2% safely, and `nNonOrthogonalCorrectors 0` diverges) - see §6, "Make the solve faster". Only cells and iterations are left |
 | `car_smoke` mesh limits | `trust_check_mesh_verdict: false`, skewness 20, non-ortho 75. Almost no quality net, by design |
+| The 7 `surface` (front/rear/left/right/top/bottom/iso) images are not drawn | Found on the first real `images` run (2026-09-01, `car_smoke`). `viz/sample.py::run_sampling` globs only `postProcessing/surfaces/*` for its return value, but the merged `vehicle` patch surface a `surfaces`-type function object named `patchSurfaces` writes lands in `postProcessing/patchSurfaces/*` instead — a different function-object name means a different `postProcessing/<name>/` directory. `find_sample(samples_root, "vehicle")` then finds nothing, `images` logs `note: 7 surfaces produced no sample and were not drawn`, and `results/index.html` links 14 images (7 surfaces × cp, yplus) that were never written. The 350 slice images are unaffected — they sample correctly from `postProcessing/surfaces/*` |
 
 ### Deferred, with the hook already in place
 
 | Deferred | Already provided for |
 |---|---|
-| Side force and yaw moment in the record | OpenFOAM already writes `Cs`, `CmYaw`, `CmRoll`; `run/parsers.py` reads only Cd and Cl |
+| Side force and yaw moment in the record — **PARTIAL** | `Cs` is reported (`ResultRecord.cs_mean`, `results/report.tsv` column `cs`). `CmYaw` still is not: `read_force_coeffs` parses the whole `coefficient.dat` header (it has `CmYaw`, `CmRoll`, `CmPitch`, `Cs`, `Cs(f)`, `Cs(r)` alongside `Cd`/`Cl` — verified against a real run's header), but `stages/post.py` only pulls `cd_mean`, `cl_mean` and `cs_mean` out of that frame into `ResultRecord` |
 | Curved **far**-wake refinement for cornering | `domain.refinement_shells` now cover the near field and the flow through the car, and they follow any attitude — but they follow the *car*, not the *path*, so past the outermost shell the cornering far wake is still at background size. `refinement_regions` are axis-aligned boxes and a cornering wake leaves them. The validator says so on every run |
-| Per-component forces, aero balance | `forceCoeffs` renders one group; roles already separate force-bearing surfaces |
-| Full plane-cut image suite | `post` exists with a minimal set |
 | Rim pumping while cornering | The sleeves are meshed and refined but carry no frame of their own — a second MRF zone adjacent to the corner frame double-subtracts the frame flux on every face they share. Needs a sliding mesh to do properly |
 | Transition model | `turbulence_model` is config-selected |
 | Parametric sweeps | Per-run records aggregate on read; `--set` overrides one field without copying the case |
