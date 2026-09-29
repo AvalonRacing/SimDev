@@ -36,6 +36,7 @@ from simdev.render.context import (
 )
 from simdev.render.render import render_case
 from simdev.run.status import StageStatus, should_skip, write_status
+from simdev.viz.datum import car_datum
 
 STAGE = "prepare"
 
@@ -576,6 +577,9 @@ def prepare(
     # actually being run rather than of the CAD's authoring position.
     wheels = derive_wheels(spec.geometry.patches, meshes)
 
+    datum, datum_reasons = car_datum(meshes, ["Chassis"])
+    warnings.extend(datum_reasons)
+
     lo, hi = _bounds(meshes)
     domain = DOMAIN_BUILDERS[spec.domain.kind]().build(spec, (lo, hi))
     if isinstance(domain, DomainSector):
@@ -614,7 +618,8 @@ def prepare(
     if should_skip(run_dir, STAGE, spec.spec_hash(), force):
         return result
 
-    speeds = wheel_speeds(spec, wheels, corner_frame(spec, domain))
+    frame = corner_frame(spec, domain)
+    speeds = wheel_speeds(spec, wheels, frame)
     render_case(spec, domain, geometry_files, run_dir, wheels)
     _write_paraview_stub(run_dir)
     write_status(
@@ -672,6 +677,24 @@ def prepare(
                     }
                     for name, patch in contact_patches.items()
                 },
+                # The car-frame origin every picture is centred on. Measured,
+                # like the wheels above, so it belongs in the run record
+                # rather than in caseSpec.json - putting it in the spec would
+                # move the spec hash and invalidate every cached run for a
+                # value nothing upstream of post consumes.
+                "datum": list(datum),
+                # The rotating frame, so the images stage can put the pictures
+                # in the car's frame without rebuilding the domain. Two
+                # numbers are cheaper to record than a domain is to
+                # reconstruct, and they are measured rather than configured.
+                "corner_frame": (
+                    {"omega": frame.omega, "origin": list(frame.origin)}
+                    if frame is not None
+                    else None
+                ),
+                # For the coverage warning: slices that stop short of the car
+                # are a silent hole in the picture suite.
+                "geometry_bounds": [list(lo), list(hi)],
                 # Derived, so it is not in caseSpec.json: record it here or a
                 # clamped layer count is invisible after the fact.
                 "surface_cell_size": spec.surface_cell_size,

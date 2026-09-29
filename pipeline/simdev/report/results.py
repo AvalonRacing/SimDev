@@ -29,6 +29,32 @@ class ResultRecord:
     n_cells: int
     yplus_passed: bool
     yplus: dict[str, float] = field(default_factory=dict)
+    # Peak-to-peak swing over the averaging window, coefficient units. None
+    # on a run whose convergence was never judged. Defaulted so a
+    # result.json written before these fields existed still loads - see
+    # tests/test_results.py.
+    cd_amplitude: float | None = None
+    cl_amplitude: float | None = None
+    # Dimensional forces and moments, newtons and newton-metres, window means.
+    # None on a run made before the `forces` function object existed.
+    fx: float | None = None
+    fy: float | None = None
+    fz: float | None = None
+    mx: float | None = None
+    my: float | None = None
+    mz: float | None = None
+    cs_mean: float | None = None
+    # THREE DIAGNOSTICS, NOT ONE POINT. cop_x and cop_z are two readings of
+    # the same pitching moment and disagree by construction; the convention
+    # is named here so no reader has to guess which one it is holding.
+    cop_x: float | None = None
+    cop_y: float | None = None
+    cop_z: float | None = None
+    balance_front_pct: float | None = None
+    cop_convention: str = "ratio"
+    # group -> {"Cd": ..., "Cl": ...}. Sums to the vehicle total by
+    # construction; see config validation.
+    groups: dict[str, dict[str, float]] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
 
 

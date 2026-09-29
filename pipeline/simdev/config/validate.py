@@ -326,6 +326,40 @@ def validate(spec: CaseSpec) -> list[str]:
             f"{NUT_RATIO_TARGET_LO:.0f}-{NUT_RATIO_TARGET_HI:.0f})"
         )
 
+    # --- force groups ----------------------------------------------------
+    # Exactly once, or not at all. A patch in no group makes the group
+    # columns silently disagree with the vehicle total; a patch in two makes
+    # them silently exceed it. Both produce a spreadsheet row that looks
+    # arithmetically sound and is not, which is the failure this whole
+    # report exists to avoid.
+    if spec.post.groups:
+        force_patches = [
+            p.name for p in spec.geometry.patches if traits(p.role).in_forces
+        ]
+        membership: dict[str, list[str]] = {}
+        for group, patches in spec.post.groups.items():
+            for patch in patches:
+                membership.setdefault(patch, []).append(group)
+
+        for patch, groups in sorted(membership.items()):
+            if patch not in force_patches:
+                errors.append(
+                    f"post.groups.{groups[0]} names {patch!r}, which is not a "
+                    "force-bearing patch"
+                )
+            elif len(groups) > 1:
+                errors.append(
+                    f"patch {patch!r} is in more than one post group "
+                    f"({', '.join(groups)}): its coefficient would be counted "
+                    "twice and the groups would exceed the vehicle total"
+                )
+        for patch in force_patches:
+            if patch not in membership:
+                errors.append(
+                    f"force patch {patch!r} is in no post group: the group "
+                    "coefficients would not sum to the vehicle total"
+                )
+
     if errors:
         raise ValidationError(errors)
     return warnings

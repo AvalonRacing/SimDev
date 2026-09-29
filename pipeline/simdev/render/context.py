@@ -756,6 +756,35 @@ def mrf_zones(
     return zones
 
 
+def solver_function_names(spec: CaseSpec) -> list[str]:
+    # EVERY FUNCTION OBJECT controlDict.jinja DECLARES, BY NAME.
+    #
+    # Published here rather than duplicated in the sampling template because
+    # the sampling pass has to switch all of them off: `postProcess -dict`
+    # MERGES its file into the run's controlDict rather than replacing it
+    # (functionObjectList.C:433), so a name missing from this list is an
+    # object that quietly runs again during sampling. For fieldAverage that
+    # means overwriting pMean and UMean with a one-sample average.
+    #
+    # Takes only the spec, not a Domain: this is also what viz/sample.py
+    # calls to render system/sampleSurfaces from a run directory, after the
+    # mesh and domain objects that built the run are long gone.
+    #
+    # tests/test_render_sample_dict.py asserts this list against the rendered
+    # controlDict, so the two cannot drift apart in silence.
+    force_patches = [p.name for p in spec.geometry.patches if traits(p.role).in_forces]
+    wall_patches = [p.name for p in spec.geometry.patches if traits(p.role).is_wall]
+    return [
+        "forceCoeffs",
+        "forces",
+        *[f"forceCoeffs_{p}" for p in force_patches],
+        "yPlus",
+        *[f"yPlusArea_{p}" for p in wall_patches],
+        *(["fieldAverage"] if spec.solve.average_fields else []),
+        "residuals",
+    ]
+
+
 def build_context(
     spec: CaseSpec,
     domain: Domain,
@@ -831,6 +860,7 @@ def build_context(
 
     return {
         "spec": spec,
+        "solver_function_names": solver_function_names(spec),
         "domain": domain,
         "geometry_files": {n: Path(p).name for n, p in geometry_files.items()},
         "refined_patches": refined_patches,

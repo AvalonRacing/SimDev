@@ -1,0 +1,4 @@
+# Force
+# Time	pressure_x pressure_y pressure_z	viscous_x viscous_y viscous_z
+1	0.9 0.15 -9.5	0.1 0.05 -0.5
+2	1.8 0.30 -19.0	0.2 0.10 -1.0

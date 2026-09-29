@@ -292,3 +292,34 @@ def test_no_field_average_object_when_the_list_is_empty(tmp_path: Path) -> None:
     spec = _spec({"solve": {"average_fields": []}})
     text = (_render(tmp_path, spec) / "system" / "controlDict").read_text()
     assert "fieldAverage" not in text
+
+
+def test_controldict_writes_forces_in_newtons(tmp_path: Path) -> None:
+    """forceCoeffs reports coefficients only.
+
+    F in newtons and M in newton-metres need their own object. Recovering
+    them from Cd/Cs/Cl would mean assuming how OpenFOAM maps
+    CmRoll/CmPitch/CmYaw onto Cartesian axes, and this pipeline does not
+    assume conventions it can read directly.
+    """
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    block = text[text.index("\n    forces\n") :]
+    block = block[: block.index("\n    }")]
+
+    assert "type            forces;" in block
+    assert 'libs            ("libforces.so");' in block
+    assert "rho             rhoInf;" in block
+    assert "CofR            (0.5 0.0 0.0);" in block
+    assert "body" in block
+
+
+def test_the_forces_object_is_aggregate_only(tmp_path: Path) -> None:
+    """One forces object, not one per patch.
+
+    The per-patch split the report needs is a split of *coefficients*, which
+    forceCoeffs_<patch> already supplies. Eleven more force objects would add
+    eleven directories under postProcessing/ and no information.
+    """
+    text = (_render(tmp_path) / "system" / "controlDict").read_text()
+    assert "forces_body" not in text
+    assert text.count("type            forces;") == 1

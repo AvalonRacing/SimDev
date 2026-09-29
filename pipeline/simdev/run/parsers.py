@@ -321,3 +321,50 @@ def find_fatal_errors(text: str) -> list[str]:
     it was protecting.
     """
     return [line.strip() for line in text.splitlines() if is_fatal_line(line)]
+
+
+def read_force_vectors(path: Path) -> pd.DataFrame:
+    """Time and the TOTAL force (or moment) vector from a v2412 forces object.
+
+    Read POSITIONALLY, never by header name, for the reason spelled out in
+    read_y_plus_area: a header whose token count disagrees with the data
+    columns does not raise, it silently produces NaN, and a NaN that reaches
+    report.tsv reads as a number somebody measured.
+
+    v2412 writes ten tab-separated columns and no parentheses -
+    forces.C::writeIntegratedDataFileHeader:
+
+        Time  total_{x,y,z}  pressure_{x,y,z}  viscous_{x,y,z}
+
+    Older builds omit the total and write seven. Both are accepted because
+    the total is recoverable from either - it is the first triple when there
+    are three and the sum when there are two - but the layout is recognised
+    by width rather than assumed. A `porosity true` object would add a fourth
+    triple; the pipeline sets no porous zones, so thirteen columns means
+    something changed and is rejected rather than mis-sliced.
+    """
+    rows: list[dict[str, float]] = []
+
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        values = [float(token) for token in line.split()]
+        if len(values) == 10:
+            total = values[1:4]
+        elif len(values) == 7:
+            total = [values[1 + i] + values[4 + i] for i in range(3)]
+        else:
+            raise ValueError(
+                f"{path}: expected 7 or 10 numeric columns per row, got "
+                f"{len(values)} - a forces-object layout this parser has not "
+                "been taught. Do not widen the slice without checking which "
+                "triple is which."
+            )
+        rows.append(
+            {"Time": values[0], "x": total[0], "y": total[1], "z": total[2]}
+        )
+
+    if not rows:
+        raise ValueError(f"{path}: no data rows")
+
+    return pd.DataFrame(rows)

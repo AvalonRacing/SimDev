@@ -1,0 +1,7 @@
+# Force
+# CofR : (0.5 0 0)
+#
+# Time         	total_x total_y total_z	pressure_x pressure_y pressure_z	viscous_x viscous_y viscous_z
+1	1.0 0.2 -10.0	0.9 0.15 -9.5	0.1 0.05 -0.5
+2	2.0 0.4 -20.0	1.8 0.30 -19.0	0.2 0.10 -1.0
+3	3.0 0.6 -30.0	2.7 0.45 -28.5	0.3 0.15 -1.5

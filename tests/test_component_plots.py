@@ -112,6 +112,44 @@ def test_read_component_coeffs_keys_by_patch(tmp_path: Path) -> None:
     assert got["Body"]["Cl"].iloc[-1] == pytest.approx(-1.1)
 
 
+def test_cop_history_is_per_iteration() -> None:
+    from simdev.report.forces import cop_history
+
+    forces = pd.DataFrame({"Time": [1, 2], "x": [50.0, 50.0], "y": [0.0, 0.0], "z": [-100.0, -200.0]})
+    moments = pd.DataFrame({"Time": [1, 2], "x": [0.0, 0.0], "y": [10.0, 10.0], "z": [0.0, 0.0]})
+    history = cop_history(forces, moments, (0.0, 0.0, 0.0), 11.16, (0.2, -0.2))
+    assert list(history["Time"]) == [1, 2]
+    assert history["COP_x"].iloc[0] == pytest.approx(0.1)
+    assert history["COP_x"].iloc[1] == pytest.approx(0.05)
+    assert history["balance_front_pct"].iloc[0] == pytest.approx(75.0)
+
+
+def test_cop_history_gaps_a_guarded_iteration_rather_than_spiking() -> None:
+    """An iteration whose F_z is under the noise floor must come back NaN, not
+    0.0 - a substituted zero draws a spike that looks like physics, where a
+    gap in the trace is the honest picture of a denominator that was noise."""
+    from simdev.report.forces import cop_history
+
+    forces = pd.DataFrame({"Time": [1, 2], "x": [50.0, 50.0], "y": [0.0, 0.0], "z": [-100.0, 0.0]})
+    moments = pd.DataFrame({"Time": [1, 2], "x": [0.0, 0.0], "y": [10.0, 10.0], "z": [0.0, 0.0]})
+    history = cop_history(forces, moments, (0.0, 0.0, 0.0), 11.16, (0.2, -0.2))
+    assert history["COP_x"].iloc[0] == pytest.approx(0.1)
+    assert np.isnan(history["COP_x"].iloc[1])
+    assert np.isnan(history["balance_front_pct"].iloc[1])
+
+
+def test_plot_balance_writes_a_file(tmp_path: Path) -> None:
+    from simdev.report.plots import plot_balance
+
+    history = pd.DataFrame({
+        "Time": range(1, 21),
+        "COP_x": [0.04] * 20,
+        "balance_front_pct": [46.0 + (i % 3) for i in range(20)],
+    })
+    out = plot_balance(history, tmp_path / "balance.png", (15, 20))
+    assert out.exists() and out.stat().st_size > 0
+
+
 def test_read_component_coeffs_does_not_pick_up_the_aggregate(tmp_path: Path) -> None:
     """postProcessing/forceCoeffs is the whole-vehicle object. Swept in as a
     'component' it would double the total and outrank every real patch."""

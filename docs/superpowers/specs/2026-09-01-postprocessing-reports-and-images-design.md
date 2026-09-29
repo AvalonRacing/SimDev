@@ -294,12 +294,21 @@ So the frame arithmetic lives in exactly one place — the renderer — with `Ω
 ```
 solve  (decomposed, ~20 M cells, never reconstructed)
    │
-   ├─ postProcess -parallel -latestTime  ──►  vorticity, Lambda2  (volume fields)
-   │
-   ├─ postProcess -parallel -func surfaces ──►  results/samples/**.vtp   (~50 MB)
+   ├─ postProcess -dict system/sampleSurfaces -latestTime, TWO function
+   │  objects, each landing under OpenFOAM's own postProcessing/<name>/<time>/:
+   │  ├─ surfaces        ──► postProcessing/surfaces/<time>/**.vtp        (slices; vorticityMean, Lambda2Mean)
+   │  └─ patchSurfaces    ──► postProcessing/patchSurfaces/<time>/vehicle.vtp  (merged patch surface; yPlus)
    │
    └─ /usr/bin/python3 viz/pv_render.py render_plan.json ──►  results/images/**.png
 ```
+
+Confirmed against a real run (2026-09-01): there is no `results/samples/`.
+`viz/sample.py::run_sampling` reads both directories directly from
+`postProcessing/` rather than copying anything into `results/` — a
+`SampleRoots(surfaces, patches)` pair, not one merged directory, because the
+two function objects sample different field lists and OpenFOAM keeps their
+output apart by construction. `results/` holds only `render_plan.json`,
+`views.yaml`, `images.json`, `results/images/**.png` and `index.html`.
 
 `mesh` decomposes once and nothing ever calls `reconstructPar`
 (`docs/handbook.md` §"Parallel strategy"). Sampling in parallel respects that:
@@ -610,13 +619,34 @@ runs on a machine with neither.
 - **The `pvpython` hang is unexplained.** Routing around it via
   `/usr/bin/python3` works today; a ParaView upgrade could change either
   behaviour. The `doctor` check is the early-warning.
-- **v2412 specifics are unverified**: `force.dat`/`moment.dat` column layout,
-  whether `fieldExpression` objects accept `field UMean`, and whether the
-  `yPlus` field is present in the time directory for sampling. All three are
-  fixture-or-verify tasks in the plan, not assumptions to build on.
-- **Sampling cost is unmeasured.** 70 planes on a 20 M-cell decomposed case;
-  the `--axes`/`--fields` flags are the mitigation, and the first real run gets
-  timed and the number recorded here.
+- **v2412 specifics, confirmed 2026-09-01 against a real run**
+  (`car_smoke`, OpenFOAM v2412, `CAD/Testcase`):
+  `postProcessing/forces/0/force.dat` is ten columns — `Time` plus
+  `total_x/y/z`, `pressure_x/y/z`, `viscous_x/y/z`, total first, exactly as
+  `run/parsers.py` assumes. `fieldExpression`'s `field` entry is mandatory (no
+  default), and `result` defaults to a bracketed name built from the type and
+  its field (e.g. `vorticity(UMean)`) if not set explicitly — both are set
+  explicitly in `sampleSurfaces.jinja` for exactly that reason. `postProcess
+  -dict` **merges** its dictionary into the run's `controlDict` rather than
+  replacing it (`functionObjectList.C:433`); `render/context.py::solver_function_names`
+  exists to enumerate every solve-time object so the sampling pass can
+  disable all of them, and `viz/sample.py::run_sampling` re-checks
+  `forceCoeffs` output timestamps after sampling as a belt-and-braces guard
+  against one slipping through. `yPlus` is present in the time directory
+  (`processor*/<time>/yPlus`) and sampled without issue. None of these three
+  are assumptions any more.
+- **Sampling cost, measured only at smoke scale.** On the `car_smoke` profile
+  (51,762 cells, 4 ranks decomposed, 70 planes + 1 merged patch surface),
+  `postProcess -dict system/sampleSurfaces -latestTime` took **1.4 s**, and
+  rendering the resulting 364 PNGs under `/usr/bin/python3 viz/pv_render.py`
+  took **202.1 s** (≈0.56 s/image) — the full 364/364 suite, all seven
+  `surface` views included (see §6.1 for where the two sample directories
+  actually land; `results/samples/` does not exist). **This does not resolve
+  the risk as originally framed.** The risk was sampling cost on the ~20
+  M-cell `car` production mesh, and no production mesh has ever been solved
+  (handbook §9, "Not verified", item 1) — that number is still unmeasured,
+  because there is nothing to measure it against yet. Do not scale the
+  smoke-scale number linearly and report it as a production estimate.
 - **`lambda2`'s default colour range is a guess.** Expect to tune it once
   against a real field; the range is in a versioned file precisely so the
   tuning is recorded rather than remembered.

@@ -1,0 +1,146 @@
+{% with foam_class="dictionary", foam_object="sampleSurfaces" %}
+{% include "foam_header.jinja" %}
+{% endwith %}
+
+// SLICE AND SURFACE SAMPLING, RUN AFTER THE SOLVE.
+//
+//     mpirun -np N postProcess -dict system/sampleSurfaces -latestTime -parallel
+//
+// Sampling in parallel is what lets this touch a 20M-cell case at all: the
+// run is decomposed once in the mesh stage and never reconstructed, so every
+// rank cuts its own cells and only the surfaces are gathered. Pulling the
+// whole mesh through one serial process to slice it would be both slower and
+// memory-bound.
+//
+// -dict MERGES INTO THE RUN'S controlDict, IT DOES NOT REPLACE IT.
+// See functionObjectList.C:433. Every solve-time function object is
+// therefore still live during this pass unless it is switched off, and two
+// of them do real damage if they run:
+//
+//   fieldAverage  would restart and overwrite pMean and UMean with a
+//                 one-sample average - destroying the exact fields these
+//                 pictures are made from.
+//   forceCoeffs   would write a new one-row time directory that
+//                 stages/common.py::find_latest, which sorts by mtime,
+//                 would then prefer over the solve's real force history.
+//
+// The list comes from render/context.py::solver_function_names so it cannot
+// drift from what controlDict declares - see
+// tests/test_render_sample_dict.py::test_the_controldict_and_the_suppression_list_agree.
+functions
+{
+{% for name in solver_function_names %}
+    {{ name }}
+    {
+        enabled         false;
+    }
+{% endfor %}
+
+    // DERIVED FIELDS FIRST. Function objects execute in dictionary order and
+    // `surfaces` below samples what these produce; the other order finds
+    // nothing and reports nothing, with no error - the same hazard
+    // controlDict.jinja documents for yPlus/yPlusArea.
+    //
+    // Both read UMean, not U. A slice taken off the instantaneous field is
+    // one arbitrary phase of a limit cycle, and comparing two designs that
+    // way compares two arbitrary phases of two different cycles.
+    //
+    // `field` is mandatory on a fieldExpression and `result` would otherwise
+    // default to `vorticity(UMean)` - a name with brackets in it, which then
+    // has to be quoted everywhere downstream. Both are set explicitly.
+    //
+    // These are the ABSOLUTE-frame vorticity and lambda2, because UMean is
+    // the absolute velocity. Relative differs by a constant 2*omega, about
+    // 7.5 1/s against a 2000 1/s plotting range, and lambda2 by O(omega^2),
+    // about 14 against 5e4. Both negligible; the structures are identical.
+    vorticityMean
+    {
+        type            vorticity;
+        libs            ("libfieldFunctionObjects.so");
+        field           UMean;
+        result          vorticityMean;
+        executeControl  timeStep;
+        writeControl    none;
+    }
+
+    Lambda2Mean
+    {
+        type            Lambda2;
+        libs            ("libfieldFunctionObjects.so");
+        field           UMean;
+        result          Lambda2Mean;
+        executeControl  timeStep;
+        writeControl    none;
+    }
+
+    surfaces
+    {
+        type            surfaces;
+        libs            ("libsampling.so");
+        executeControl  timeStep;
+        writeControl    timeStep;
+        interpolationScheme cellPoint;
+        // The vtk writer emits .vtk or .vtp depending on build
+        // (vtkSurfaceWriter.H:76). viz/sample.py::find_sample globs for both.
+        surfaceFormat   vtk;
+
+        fields          (pMean UMean vorticityMean Lambda2Mean);
+
+        surfaces
+        {
+{% for s in slices %}
+            {{ s.name }}
+            {
+                type        cuttingPlane;
+                planeType   pointAndNormal;
+                pointAndNormalDict
+                {
+                    point   ({{ s.point[0] }} {{ s.point[1] }} {{ s.point[2] }});
+                    normal  ({{ s.normal[0] }} {{ s.normal[1] }} {{ s.normal[2] }});
+                }
+                interpolate true;
+            }
+{% endfor %}
+        }
+    }
+
+    // THE CAR'S OWN SURFACE, AS ONE COMBINED SAMPLE - NOT ONE PER PATCH.
+    //
+    // These feed the seven "overall" views of the car. Sampled per patch, a
+    // consumer would pick whichever surface it found first and draw one part
+    // of the car - the body alone, say - labelled as the whole vehicle. One
+    // `patch`-type surface whose own `patches` entry lists every force
+    // patch avoids that: sampledPatch.H documents `patches` as a required
+    // word/regex LIST (`patches (inlet "outlet.*")`), so a list here is
+    // valid syntax, not a shorthand for one name.
+    //
+    // A separate object from `surfaces` above because it wants a different
+    // field list: yPlus exists only on walls, and asking the slice sampler
+    // for it would sample a volume field that is meaningful nowhere off the
+    // wall. UMean is included too (not just pMean/yPlus): the renderer's
+    // velocity-derived Calculators reference UMean unconditionally, and a
+    // surface sample missing it fails at render time. One extra vector field
+    // on one surface is negligible next to keeping slices and surfaces on
+    // one code path.
+    patchSurfaces
+    {
+        type            surfaces;
+        libs            ("libsampling.so");
+        executeControl  timeStep;
+        writeControl    timeStep;
+        interpolationScheme cell;
+        surfaceFormat   vtk;
+
+        fields          (pMean UMean yPlus);
+
+        surfaces
+        {
+            vehicle
+            {
+                type        patch;
+                patches     ({% for p in force_patches %}{{ p }} {% endfor %});
+                interpolate false;
+            }
+        }
+    }
+}

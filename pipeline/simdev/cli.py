@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -9,7 +10,9 @@ from pydantic import ValidationError as SchemaValidationError
 
 from simdev.config.validate import ValidationError
 from simdev.report.results import aggregate
+from simdev.report.tsv import aggregate_reports
 from simdev.run.runner import StageError
+from simdev.stages.images import images
 from simdev.stages.mesh import mesh
 from simdev.stages.post import post
 from simdev.stages.prepare import prepare
@@ -57,11 +60,36 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("run_dir", type=Path)
         sub.add_argument("--force", action="store_true")
 
+    img = subparsers.add_parser(
+        "images",
+        help="render the slice and surface suite for a solved run",
+    )
+    img.add_argument("run_dir", type=Path)
+    img.add_argument("--force", action="store_true")
+    img.add_argument(
+        "--axes", nargs="+", default=None, choices=["x", "y", "z"],
+        help="only these slice axes. Iterating on one view should not cost 364 images",
+    )
+    img.add_argument(
+        "--fields", nargs="+", default=None,
+        help="only these fields, e.g. --fields cp U",
+    )
+
     subparsers.add_parser("doctor")
 
     agg = subparsers.add_parser("aggregate")
     agg.add_argument("run_dirs", type=Path, nargs="+")
     agg.add_argument("--out", type=Path, default=None)
+
+    rep = subparsers.add_parser(
+        "report",
+        help=(
+            "stack per-run results/report.tsv files into one table. Combines "
+            "on read; never appends to a shared file"
+        ),
+    )
+    rep.add_argument("run_dirs", type=Path, nargs="+")
+    rep.add_argument("--out", type=Path, default=None)
 
     return parser
 
@@ -98,6 +126,28 @@ def _doctor() -> int:
     except Exception as error:
         print(f"{'gmsh (STEP import)':18s} BROKEN: {error}")
         missing.append("gmsh")
+
+    # ParaView, and NOT via pvpython. pvpython and pvbatch do not return on
+    # this machine - measured, no output at a 150 s timeout, not even for
+    # --version - while the same install imports fine under the plain system
+    # interpreter. Checked here because the alternative is discovering it
+    # after a solve, when the pictures are what is missing.
+    interpreter = "/usr/bin/python3"
+    probe = subprocess.run(
+        [interpreter, "-c", "import paraview.simple"],
+        capture_output=True, timeout=300,
+    )
+    if probe.returncode == 0:
+        print(f"{'paraview (images)':18s} {interpreter}")
+    else:
+        print(f"{'paraview (images)':18s} BROKEN under {interpreter}")
+        print(
+            "\nThe images stage needs an interpreter that can 'import "
+            "paraview.simple'. On Ubuntu:\n  sudo apt-get install -y "
+            "python3-paraview\nSet post.paraview_python if it lives "
+            "elsewhere. Do NOT point it at pvpython."
+        )
+        missing.append("paraview")
 
     if missing:
         print(f"\nMissing: {', '.join(missing)}")
@@ -152,6 +202,26 @@ def main(argv: list[str] | None = None) -> int:
             print(frame.to_string(index=False))
             return 0
 
+        if args.command == "report":
+            header, rows = aggregate_reports(args.run_dirs)
+            missing = [
+                str(d) for d in args.run_dirs
+                if not (Path(d) / "results" / "report.tsv").exists()
+            ]
+            if missing:
+                # Loudly. A run quietly absent from a comparison table is how
+                # a conclusion gets drawn from half the evidence.
+                print(
+                    "warning: no results/report.tsv, skipped: "
+                    + ", ".join(missing),
+                    file=sys.stderr,
+                )
+            text = "\n".join("\t".join(r) for r in [header, *rows]) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+            print(text, end="")
+            return 0
+
         if args.command in ("prepare", "run"):
             prepare(
                 args.case,
@@ -181,6 +251,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if solve(args.run_dir, force=args.force).converged else 1
         if args.command == "post":
             return 0 if post(args.run_dir, force=args.force).yplus_passed else 1
+        if args.command == "images":
+            record = images(
+                args.run_dir, force=args.force, axes=args.axes, fields=args.fields
+            )
+            print(
+                f"{record['images_written']} images  "
+                f"sample {record['sample_seconds']}s  "
+                f"render {record['render_seconds']}s"
+            )
+            for reason in record["reasons"]:
+                print(f"  note: {reason}", file=sys.stderr)
+            return 0
 
     # SchemaValidationError is pydantic's: a case file that is malformed rather
     # than merely inconsistent fails in model_validate, before our own
