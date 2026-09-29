@@ -14,6 +14,16 @@ from simdev.run.runner import Runner, StageError
 
 SAMPLE_DICT = "system/sampleSurfaces"
 
+# The fields postProcess must READ FROM THE TIME DIRECTORY, passed to -fields.
+#
+# Exactly the on-disk inputs of sampleSurfaces.jinja, and nothing else:
+# `surfaces` samples (pMean UMean vorticityMean Lambda2Mean) and
+# `patchSurfaces` samples (pMean UMean yPlus), but the two *Mean derivatives
+# are computed in memory by the fieldExpression objects rather than read, so
+# listing them here would send postProcess looking for files that do not
+# exist. Keep this in step with the template's two `fields` entries.
+DISK_FIELDS = ("pMean", "UMean", "yPlus")
+
 
 @dataclass(frozen=True)
 class SampleRoots:
@@ -77,7 +87,32 @@ def run_sampling(run_dir: Path, n_ranks: int) -> SampleRoots:
     before = _force_coeff_times(run_dir)
 
     Runner(run_dir).run_parallel(
-        ["postProcess", "-dict", SAMPLE_DICT, "-latestTime"],
+        [
+            "postProcess",
+            "-dict", SAMPLE_DICT,
+            "-latestTime",
+            # -fields IS MANDATORY HERE, AND LEAVING IT OUT COSTS EVERY COLOUR.
+            #
+            # postProcess only loads the fields named in `selectedFields`, and
+            # functionObjectList::New populates that from -func / -funcs ONLY.
+            # The -dict path never touches it (functionObjectList.C:433-465),
+            # so with -dict alone selectedFields stays empty, NOTHING is read
+            # from the time directory, and every object that wants a field
+            # fails.
+            #
+            # It fails QUIETLY. postProcess exits 0; the warnings scroll past
+            # as "cannot find required object UMean"; and `surfaces` still
+            # writes one .vtp per plane carrying full geometry and not a
+            # single data array. The renderer then draws 364 correctly-framed,
+            # correctly-named, entirely colourless pictures, and a check that
+            # counts files says 364/364.
+            #
+            # Only the fields READ FROM DISK belong here. vorticityMean and
+            # Lambda2Mean are derived in-memory by the two fieldExpression
+            # objects and must NOT be listed - they do not exist on disk, and
+            # naming them would make postProcess fail looking for them.
+            "-fields", f"({' '.join(DISK_FIELDS)})",
+        ],
         n_ranks,
         name="postProcess.sample",
     )

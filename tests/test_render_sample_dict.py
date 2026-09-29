@@ -219,3 +219,82 @@ def test_one_combined_vehicle_surface_not_one_per_patch(tmp_path: Path) -> None:
     line_end = text.index(")", idx)
     patches_line = text[idx : line_end + 1]
     assert "body" in patches_line and "wing" in patches_line
+
+
+def test_sampling_asks_postprocess_to_load_the_fields(tmp_path: Path, monkeypatch) -> None:
+    """-fields is mandatory, and its absence is invisible until the pictures.
+
+    postProcess populates its `selectedFields` from -func / -funcs only;
+    the -dict path never touches it. With -dict alone nothing is read from
+    the time directory, every function object fails to find its input, and
+    `surfaces` still writes one .vtp per plane carrying full geometry and no
+    data arrays at all. postProcess exits 0. The renderer then draws a
+    complete, correctly-named, entirely colourless suite - and a check that
+    counts files reports success.
+
+    Measured on a real 21.6M-cell run before this was fixed: 71 surfaces
+    written, 0 field arrays in any of them.
+    """
+    from simdev.run.runner import CommandResult
+    from simdev.viz.sample import DISK_FIELDS, run_sampling
+
+    calls: list[list[str]] = []
+
+    class Recorder:
+        def __init__(self, case_dir):
+            self.log_dir = Path(case_dir) / "logs"
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        def run_parallel(self, argv, n_ranks, name=None, check=True):
+            calls.append(list(argv))
+            # Make the post-run discovery find something, so the function
+            # reaches its return rather than raising on empty output.
+            for obj in ("surfaces", "patchSurfaces"):
+                out = Path(tmp_path) / "postProcessing" / obj / "400"
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "x_+0.000.vtp").write_text("", encoding="utf-8")
+            log = self.log_dir / f"log.{name}"
+            log.write_text("End\n", encoding="utf-8")
+            return CommandResult(name=name, argv=argv, returncode=0, log_path=log)
+
+    monkeypatch.setattr("simdev.viz.sample.Runner", Recorder)
+    run_sampling(tmp_path, 4)
+
+    argv = calls[0]
+    assert "-fields" in argv, f"postProcess invoked without -fields: {argv}"
+    fields = argv[argv.index("-fields") + 1]
+    for name in DISK_FIELDS:
+        assert name in fields, f"{name} missing from -fields: {fields}"
+
+    # The derived fields are computed in memory, never read from disk.
+    # Naming them would send postProcess looking for files that do not exist.
+    assert "vorticityMean" not in fields
+    assert "Lambda2Mean" not in fields
+
+
+def test_the_disk_fields_match_what_the_template_samples() -> None:
+    """DISK_FIELDS and the template's two `fields` entries must agree.
+
+    They are edited in different files months apart. A field added to the
+    template but not here is one postProcess never loads - which is this
+    whole bug, in miniature, waiting to happen again.
+    """
+    import re
+
+    from simdev.viz.sample import DISK_FIELDS
+
+    template = (
+        Path(__file__).parent.parent
+        / "pipeline" / "simdev" / "render" / "templates" / "sampleSurfaces.jinja"
+    ).read_text(encoding="utf-8")
+
+    sampled: set[str] = set()
+    for entry in re.findall(r"fields\s+\(([^)]*)\)", template):
+        sampled.update(entry.split())
+
+    # Everything the template samples is either read from disk or derived.
+    derived = {"vorticityMean", "Lambda2Mean"}
+    assert sampled - derived == set(DISK_FIELDS), (
+        f"template samples {sorted(sampled - derived)}, "
+        f"DISK_FIELDS is {sorted(DISK_FIELDS)}"
+    )
