@@ -43,6 +43,17 @@ simdev = ["render/templates/*.jinja"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root, so `pytest` alone works from a clean checkout.
+#
+# Three test modules import sibling packages by their root-relative names -
+# `from tests.test_car_prepare import ...` and `from scripts.mesh_independence
+# import ...`. Neither package is installed; both are just directories in the
+# repo, and the `pytest` console script does not put the invocation directory
+# on sys.path. So a bare `pytest` failed COLLECTION on those three files with
+# "No module named 'tests'", while `python -m pytest` - which does prepend the
+# cwd - worked. Two commands that should agree, disagreeing, with the working
+# one being the longer one nobody types.
+pythonpath = ["."]
 markers = [
     "openfoam: requires a working OpenFOAM installation",
     "paraview: requires a working ParaView python (see cli.py::_doctor)",
