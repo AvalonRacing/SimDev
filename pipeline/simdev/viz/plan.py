@@ -23,8 +23,11 @@ SURFACE_VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, f
     "rear":   (( 1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
     "left":   (( 0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
     "right":  (( 0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-    "top":    (( 0.0, 0.0, -1.0), (1.0, 0.0, 0.0)),
-    "bottom": (( 0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
+    # Top and bottom put the car's LONG axis across the long side of the
+    # frame: up = +y, so the car lies lengthwise in a landscape image
+    # instead of standing on end in it and wasting both margins.
+    "top":    (( 0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+    "bottom": (( 0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
     "iso":    ((-1.0 / math.sqrt(3), -1.0 / math.sqrt(3), -1.0 / math.sqrt(3)),
                (0.0, 0.0, 1.0)),
 }
@@ -44,6 +47,22 @@ SLICE_VIEW = {
 }
 
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
+
+# The direction the index counts in, per axis.
+#
+# x counts from the FRONT of the car to behind it. The car travels +x and
+# the air arrives from +x, so the front-most plane is the largest offset and
+# the index descends from it - flipping through cp_x/ in filename order then
+# walks the car nose to tail. y and z count upward in offset, which is
+# right-to-left and ground-up respectively.
+COUNT_DESCENDING = {"x": True, "y": False, "z": False}
+
+
+def slice_index(axis: str, offset: float, offsets: Sequence[float]) -> int:
+    """1-based position of this plane in viewing order along its axis."""
+    ordered = sorted(offsets, reverse=COUNT_DESCENDING.get(axis, False))
+    return ordered.index(offset) + 1
 
 
 def slice_name(axis: str, offset: float) -> str:
@@ -146,7 +165,11 @@ def build_render_plan(
     for axis, spec_axis in views.axes.items():
         direction, up = SLICE_VIEW[axis]
         index = AXIS_INDEX[axis]
-        for offset in spec_axis.offsets():
+        all_offsets = spec_axis.offsets()
+        index_of = {
+            o: slice_index(axis, o, all_offsets) for o in all_offsets
+        }
+        for offset in all_offsets:
             name = slice_name(axis, offset)
 
             # The plane's normal is the CAR's axis, not the mesh's, so an
@@ -201,24 +224,39 @@ def build_render_plan(
                         # directory under results/images therefore holds
                         # pictures and nothing else - no intermediate
                         # levels to click through to reach one.
-                        "out": str(images_dir / f"{field}_{axis}" / f"{field}_{name}.png"),
+                        # ZERO-PADDED INDEX FIRST, so the directory lists
+                        # in viewing order. The signed offset alone does
+                        # not sort: "+" is ASCII 43 and "-" is 45, so
+                        # every positive station sorted before every
+                        # negative one and the sequence jumped about.
+                        "out": str(
+                            images_dir / f"{field}_{axis}"
+                            / f"{field}_{axis}_{index_of[offset]:02d}_{offset:+.3f}.png"
+                        ),
                     }
                     for field in SLICE_FIELDS
                 ],
             })
 
+    # SURFACE VIEWS STAY IN THE GLOBAL AXES, UNLIKE THE SLICES.
+    #
+    # The slices are rotated into the car's frame so plane k cuts the same
+    # station on the car whatever attitude it is posed at. These seven are
+    # the overall views, and holding them in the domain's own axes means a
+    # yawed car LOOKS yawed - the attitude stays visible in the picture
+    # rather than being rotated out of it.
     focal = (datum[0], datum[1], datum[2] + views.focus_height)
     for name, (direction, up) in SURFACE_VIEWS.items():
         plan["surfaces"].append({
             "name": name,
-            # Car-frame, like the slices: `front` means the car's nose,
-            # not the domain's -x face, so two states posed at different
-            # body-slip angles give the same view of the car.
             "camera": _camera(
                 focal,
-                _rotate(direction, axes),
-                _rotate(up, axes),
-                max(views.parallel_scale.values()),
+                direction,
+                up,
+                # The iso view sees the car along its diagonal, which is
+                # longer than any single axis - at the slice scale the nose
+                # and wing ran off the frame. Its own, wider setting.
+                views.surface_scale[name],
             ),
             "images": [
                 {

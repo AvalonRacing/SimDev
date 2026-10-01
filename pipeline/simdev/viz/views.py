@@ -63,12 +63,44 @@ class Views:
     axes: dict[str, Axis]
     fields: dict[str, FieldStyle]
     parallel_scale: dict[str, float]
+    surface_scale: dict[str, float]
     focus_height: float
     resolution: tuple[int, int]
     streamlines: str
     # sha256 of the file text, truncated. Recorded beside every picture so a
     # PNG can always be traced back to the definition that framed it.
     digest: str
+
+
+# The seven overall views, and how wide each needs to be when the views file
+# does not say. Expressed as a multiple of the largest slice scale: the iso
+# view looks along the car's diagonal, which is longer than its length, so
+# it needs the most; front and rear see only the car's width and need least.
+SURFACE_SCALE_FALLBACK = {
+    "iso": 1.5,
+    "front": 1.0,
+    "rear": 1.0,
+    "left": 1.3,
+    "right": 1.3,
+    "top": 1.3,
+    "bottom": 1.3,
+}
+
+
+def _surface_scale(camera: dict) -> dict[str, float]:
+    """Per-view half-heights for the surface renders.
+
+    OPTIONAL in the views file. A definition written before these existed is
+    still a valid definition, and failing to load it would mean an old run
+    cannot be re-rendered at all - so the fallback scales off the slice
+    settings rather than raising.
+    """
+    declared = camera.get("surface_scale") or {}
+    widest = max(float(v) for v in camera["parallel_scale"].values())
+    return {
+        name: float(declared.get(name, widest * factor))
+        for name, factor in SURFACE_SCALE_FALLBACK.items()
+    }
 
 
 def load_views(path: Path) -> Views:
@@ -123,6 +155,7 @@ def load_views(path: Path) -> Views:
         axes=axes,
         fields=fields,
         parallel_scale={k: float(v) for k, v in camera["parallel_scale"].items()},
+        surface_scale=_surface_scale(camera),
         focus_height=float(camera.get("focus_height", 0.0)),
         resolution=(int(camera["resolution"][0]), int(camera["resolution"][1])),
         streamlines=streamlines,

@@ -62,10 +62,13 @@ fields:
   # nothing came out blue and so much read as red.
   cp:      {limits: [-1.0, 1.0],       colormap: spectrum}
 
-  # Total-pressure coefficient: 0 is undisturbed flow and negative is loss,
-  # so the useful range is almost entirely below zero. The ceiling stays at
-  # +1 to match cp.
-  cpt:     {limits: [-2.0, 1.0],       colormap: spectrum}
+  # Total-pressure coefficient on the convention where UNDISTURBED FLOW
+  # READS 1 and loss reads below it - what StarCCM+ reports and what
+  # published plots use. Measured on the production run under this
+  # convention the bulk sits between about -0.5 and 1.0, with the freestream
+  # pinned at the top of the ramp, so wake and separation read as the
+  # departure from red that they are.
+  cpt:     {limits: [-1.0, 1.0],       colormap: spectrum}
 
   # 0..25 m/s against a 15 m/s freestream - a round ceiling at 1.67x u_inf,
   # which covers the acceleration over the body and the rotating frame's
@@ -102,6 +105,18 @@ camera:
   # the horizon exactly at the bottom edge. 0.12 stops just short of that,
   # keeping a little road visible for reference.
   focus_height: 0.12
+  # Half-height for each of the seven overall views, separately from the
+  # slice scales. The iso view looks along the car's diagonal, which is
+  # longer than its length, so at the slice setting the nose and wing ran
+  # off the frame. Front and rear see only the car's width and need less.
+  surface_scale:
+    iso: 0.30
+    front: 0.20
+    rear: 0.20
+    left: 0.26
+    right: 0.26
+    top: 0.26
+    bottom: 0.26
   resolution: [1600, 1200]
 
 # off | lic | seeded. Off by default until the cost is measured on a real

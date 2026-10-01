@@ -111,9 +111,25 @@ def _derive(source, frame):
         if w
         else f"{u_inf * u_inf!r}"
     )
+    # THE +1 IS THE CONVENTION, NOT A FUDGE.
+    #
+    # cpt is referenced to freestream TOTAL pressure, so undisturbed flow
+    # reads 1 and loss reads below it - the same scale StarCCM+ reports and
+    # the same one published plots use, which is the point: these pictures
+    # get read against other people's. Written out,
+    #
+    #   cpt = (p + 0.5|U_rel|^2) / q      with the local head corrected
+    #
+    # and in undisturbed flow p = 0 and |U_rel| = U_ff, so the first term is
+    # 0.5*U_ff^2/q - which is 1 in straight-line flow and NOT 1 in a
+    # rotating frame, where the undisturbed speed varies with radius. The
+    # local-head subtraction removes that variation and the +1 puts the
+    # datum back where the convention wants it. Both are needed: without the
+    # subtraction a cornering freestream is graded by radius; without the +1
+    # it sits at 0 and nobody else's scale matches.
     cpt = Calculator(Input=cp)
     cpt.ResultArrayName = "cpt"
-    cpt.Function = f"(pMean + 0.5*mag(U_rel)^2 - 0.5*({uff2}))/{q!r}"
+    cpt.Function = f"(pMean + 0.5*mag(U_rel)^2 - 0.5*({uff2}))/{q!r} + 1"
 
     return cpt
 

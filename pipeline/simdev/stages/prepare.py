@@ -36,6 +36,7 @@ from simdev.render.context import (
 )
 from simdev.render.render import render_case
 from simdev.run.status import StageStatus, should_skip, write_status
+from simdev.geometry.step_axes import StepAxesError, read_step_axes
 from simdev.viz.datum import car_axes, car_datum
 
 STAGE = "prepare"
@@ -578,7 +579,34 @@ def prepare(
     wheels = derive_wheels(spec.geometry.patches, meshes)
 
     datum, datum_reasons = car_datum(meshes, ["Chassis"])
+    # THE CAR'S AXES COME FROM THE CAD, NOT FROM A FIT, WHEN THE CAD SAYS.
+    #
+    # Body.step carries the coordinate system the part was placed on, which
+    # is the attitude stated rather than inferred: exact, independent of how
+    # the surface happens to be tessellated, and identical across every
+    # driving state exported from the same model. The principal-axis fit
+    # stays as the fallback for geometry that arrives as bare STL. On
+    # CAD/Testcase the two agree to 0.8 degrees, which is the check that
+    # neither is wrong.
     axes, car_angles, axes_reasons = car_axes(meshes, ["Chassis"])
+    axes_source = "fit"
+    if spec.geometry.source_dir:
+        body_step = Path(spec.geometry.source_dir) / "Body.step"
+        if body_step.exists():
+            try:
+                axes = read_step_axes(body_step)
+                axes_source = "Body.step"
+                car_angles = {
+                    "yaw_deg": math.degrees(math.atan2(axes[0][1], axes[0][0])),
+                    "pitch_deg": math.degrees(math.asin(-axes[0][2])),
+                    "roll_deg": math.degrees(math.atan2(axes[1][2], axes[2][2])),
+                }
+                axes_reasons = []
+            except StepAxesError as error:
+                axes_reasons.append(
+                    f"could not read car axes from {body_step.name} ({error}); "
+                    "fell back to the principal-axis fit of the Chassis"
+                )
     datum_reasons.extend(axes_reasons)
     warnings.extend(datum_reasons)
 
@@ -699,6 +727,11 @@ def prepare(
                 # two different attitudes, which is worth being able to
                 # read off without re-measuring the geometry.
                 "car_angles": car_angles,
+                # "Body.step" or "fit" - which of the two produced the
+                # axes above. Worth recording: a run framed from a fit
+                # and one framed from the CAD are not guaranteed to be
+                # framed identically, and this is what says which.
+                "car_axes_source": axes_source,
                 # The rotating frame, so the images stage can put the pictures
                 # in the car's frame without rebuilding the domain. Two
                 # numbers are cheaper to record than a domain is to

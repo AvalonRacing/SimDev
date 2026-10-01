@@ -154,8 +154,14 @@ def test_car_axes_rotate_the_slice_normals() -> None:
     assert first["normal"][1] == pytest.approx(0.1815, abs=1e-3)
 
 
-def test_car_axes_rotate_the_surface_cameras() -> None:
-    """`front` means the car's nose, not the domain's -x face."""
+def test_surface_cameras_stay_in_the_global_axes() -> None:
+    """The seven overall views do NOT rotate with the car, unlike the slices.
+
+    A slice is rotated so plane k cuts the same station on the car whatever
+    attitude it is posed at. These are the overall views, and holding them
+    in the domain's axes keeps the attitude visible: a yawed car should look
+    yawed rather than have the yaw rotated out of the picture.
+    """
     plan = _yawed_plan()
     front = next(s for s in plan["surfaces"] if s["name"] == "front")
     direction = [
@@ -163,9 +169,26 @@ def test_car_axes_rotate_the_surface_cameras() -> None:
         for i in range(3)
     ]
     mag = sum(d * d for d in direction) ** 0.5
-    # Looking along -x_car: the camera sits on the nose side and looks back.
-    assert direction[0] / mag == pytest.approx(-0.9834, abs=1e-3)
-    assert direction[1] / mag == pytest.approx(-0.1815, abs=1e-3)
+    # Straight down -x, with no trace of the 10.5 degree pose.
+    assert direction[0] / mag == pytest.approx(-1.0, abs=1e-6)
+    assert direction[1] / mag == pytest.approx(0.0, abs=1e-6)
+
+
+def test_top_and_bottom_lie_the_car_along_the_long_edge() -> None:
+    """up = +y, so the car runs lengthwise across a landscape frame.
+
+    With up = +x it stood on end in a 4:3 image and wasted both margins.
+    """
+    for name in ("top", "bottom"):
+        _, up = SURFACE_VIEWS[name]
+        assert up == (0.0, 1.0, 0.0), name
+
+
+def test_the_iso_view_is_zoomed_out_further_than_the_others() -> None:
+    """It looks along the car's diagonal, which is longer than its length."""
+    plan = _plan()
+    scale = {s["name"]: s["camera"]["parallel_scale"] for s in plan["surfaces"]}
+    assert scale["iso"] > scale["front"]
 
 
 def test_slice_offsets_walk_along_the_car_axis() -> None:
