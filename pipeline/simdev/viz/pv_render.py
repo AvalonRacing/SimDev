@@ -167,15 +167,43 @@ def _draw(source, field, style, camera, out_path, resolution):
     lut.RescaleTransferFunction(low, high)
 
     bar = GetScalarBar(lut, view)
-    bar.Title = field
+    # NO TITLE. "only colourscale" - and the field is already named by the
+    # directory the picture sits in (cp_x/, surface_yplus/) and by its own
+    # filename, so a label in the pixels would only repeat it. The numeric
+    # labels stay: without them the bar is a decoration rather than a scale.
+    bar.Title = ""
     bar.ComponentTitle = ""
+    # HORIZONTAL, ALONG THE BOTTOM. The default is a vertical bar in the
+    # lower-right corner, which draws its tick labels to the RIGHT of the
+    # bar - off the edge of the frame, so the numbers come out clipped and
+    # the scale is unreadable. Laid flat along the bottom the labels sit
+    # under the bar with room for them, and it fills the dead band beneath
+    # the ground plane rather than covering flow.
+    bar.AutoOrient = 0
+    bar.Orientation = "Horizontal"
+    # Placed by hand rather than by WindowLocation. A horizontal bar draws
+    # its tick labels BELOW itself, and "Lower Center" sits flush with the
+    # bottom edge - so the bar appeared but its numbers fell off the frame.
+    # Lifting it to 7% of frame height leaves room for them underneath.
+    bar.WindowLocation = "Any Location"
+    bar.Position = [0.37, 0.07]
     # Smaller than ParaView's default (0.33 long, 16 thick). The bar is a
-    # key, not a feature of the picture; at the default size it takes a
-    # noticeable bite out of a 1600x1200 frame that the flow should have.
-    bar.ScalarBarLength = 0.22
-    bar.ScalarBarThickness = 10
+    # key, not a feature of the picture.
+    bar.ScalarBarLength = 0.26
+    bar.ScalarBarThickness = 9
     bar.TitleFontSize = 11
     bar.LabelFontSize = 10
+    # Two significant figures. The limits are round numbers by design, so
+    # the default "1.0e+00" spelling of 1 is noise - and a long label is
+    # what overflowed the frame in the first place.
+    bar.LabelFormat = "%-#.3g"
+    bar.RangeLabelFormat = "%-#.3g"
+    # BLACK. ParaView defaults the bar's text to white, which is sized for
+    # its own dark viewport - on the white background these images use it is
+    # drawn, correctly, in white on white. The numbers were there the whole
+    # time and invisible, which reads exactly like a bar with no labels.
+    bar.LabelColor = [0.0, 0.0, 0.0]
+    bar.TitleColor = [0.0, 0.0, 0.0]
 
     display.SetScalarBarVisibility(view, True)
 
