@@ -65,6 +65,7 @@ class Views:
     parallel_scale: dict[str, float]
     surface_scale: dict[str, float]
     focus_height: float
+    surface_focus_height: float
     resolution: tuple[int, int]
     streamlines: str
     # sha256 of the file text, truncated. Recorded beside every picture so a
@@ -157,6 +158,11 @@ def load_views(path: Path) -> Views:
         parallel_scale={k: float(v) for k, v in camera["parallel_scale"].items()},
         surface_scale=_surface_scale(camera),
         focus_height=float(camera.get("focus_height", 0.0)),
+        # Defaults to the slice height when unset, so an older views
+        # file still loads and still frames the way it used to.
+        surface_focus_height=float(
+            camera.get("surface_focus_height", camera.get("focus_height", 0.0))
+        ),
         resolution=(int(camera["resolution"][0]), int(camera["resolution"][1])),
         streamlines=streamlines,
         digest=hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],

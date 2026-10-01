@@ -245,7 +245,11 @@ def build_render_plan(
     # the overall views, and holding them in the domain's own axes means a
     # yawed car LOOKS yawed - the attitude stays visible in the picture
     # rather than being rotated out of it.
-    focal = (datum[0], datum[1], datum[2] + views.focus_height)
+    # Lower than the slices': a slice wants the camera high so the dead
+    # band under the ground plane is small, but a surface view wants the
+    # car CENTRED - at the slice height the bodywork hung low enough in
+    # frame to sit under the colour bar.
+    focal = (datum[0], datum[1], datum[2] + views.surface_focus_height)
     for name, (direction, up) in SURFACE_VIEWS.items():
         plan["surfaces"].append({
             "name": name,

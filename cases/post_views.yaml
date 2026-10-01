@@ -105,6 +105,10 @@ camera:
   # the horizon exactly at the bottom edge. 0.12 stops just short of that,
   # keeping a little road visible for reference.
   focus_height: 0.12
+  # The overall views centre on the car itself rather than on the slice
+  # framing: roughly the bodywork's own mid-height, so the car sits in
+  # the middle of the frame and clears the colour bar below it.
+  surface_focus_height: 0.065
   # Half-height for each of the seven overall views, separately from the
   # slice scales. The iso view looks along the car's diagonal, which is
   # longer than its length, so at the slice setting the nose and wing ran
