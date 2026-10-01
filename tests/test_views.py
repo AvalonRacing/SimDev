@@ -94,3 +94,25 @@ def test_every_rendered_field_has_limits() -> None:
     views = load_views(REPO / "cases" / "post_views.yaml")
     for field in (*SLICE_FIELDS, *SURFACE_FIELDS):
         assert field in views.fields, field
+
+
+def test_every_colour_limit_is_a_round_number() -> None:
+    """Limits are read against other people's plots, so they must be numbers
+    someone else would also have picked.
+
+    A limit fitted to one run's percentiles - -0.96693, say - cannot be
+    matched by anyone working from different data, and a scale nobody else
+    can reproduce defeats the point of fixing it. Every limit here should be
+    expressible in at most two significant figures.
+    """
+    views = load_views(REPO / "cases" / "post_views.yaml")
+    for name, style in views.fields.items():
+        for value in style.limits:
+            if value == 0.0:
+                continue
+            magnitude = abs(value)
+            scale = 10 ** (len(f"{int(magnitude)}") - 1) if magnitude >= 1 else 0.1
+            quantum = scale / 10.0
+            assert abs(value / quantum - round(value / quantum)) < 1e-9, (
+                f"{name} limit {value} is not round to {quantum}"
+            )

@@ -45,7 +45,9 @@ def write_contact_sheet(
     for entry in plan["slices"]:
         offset = entry.get("offset", 0.0)  # numeric offset
         for image in entry["images"]:
-            key = f"slices — {entry['axis']} — {image['field']}"
+            # Named for the directory the pictures are actually in, so a
+            # heading on the sheet and a folder on disk read the same.
+            key = f"{image['field']}_{entry['axis']}"
             groups.setdefault(key, []).append(
                 (image["out"], entry["name"], offset)
             )
@@ -55,7 +57,7 @@ def write_contact_sheet(
         surface_name = entry.get("name", "unknown")
         sort_key = SURFACE_ORDER.index(surface_name) if surface_name in SURFACE_ORDER else 999
         for image in entry["images"]:
-            key = f"surface — {image['field']}"
+            key = f"surface_{image['field']}"
             groups.setdefault(key, []).append(
                 (image["out"], surface_name, sort_key)
             )

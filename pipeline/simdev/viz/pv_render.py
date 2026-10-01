@@ -20,7 +20,7 @@ import sys
 
 from paraview.simple import (  # type: ignore[import-not-found]
     Calculator, ColorBy, CreateRenderView, Delete, GetColorTransferFunction,
-    GetScalarBar, Hide, LegacyVTKReader, Render, SaveScreenshot, Show, Text,
+    GetScalarBar, Hide, LegacyVTKReader, Render, SaveScreenshot, Show,
     XMLPolyDataReader,
 )
 
@@ -128,21 +128,18 @@ def _vorticity(source, component):
     return out
 
 
-def _stamp(view, lines):
-    """Provenance in the corner of every image.
-
-    Two pictures a month apart are worthless if you cannot tell which run,
-    which window and which colour limits made them.
-    """
-    text = Text()
-    text.Text = "\n".join(lines)
-    display = Show(text, view)
-    display.WindowLocation = 0  # 0 = LowerLeft
-    display.FontSize = 9
-    return text
+# NO TEXT IS DRAWN INTO THE IMAGE. Only the colour bar.
+#
+# These pictures get read side by side and cropped into reports, and an
+# overlay block in the corner is in the way for both. The provenance that
+# block used to carry has not been dropped - it is in results/images.json
+# (run, spec hash, views digest, datum, counts, timings), in the
+# results/views.yaml copy of the definition that framed every picture, and
+# across the top of results/index.html. What is gone is only the copy that
+# was burnt into the pixels.
 
 
-def _draw(source, field, style, camera, out_path, resolution, stamp_lines):
+def _draw(source, field, style, camera, out_path, resolution):
     view = CreateRenderView()
     view.CameraParallelProjection = 1
     view.CameraPosition = camera["position"]
@@ -172,9 +169,15 @@ def _draw(source, field, style, camera, out_path, resolution, stamp_lines):
     bar = GetScalarBar(lut, view)
     bar.Title = field
     bar.ComponentTitle = ""
+    # Smaller than ParaView's default (0.33 long, 16 thick). The bar is a
+    # key, not a feature of the picture; at the default size it takes a
+    # noticeable bite out of a 1600x1200 frame that the flow should have.
+    bar.ScalarBarLength = 0.22
+    bar.ScalarBarThickness = 10
+    bar.TitleFontSize = 11
+    bar.LabelFontSize = 10
 
     display.SetScalarBarVisibility(view, True)
-    _stamp(view, [*stamp_lines, f"{field}  [{low:g}, {high:g}]"])
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     Render(view)
@@ -199,17 +202,11 @@ def main(argv):
 
     frame = plan["frame"]
     resolution = plan["resolution"]
-    stamp = plan["stamp"]
-    base_lines = [
-        f"{stamp['run']}  spec {stamp['spec_hash']}  views {plan['views_digest']}",
-        f"iterations {stamp['window']}  "
-        + ("MEAN" if stamp.get("mean") else "INSTANTANEOUS"),
-    ]
 
     written = 0
     missing = []
 
-    for group, label in ((plan["slices"], "slice"), (plan["surfaces"], "surface")):
+    for group in (plan["slices"], plan["surfaces"]):
         for entry in group:
             sample = entry.get("sample")
             if not sample or not os.path.exists(sample):
@@ -221,16 +218,13 @@ def main(argv):
                 node = source
                 if field == "vort":
                     node = _vorticity(source, image["component"])
-                style = plan["fields"][field]
-                lines = [*base_lines, f"{label} {entry['name']}"]
                 _draw(
                     node,
                     ARRAY_NAMES.get(field, field),
-                    style,
+                    plan["fields"][field],
                     entry["camera"],
                     image["out"],
                     resolution,
-                    lines,
                 )
                 written += 1
 

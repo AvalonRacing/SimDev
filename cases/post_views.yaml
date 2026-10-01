@@ -33,34 +33,75 @@ planes:
   z: {from:  0.00, to: 0.16, step: 0.01}   # 17 planes
 
 fields:
-  # Fixed limits, on the same reasoning as report/plots.py's FORCE_AXIS_LIMITS:
-  # a scale fitted per run makes a 5% change look identical to a 0.5% one.
-  # Values outside clamp to the end colour and the clamped fraction is
-  # recorded, so a badly chosen limit is visible rather than merely invisible.
+  # EVERY LIMIT IS A ROUND NUMBER, AND FIXED FOR ALL RUNS.
+  #
+  # Two reasons, and the second is why they are not simply the measured
+  # percentiles. A limit that moves per run makes two pictures
+  # incomparable - the whole point of this file. And a limit like -0.96693,
+  # fitted to one run's data, cannot be matched by anyone else: these
+  # pictures get read against simulations from other people and against
+  # published plots, and that only works if the scale is a number someone
+  # else would also have picked. So the measurements below inform the
+  # choice and a round number is what gets written down.
   #
   # COLOURMAPS ARE THE STARCCM+ ONES, by preference and for continuity with
   # the archive: the old pipeline's simConfig.txt offered exactly `thermal`
-  # and `spectrum`, and every scene was exported with `spectrum` - so a plane
-  # from the old pipeline and one from this pipeline read the same way.
+  # and `spectrum`, and every scene was exported with `spectrum` - so a
+  # plane from the old pipeline and one from this pipeline read the same way.
   #
   # `spectrum` is a rainbow and rainbows band perceptually: equal steps in
   # value are not equal steps in apparent colour. That cost is accepted
-  # deliberately, because a map the team already reads fluently is worth more
-  # than one that is technically better and unfamiliar. It is one line per
-  # field to change if that stops being true.
-  cp:      {limits: [-3.0, 1.0],       colormap: spectrum}
-  cpt:     {limits: [-3.0, 1.0],       colormap: spectrum}
-  U:       {limits: [0.0, 22.5],       colormap: spectrum}   # 1.5 x u_inf
-  vort:    {limits: [0.0, 2000.0],     colormap: spectrum}
-  lambda2: {limits: [-50000.0, 0.0],   colormap: spectrum}
-  yplus:   {limits: [0.0, 5.0],        colormap: spectrum}   # the gate band
+  # deliberately, because a map the team already reads fluently is worth
+  # more than one that is technically better and unfamiliar.
+
+  # -1..+1 is the conventional surface-pressure scale: +1 is the stagnation
+  # point, 0 is freestream static, and negative is suction. Measured on the
+  # 21.6M-cell production run, p1..p99 is -0.68..+0.67, so the band holds
+  # the bulk of the field and uses the full blue-to-red ramp. The old
+  # -3..+1 put every value above the 58% mark of the ramp, which is why
+  # nothing came out blue and so much read as red.
+  cp:      {limits: [-1.0, 1.0],       colormap: spectrum}
+
+  # Total-pressure coefficient: 0 is undisturbed flow and negative is loss,
+  # so the useful range is almost entirely below zero. The ceiling stays at
+  # +1 to match cp.
+  cpt:     {limits: [-2.0, 1.0],       colormap: spectrum}
+
+  # 0..25 m/s against a 15 m/s freestream - a round ceiling at 1.67x u_inf,
+  # which covers the acceleration over the body and the rotating frame's
+  # outboard sweep.
+  U:       {limits: [0.0, 25.0],       colormap: spectrum}
+
+  # Normal-component magnitude. Measured p99 ~3.0e4 1/s, max 6.3e5: the tail
+  # spans four decades, so any linear ceiling clamps the cores. 30000 keeps
+  # the shear layers readable, which is what the field is plotted for.
+  vort:    {limits: [0.0, 30000.0],    colormap: spectrum}
+
+  # Negative lambda2 marks a vortex core, so only the negative half carries
+  # information and the ceiling stays at 0. Measured p1 is -2.4e6; -2e6 is
+  # the round number beside it.
+  lambda2: {limits: [-2000000.0, 0.0], colormap: spectrum}
+
+  # The y+ gate band from post.yplus_min/max. Deliberately the same numbers
+  # the gate judges against, so the picture and the verdict agree.
+  yplus:   {limits: [0.0, 5.0],        colormap: spectrum}
 
 camera:
   # Parallel projection half-height, per slice axis. Never "fit to data".
-  parallel_scale: {x: 0.35, y: 0.35, z: 0.30}
-  # Height above the datum the x- and y-slice cameras look at, so the car is
-  # centred in frame rather than sitting at the bottom above empty road.
-  focus_height: 0.06
+  #
+  # 0.20 m half-height against a car 0.457 m long and 0.130 m tall: the car
+  # fills most of the frame width and about a third of its height, leaving
+  # room for the wake it sheds. 0.35 was the first guess and spent well over
+  # half the frame on empty domain.
+  parallel_scale: {x: 0.20, y: 0.20, z: 0.20}
+  # Height above the datum the x- and y-slice cameras look at.
+  #
+  # Raised from 0.06 to sit the car lower in frame and cut the dead band
+  # under it. The ground is a hard floor at z = 0 - there is simply nothing
+  # to draw below it - so a focal point at half the parallel scale would put
+  # the horizon exactly at the bottom edge. 0.12 stops just short of that,
+  # keeping a little road visible for reference.
+  focus_height: 0.12
   resolution: [1600, 1200]
 
 # off | lic | seeded. Off by default until the cost is measured on a real

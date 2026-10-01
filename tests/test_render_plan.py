@@ -94,7 +94,12 @@ def test_slice_cameras_track_their_own_plane() -> None:
     # Laterally pinned to the datum, so the car does not drift across frame.
     assert first["camera"]["focal"][1] == pytest.approx(DATUM[1])
     assert first["camera"]["focal"][2] == pytest.approx(VIEWS.focus_height)
-    assert first["camera"]["parallel_scale"] == pytest.approx(0.35)
+    # From the views file, not a literal: the camera scale is a tuning knob
+    # and hardcoding it here makes every adjustment look like a regression.
+    # What is being tested is that the plan USES the configured value.
+    assert first["camera"]["parallel_scale"] == pytest.approx(
+        VIEWS.parallel_scale["x"]
+    )
 
 
 def test_a_straight_line_case_carries_no_rotation() -> None:
@@ -120,3 +125,75 @@ def test_the_plan_carries_no_expression_strings() -> None:
     """
     text = json.dumps(_plan(frame={"omega": 3.75, "origin": (0.0, 4.0, 0.0)}))
     assert "coordsX" not in text and "iHat" not in text
+
+
+YAWED = (
+    (0.9834, 0.1815, 0.0),   # x_car, ~10.5 deg of body slip
+    (-0.1815, 0.9834, 0.0),  # y_car
+    (0.0, 0.0, 1.0),         # z_car
+)
+
+
+def _yawed_plan():
+    return build_render_plan(
+        u_inf=15.0, views=VIEWS, datum=DATUM, frame=None,
+        images_dir=Path("results/images"), stamp=STAMP, axes=YAWED,
+    )
+
+
+def test_car_axes_rotate_the_slice_normals() -> None:
+    """A slice must cut across the CAR, not across the domain.
+
+    The CAD carries its attitude baked in - this pose is ~10.5 degrees of
+    body slip - so a plane normal to mesh +x cuts the car at that angle, and
+    a state exported at a different slip angle cuts it at a different one.
+    Plane k of two states would then be two different cuts sharing a name.
+    """
+    first = next(s for s in _yawed_plan()["slices"] if s["axis"] == "x")
+    assert first["normal"][0] == pytest.approx(0.9834, abs=1e-3)
+    assert first["normal"][1] == pytest.approx(0.1815, abs=1e-3)
+
+
+def test_car_axes_rotate_the_surface_cameras() -> None:
+    """`front` means the car's nose, not the domain's -x face."""
+    plan = _yawed_plan()
+    front = next(s for s in plan["surfaces"] if s["name"] == "front")
+    direction = [
+        front["camera"]["focal"][i] - front["camera"]["position"][i]
+        for i in range(3)
+    ]
+    mag = sum(d * d for d in direction) ** 0.5
+    # Looking along -x_car: the camera sits on the nose side and looks back.
+    assert direction[0] / mag == pytest.approx(-0.9834, abs=1e-3)
+    assert direction[1] / mag == pytest.approx(-0.1815, abs=1e-3)
+
+
+def test_slice_offsets_walk_along_the_car_axis() -> None:
+    """The offset must step along the rotated normal, not along mesh x.
+
+    Otherwise the planes stay parallel to the car but march across it at an
+    angle, and the spacing a run reports is not the spacing on the car.
+    """
+    plan = _yawed_plan()
+    at_zero = next(s for s in plan["slices"] if s["name"] == "x_+0.000")
+    at_200 = next(s for s in plan["slices"] if s["name"] == "x_+0.200")
+    step = [at_200["point"][i] - at_zero["point"][i] for i in range(3)]
+    assert step[0] == pytest.approx(0.200 * 0.9834, abs=1e-3)
+    assert step[1] == pytest.approx(0.200 * 0.1815, abs=1e-3)
+
+
+def test_identity_axes_leave_everything_in_mesh_coordinates() -> None:
+    """A case with no measured yaw must be framed exactly as before."""
+    plan = _plan()
+    first = next(s for s in plan["slices"] if s["axis"] == "x")
+    assert first["normal"] == pytest.approx([1.0, 0.0, 0.0])
+
+
+def test_images_go_in_one_flat_directory_per_field_and_axis() -> None:
+    plan = _plan()
+    first = next(s for s in plan["slices"] if s["axis"] == "x")
+    out = next(i["out"] for i in first["images"] if i["field"] == "cp")
+    assert "/cp_x/" in out and "/slices/" not in out
+    surface = next(s for s in plan["surfaces"] if s["name"] == "iso")
+    sout = next(i["out"] for i in surface["images"] if i["field"] == "yplus")
+    assert sout.endswith("surface_yplus/iso.png")

@@ -12,7 +12,7 @@ from simdev.report.results import read_result
 from simdev.run.runner import StageError
 from simdev.run.status import StageStatus, read_status, write_status
 from simdev.stages.common import load_spec
-from simdev.viz.plan import build_render_plan
+from simdev.viz.plan import CAR_AXES_IDENTITY, build_render_plan
 from simdev.viz.sample import find_sample, render_sample_dict, run_sampling
 from simdev.viz.sheet import write_contact_sheet
 from simdev.viz.views import DEFAULT_VIEWS_PATH, load_views
@@ -105,6 +105,11 @@ def images(
         datum=datum,
         frame=prepare_status.detail.get("corner_frame"),
         images_dir=results / "images",
+        # The car's own axes, measured by prepare. Older runs recorded no
+        # such thing, so they fall back to the mesh axes and are framed the
+        # way they always were - a run prepared before this existed still
+        # draws, it just does not get the yaw correction.
+        axes=prepare_status.detail.get("car_axes") or CAR_AXES_IDENTITY,
         stamp={
             "run": run_dir.name,
             "spec_hash": spec.spec_hash()[:8],

@@ -139,7 +139,17 @@ functions
             {
                 type        patch;
                 patches     ({% for p in force_patches %}{{ p }} {% endfor %});
-                interpolate false;
+                // POINT DATA, AND THE SEVEN CAR VIEWS ARE GREY WITHOUT IT.
+                //
+                // `interpolate false` writes one value per FACE - cell data.
+                // The renderer builds cp and U_rel with Calculators and then
+                // calls ColorBy(..., ("POINTS", field)), both of which want
+                // point data, so on a cell-data surface it finds nothing to
+                // colour by and draws the bodywork in flat default grey. No
+                // error: a correctly-lit, correctly-framed, unpainted car.
+                //
+                // The slices above already interpolate for the same reason.
+                interpolate true;
             }
         }
     }

@@ -82,6 +82,27 @@ def _camera(
     }
 
 
+def _rotate(vector: Sequence[float], axes: Sequence[Sequence[float]]) -> list[float]:
+    """Express a car-frame vector in mesh coordinates.
+
+    `axes` is (x_car, y_car, z_car), each a unit vector in mesh coordinates,
+    so this is just v[0]*x_car + v[1]*y_car + v[2]*z_car. With axes = the
+    identity it returns the vector unchanged, which is what a case with no
+    measured yaw gets - one code path, no special casing.
+    """
+    return [
+        sum(vector[k] * axes[k][i] for k in range(3))
+        for i in range(3)
+    ]
+
+
+CAR_AXES_IDENTITY: tuple[tuple[float, float, float], ...] = (
+    (1.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.0, 0.0, 1.0),
+)
+
+
 def build_render_plan(
     u_inf: float,
     views: Views,
@@ -89,13 +110,22 @@ def build_render_plan(
     frame: Mapping[str, Any] | None,
     images_dir: Path,
     stamp: Mapping[str, Any],
+    axes: Sequence[Sequence[float]] = CAR_AXES_IDENTITY,
 ) -> dict[str, Any]:
-    """The whole picture suite, as one JSON-serialisable dict."""
+    """The whole picture suite, as one JSON-serialisable dict.
+
+    `axes` are the car's own axes in mesh coordinates, from
+    viz.datum.car_axes. Every camera direction, every up vector, every slice
+    normal and every offset is expressed in them, so a driving state posed
+    at a different body-slip angle still yields the same view of the car
+    rather than the same view of the mesh. Defaults to the mesh axes.
+    """
     plan: dict[str, Any] = {
         "views_digest": views.digest,
         "resolution": list(views.resolution),
         "streamlines": views.streamlines,
         "datum": list(datum),
+        "car_axes": [list(a) for a in axes],
         "stamp": dict(stamp),
         # The renderer builds U_rel, cp and cpt from these. Straight-line and
         # cornering differ only in these numbers, so there is one code path.
@@ -119,24 +149,34 @@ def build_render_plan(
         for offset in spec_axis.offsets():
             name = slice_name(axis, offset)
 
-            point = list(datum)
-            point[index] = datum[index] + offset
+            # The plane's normal is the CAR's axis, not the mesh's, so an
+            # "x slice" cuts across the car rather than across the domain.
+            normal = _rotate(
+                [1.0 if i == index else 0.0 for i in range(3)], axes
+            )
+            # ...and the offset walks along that same rotated axis from the
+            # datum, so plane k of two differently-posed states cuts the
+            # same place on the car.
+            point = [datum[i] + offset * normal[i] for i in range(3)]
 
             # Focal point tracks the plane along its own normal and stays
             # pinned to the datum in the other two axes, so the car sits in
             # the same pixels in every run and every state.
-            focal = [datum[0], datum[1], datum[2] + views.focus_height]
             if axis == "z":
                 focal = [datum[0], datum[1], datum[2] + offset]
             else:
-                focal[index] = datum[index] + offset
+                focal = [
+                    datum[0] + offset * normal[0],
+                    datum[1] + offset * normal[1],
+                    datum[2] + views.focus_height,
+                ]
 
             plan["slices"].append({
                 "name": name,
                 "axis": axis,
                 "offset": offset,
                 "point": point,
-                "normal": [1.0 if i == index else 0.0 for i in range(3)],
+                "normal": normal,
                 # "sample" is not seeded here: images.py fills it in for
                 # every slice and every surface once it has actually found
                 # the file on disk (find_sample), and overwrites whatever
@@ -146,8 +186,8 @@ def build_render_plan(
                 # a future `simdev compare`, say - would silently ship it.
                 "camera": _camera(
                     (focal[0], focal[1], focal[2]),
-                    direction,
-                    up,
+                    _rotate(direction, axes),
+                    _rotate(up, axes),
                     views.parallel_scale[axis],
                 ),
                 "images": [
@@ -156,7 +196,12 @@ def build_render_plan(
                         # vort on a plane is the component NORMAL to it - the
                         # one that shows streamwise vortices punching through.
                         "component": index if field == "vort" else None,
-                        "out": str(images_dir / "slices" / axis / field / f"{field}_{name}.png"),
+                        # FLAT LAYOUT: one directory per field-and-axis,
+                        # e.g. cp_x/ holding cp_x_+0.120.png. Every
+                        # directory under results/images therefore holds
+                        # pictures and nothing else - no intermediate
+                        # levels to click through to reach one.
+                        "out": str(images_dir / f"{field}_{axis}" / f"{field}_{name}.png"),
                     }
                     for field in SLICE_FIELDS
                 ],
@@ -166,12 +211,20 @@ def build_render_plan(
     for name, (direction, up) in SURFACE_VIEWS.items():
         plan["surfaces"].append({
             "name": name,
-            "camera": _camera(focal, direction, up, max(views.parallel_scale.values())),
+            # Car-frame, like the slices: `front` means the car's nose,
+            # not the domain's -x face, so two states posed at different
+            # body-slip angles give the same view of the car.
+            "camera": _camera(
+                focal,
+                _rotate(direction, axes),
+                _rotate(up, axes),
+                max(views.parallel_scale.values()),
+            ),
             "images": [
                 {
                     "field": field,
                     "component": None,
-                    "out": str(images_dir / "surface" / field / f"{name}.png"),
+                    "out": str(images_dir / f"surface_{field}" / f"{name}.png"),
                 }
                 for field in SURFACE_FIELDS
             ],

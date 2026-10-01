@@ -36,7 +36,7 @@ from simdev.render.context import (
 )
 from simdev.render.render import render_case
 from simdev.run.status import StageStatus, should_skip, write_status
-from simdev.viz.datum import car_datum
+from simdev.viz.datum import car_axes, car_datum
 
 STAGE = "prepare"
 
@@ -578,6 +578,8 @@ def prepare(
     wheels = derive_wheels(spec.geometry.patches, meshes)
 
     datum, datum_reasons = car_datum(meshes, ["Chassis"])
+    axes, car_angles, axes_reasons = car_axes(meshes, ["Chassis"])
+    datum_reasons.extend(axes_reasons)
     warnings.extend(datum_reasons)
 
     lo, hi = _bounds(meshes)
@@ -683,6 +685,20 @@ def prepare(
                 # move the spec hash and invalidate every cached run for a
                 # value nothing upstream of post consumes.
                 "datum": list(datum),
+                # The car's own axes in mesh coordinates, and the yaw they
+                # imply. Measured, like the datum and the wheels above, so it
+                # belongs in the run record rather than in caseSpec.json.
+                # The images stage frames every picture on these: the CAD
+                # carries its attitude baked in (this pose is ~10.5 deg of
+                # body slip), so mesh-axis framing would sit the car skewed
+                # by whatever each driving state happens to be posed at.
+                "car_axes": [list(a) for a in axes],
+                # yaw, pitch and roll of the pose, in degrees. Recorded
+                # for the record rather than consumed: the axes above are
+                # what the cameras use. Two runs whose angles differ are
+                # two different attitudes, which is worth being able to
+                # read off without re-measuring the geometry.
+                "car_angles": car_angles,
                 # The rotating frame, so the images stage can put the pictures
                 # in the car's frame without rebuilding the domain. Two
                 # numbers are cheaper to record than a domain is to
