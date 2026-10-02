@@ -116,3 +116,113 @@ def test_classify_names_stages_that_never_ran(tmp_path: Path) -> None:
     status, error = classify(tmp_path, {"steps": [{"argv": ["run"], "exit": 0}]})
     assert status == "failed"
     assert "solve" in error
+
+
+def test_system_exit_is_caught_and_recorded(tmp_path: Path) -> None:
+    write_job(tmp_path)
+
+    def exit_with_code(argv):
+        raise SystemExit(2)
+
+    outcome = run_job(tmp_path, main=exit_with_code)
+    assert outcome["steps"][0]["exit"] == 2
+    assert read_outcome(tmp_path) == outcome
+
+
+def test_system_exit_none_becomes_zero(tmp_path: Path) -> None:
+    write_job(tmp_path)
+
+    def exit_no_code(argv):
+        raise SystemExit()
+
+    outcome = run_job(tmp_path, main=exit_no_code)
+    assert outcome["steps"][0]["exit"] == 0
+
+
+def test_system_exit_non_int_becomes_two(tmp_path: Path) -> None:
+    write_job(tmp_path)
+
+    def exit_string(argv):
+        raise SystemExit("error message")
+
+    outcome = run_job(tmp_path, main=exit_string)
+    assert outcome["steps"][0]["exit"] == 2
+
+
+def test_missing_job_file_is_an_outcome(tmp_path: Path) -> None:
+    outcome = run_job(tmp_path, main=lambda argv: 0)
+    assert outcome["steps"] == []
+    assert "error" in outcome
+    assert "job file not found" in outcome["error"]
+    assert classify(tmp_path, outcome) == ("failed", outcome["error"])
+
+
+def test_malformed_job_json_is_an_outcome(tmp_path: Path) -> None:
+    (tmp_path / "ui").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "ui" / "job.json").write_text("not valid json {")
+
+    outcome = run_job(tmp_path, main=lambda argv: 0)
+    assert outcome["steps"] == []
+    assert "error" in outcome
+    assert "malformed" in outcome["error"]
+    assert classify(tmp_path, outcome) == ("failed", outcome["error"])
+
+
+def test_unknown_force_from_is_an_outcome(tmp_path: Path) -> None:
+    write_job(tmp_path, force_from="nonexistent_stage")
+
+    outcome = run_job(tmp_path, main=lambda argv: 0)
+    assert outcome["steps"] == []
+    assert "error" in outcome
+    assert "unknown force_from" in outcome["error"]
+    assert classify(tmp_path, outcome) == ("failed", outcome["error"])
+
+
+def test_stale_outcome_json_is_deleted_at_start(tmp_path: Path) -> None:
+    write_job(tmp_path)
+
+    # Write a stale outcome file
+    (tmp_path / "ui").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "ui" / "outcome.json").write_text(json.dumps({"steps": [{"argv": ["stale"], "exit": 1}]}))
+
+    # Verify it exists before
+    assert (tmp_path / "ui" / "outcome.json").is_file()
+
+    # Track when main is first called to check outcome is gone by then
+    outcome_existed_at_call = []
+
+    def fake_main(argv):
+        outcome_existed_at_call.append((tmp_path / "ui" / "outcome.json").is_file())
+        return 0
+
+    outcome = run_job(tmp_path, main=fake_main)
+
+    # The outcome file should not have existed when main was first called
+    assert outcome_existed_at_call[0] is False
+    # And the new outcome should be written
+    assert read_outcome(tmp_path) == outcome
+
+
+def test_first_error_ignores_errors_before_last_marker(tmp_path: Path) -> None:
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "simdev-ui.log").write_text(
+        "$ simdev run ...\nerror: old error from previous run\n"
+        "=== simdev-ui job started ===\n"
+        "$ simdev run ...\nerror: current error\n"
+    )
+
+    # Should find the current error after the marker, not the old one
+    assert first_error(tmp_path) == "current error"
+
+
+def test_first_error_with_multiple_markers_uses_last_one(tmp_path: Path) -> None:
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "simdev-ui.log").write_text(
+        "=== simdev-ui job started ===\n"
+        "error: first attempt error\n"
+        "=== simdev-ui job started ===\n"
+        "error: second attempt error\n"
+    )
+
+    # Should use the second marker
+    assert first_error(tmp_path) == "second attempt error"

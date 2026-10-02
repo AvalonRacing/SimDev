@@ -72,6 +72,7 @@ def build_steps(job: dict[str, Any], run_dir: Path) -> list[list[str]]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temporary, path)
@@ -82,7 +83,39 @@ def run_job(run_dir: Path, main: Callable[[list[str]], int] | None = None) -> di
         from simdev.cli import main
 
     run_dir = Path(run_dir)
-    job = json.loads((run_dir / JOB_FILE).read_text(encoding="utf-8"))
+    outcome_path = run_dir / OUTCOME_FILE
+
+    # Delete any existing stale outcome from a previous attempt so a killed rerun
+    # cannot be judged by the previous outcome.
+    if outcome_path.is_file():
+        outcome_path.unlink()
+
+    # Print job started marker for log parsing - subsequent runs can find this.
+    print("=== simdev-ui job started ===", flush=True)
+
+    # Validate and load job - failure to load is an outcome, not a hang.
+    job_path = run_dir / JOB_FILE
+    if not job_path.is_file():
+        error_outcome = {"steps": [], "error": f"job file not found: {JOB_FILE}"}
+        _write_json(outcome_path, error_outcome)
+        return error_outcome
+
+    try:
+        job = json.loads(job_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        error_outcome = {"steps": [], "error": f"malformed job file: {e}"}
+        _write_json(outcome_path, error_outcome)
+        return error_outcome
+
+    # Validate force_from before trying to use it in build_steps.
+    if job.get("force_from") is not None:
+        try:
+            STAGES.index(job["force_from"])
+        except ValueError:
+            error_outcome = {"steps": [], "error": f"unknown force_from: {job.get('force_from')}"}
+            _write_json(outcome_path, error_outcome)
+            return error_outcome
+
     steps: list[dict[str, Any]] = []
 
     for argv in build_steps(job, run_dir):
@@ -93,6 +126,11 @@ def run_job(run_dir: Path, main: Callable[[list[str]], int] | None = None) -> di
         print(f"$ simdev {' '.join(argv)}", flush=True)
         try:
             code = main(argv)
+        except SystemExit as e:
+            # argparse and other code raises SystemExit(code) - capture it as an outcome.
+            # code can be None (exit()), an int, or anything else; record accordingly.
+            code = 0 if e.code is None else (e.code if isinstance(e.code, int) else 2)
+            traceback.print_exc()
         except Exception:
             # The CLI catches the errors it expects; anything else is a bug,
             # and it is still an outcome rather than a job that never ends.
@@ -106,7 +144,7 @@ def run_job(run_dir: Path, main: Callable[[list[str]], int] | None = None) -> di
             break
 
     outcome = {"steps": steps}
-    _write_json(run_dir / OUTCOME_FILE, outcome)
+    _write_json(outcome_path, outcome)
     return outcome
 
 
@@ -118,11 +156,27 @@ def read_outcome(run_dir: Path) -> dict[str, Any] | None:
 
 
 def first_error(run_dir: Path) -> str | None:
-    """The CLI's own `error: ...` line, which is the best one-line summary."""
+    """The CLI's own `error: ...` line, which is the best one-line summary.
+
+    Searches only the lines after the LAST job started marker, so that
+    stale error lines from a previous attempt are ignored.
+    """
     path = Path(run_dir) / UI_LOG
     if not path.is_file():
         return None
-    for line in reversed(path.read_text(encoding="utf-8", errors="replace").splitlines()):
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+    # Find the last marker line from run_job's startup.
+    marker = "=== simdev-ui job started ==="
+    marker_idx = -1
+    for i, line in enumerate(lines):
+        if marker in line:
+            marker_idx = i
+
+    # Search for error lines only after the last marker.
+    search_start = marker_idx + 1 if marker_idx >= 0 else 0
+    for line in reversed(lines[search_start:]):
         if line.startswith("error: "):
             return line[len("error: "):].strip()
     return None
@@ -138,6 +192,10 @@ def classify(
             "the job ended without recording an outcome - it was killed, "
             "or the service lost track of it"
         )
+
+    # Handle validation errors in outcome (e.g., missing or malformed job.json).
+    if "error" in outcome:
+        return "failed", outcome["error"]
 
     run_dir = Path(run_dir)
     statuses = {stage: read_status(run_dir, stage) for stage in STAGES}
