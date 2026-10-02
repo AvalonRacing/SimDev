@@ -67,8 +67,11 @@ def test_case_and_extension_variants_are_accepted(tmp_path: Path) -> None:
 
 def test_two_files_for_one_part_are_rejected(tmp_path: Path) -> None:
     files = make_files(tmp_path, ["Body.step", "body.STEP", "Wing.step"])
-    with pytest.raises(LibraryError, match="second file for part Body"):
+    with pytest.raises(LibraryError) as error:
         match_parts(files, DESIGN_PARTS, require_all=True)
+    assert "second file for part Body" in str(error.value)
+    assert "Body.step" in str(error.value)
+    assert "body.STEP" in str(error.value)
 
 
 def test_unexpected_and_missing_parts_are_named(tmp_path: Path) -> None:
@@ -240,3 +243,40 @@ def test_assemble_without_a_slot_names_the_pair(stocked: Library, tmp_path: Path
 def test_state_file_is_plain_yaml(stocked: Library) -> None:
     raw = yaml.safe_load((stocked.root / "states" / "corner" / "state.yaml").read_text())
     assert raw == {"description": "4 m left", **CORNER}
+
+
+# --- path traversal protection ------------------------------------------
+
+
+def test_delete_design_rejects_parent_directory_traversal(lib: Library) -> None:
+    """Ensure delete_design('..') cannot reach the CAD root."""
+    lib.create_design("v01")
+    before = sorted(lib.designs_dir.iterdir())
+    with pytest.raises(LibraryError, match="no design"):
+        lib.delete_design("..")
+    assert sorted(lib.designs_dir.iterdir()) == before
+
+
+def test_delete_design_rejects_empty_name(lib: Library) -> None:
+    """Ensure delete_design('') cannot reach designs/."""
+    lib.create_design("v01")
+    before = sorted(lib.designs_dir.iterdir())
+    with pytest.raises(LibraryError, match="no design"):
+        lib.delete_design("")
+    assert sorted(lib.designs_dir.iterdir()) == before
+
+
+def test_delete_slot_rejects_invalid_state_name(stocked: Library) -> None:
+    """Ensure delete_slot('v01', '..') cannot escape the state directory."""
+    before = list(stocked.root.glob("**/*"))
+    with pytest.raises(LibraryError, match="no Body and Wing"):
+        stocked.delete_slot("v01", "..")
+    after = list(stocked.root.glob("**/*"))
+    assert before == after
+
+
+def test_state_rejects_path_traversal(lib: Library, tmp_path: Path) -> None:
+    """Ensure state('..') cannot reach outside states/."""
+    lib.create_state("corner", "", CORNER, state_files(tmp_path))
+    with pytest.raises(LibraryError, match="no driving state"):
+        lib.state("../states/corner")

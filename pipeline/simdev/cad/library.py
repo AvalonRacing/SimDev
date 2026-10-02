@@ -79,6 +79,7 @@ def match_parts(
     """
     lookup = {part.lower(): part for part in expected}
     matched: dict[str, Path] = {}
+    matched_files: dict[str, str] = {}  # part -> filename
     problems: list[str] = []
 
     for filename, path in files.items():
@@ -91,9 +92,11 @@ def match_parts(
                 f"{filename}: not one of the expected parts ({', '.join(expected)})"
             )
         elif part in matched:
-            problems.append(f"{filename}: a second file for part {part}")
+            first_file = matched_files[part]
+            problems.append(f"{filename}: a second file for part {part} (also {first_file})")
         else:
             matched[part] = Path(path)
+            matched_files[part] = filename
 
     if require_all:
         missing = [part for part in expected if part not in matched]
@@ -152,6 +155,8 @@ class Library:
         ]
 
     def state(self, name: str) -> State:
+        if not NAME_PATTERN.fullmatch(name or ""):
+            raise LibraryError(f"no driving state {name!r}")
         path = self.states_dir / name / STATE_FILE
         if not path.is_file():
             raise LibraryError(f"no driving state {name!r}")
@@ -301,12 +306,16 @@ class Library:
     # --- designs and slots ---------------------------------------------------
 
     def _require_design(self, design: str) -> Path:
+        if not NAME_PATTERN.fullmatch(design or ""):
+            raise LibraryError(f"no design {design!r}")
         folder = self.designs_dir / design
         if not folder.is_dir():
             raise LibraryError(f"no design {design!r}")
         return folder
 
     def _require_slot(self, design: str, state: str) -> Path:
+        if not NAME_PATTERN.fullmatch(state or ""):
+            raise LibraryError(f"design {design!r} has no Body and Wing for state {state!r}")
         slot = self._require_design(design) / state
         if not slot.is_dir():
             raise LibraryError(f"design {design!r} has no Body and Wing for state {state!r}")
