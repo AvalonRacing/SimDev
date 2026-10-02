@@ -39,7 +39,8 @@
   {% if job and job.status == 'running' %}
   <form method="post" action="/jobs/{{ job.id }}/cancel" onsubmit='return confirm({{ ("Cancel " ~ name ~ "?")|tojson }})'><button class="danger">Cancel</button></form>
   {% endif %}
-  {% if not active %}
+  {# Runs started from the shell have no job and are read-only here. #}
+  {% if job and not active %}
   <form method="post" action="/runs/{{ name }}/strip" onsubmit='return confirm({{ ("Delete the mesh and field data of " ~ name ~ "? Results, logs and plots are kept.")|tojson }})'><button>Strip mesh</button></form>
   <form method="post" action="/runs/{{ name }}/delete" onsubmit='return confirm({{ ("Delete " ~ name ~ " completely?")|tojson }})'><button class="danger">Delete run</button></form>
   {% endif %}

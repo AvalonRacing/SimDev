@@ -100,8 +100,24 @@ def test_strip_and_delete_are_refused_while_running(tmp_path: Path) -> None:
 def test_delete_removes_the_run(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         run_dir = fake_run(tmp_path / "runs")
+        add_job(app, "r1", "failed")
         client.post("/runs/r1/delete", follow_redirects=False)
         assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("action", ["strip", "delete"])
+def test_a_run_started_from_the_shell_is_read_only(tmp_path: Path, action: str) -> None:
+    with make_client(tmp_path) as (client, app):
+        run_dir = fake_run(tmp_path / "runs")
+        mesh = run_dir / "constant" / "polyMesh"
+        mesh.mkdir(parents=True)
+        (mesh / "points").write_text("()")
+        response = client.post(f"/runs/r1/{action}", follow_redirects=True)
+        assert "started from the shell" in response.text
+        assert (mesh / "points").is_file()
+        page = client.get("/runs/r1").text
+        assert "/runs/r1/strip" not in page
+        assert "/runs/r1/delete" not in page
 
 
 def test_a_hostile_job_name_cannot_break_out_of_the_confirm_dialogs(tmp_path: Path) -> None:

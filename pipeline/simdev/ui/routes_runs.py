@@ -104,12 +104,28 @@ def run_file(request: Request, name: str, rel: str):
         raise HTTPException(status_code=404) from None
 
 
+SHELL_RUN = "this run was started from the shell; it is read-only here"
+
+
+def _refusal(job) -> str | None:
+    """Why the UI may not change this run, or None if it may.
+
+    A run without a job was started from the shell, and a CLI solve may be
+    writing to it right now, so the UI only ever reads it (spec 5.1).
+    """
+    if job is None:
+        return SHELL_RUN
+    if _active(job):
+        return "the run is still queued or running"
+    return None
+
+
 def _requeue(request: Request, name: str, force_from: str | None):
     _run_dir(request, name)
     queue = ctx(request).queue
     job = queue.latest_for(name)
     if job is None:
-        return back(f"/runs/{name}", error="only runs queued from this UI can be resumed here")
+        return back(f"/runs/{name}", error=SHELL_RUN)
     try:
         queue.requeue(job.id, force_from=force_from)
     except QueueError as error:
@@ -132,8 +148,8 @@ def rerun(request: Request, name: str, stage: str = Form(...)):
 @router.post("/runs/{name}/strip")
 def strip(request: Request, name: str):
     run_dir = _run_dir(request, name)
-    if _active(ctx(request).queue.latest_for(name)):
-        return back(f"/runs/{name}", error="the run is still queued or running")
+    if refusal := _refusal(ctx(request).queue.latest_for(name)):
+        return back(f"/runs/{name}", error=refusal)
     freed = strip_mesh(run_dir)
     return back(f"/runs/{name}", message=f"mesh stripped, {freed / 1e9:.1f} GB freed")
 
@@ -141,7 +157,7 @@ def strip(request: Request, name: str):
 @router.post("/runs/{name}/delete")
 def delete(request: Request, name: str):
     run_dir = _run_dir(request, name)
-    if _active(ctx(request).queue.latest_for(name)):
-        return back(f"/runs/{name}", error="the run is still queued or running")
+    if refusal := _refusal(ctx(request).queue.latest_for(name)):
+        return back(f"/runs/{name}", error=refusal)
     delete_run(run_dir)
     return back("/runs", message=f"deleted {name}")
