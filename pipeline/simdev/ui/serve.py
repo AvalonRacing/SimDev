@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -42,6 +43,26 @@ def resolve_host(
     return lines[0].strip()
 
 
+def tailscale_names(
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> list[str]:
+    """This machine's MagicDNS name and its short form, or none if unknown."""
+    exe = which("tailscale") or (str(SNAP_TAILSCALE) if SNAP_TAILSCALE.exists() else None)
+    if exe is None:
+        return []
+    try:
+        result = run([exe, "status", "--json"], capture_output=True, text=True, timeout=10)
+        name = json.loads(result.stdout)["Self"]["DNSName"].rstrip(".")
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+    return [name, name.split(".")[0]] if name else []
+
+
+def allowed_hosts(address: str, port: int, names: list[str]) -> list[str]:
+    return [address, f"{address}:{port}", "localhost", "127.0.0.1", *names]
+
+
 def serve(
     host: str | None,
     port: int,
@@ -67,5 +88,6 @@ def serve(
         db_path=Path(db_path).expanduser(),
     )
     print(f"SimDev UI on http://{address}:{port}", flush=True)
-    uvicorn.run(create_app(config), host=address, port=port, log_level="info")
+    hosts = allowed_hosts(address, port, tailscale_names())
+    uvicorn.run(create_app(config, allowed_hosts=hosts), host=address, port=port, log_level="info")
     return 0

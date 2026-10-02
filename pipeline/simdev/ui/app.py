@@ -7,9 +7,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.templating import Jinja2Templates
 
 from simdev.cad.checks import default_library
@@ -20,6 +23,37 @@ from simdev.ui.queue import Job, Queue
 from simdev.ui.worker import Worker, default_command
 
 HERE = Path(__file__).parent
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _endpoint(netloc: str, scheme: str) -> tuple[str, int | None] | None:
+    """(host, port) of a netloc, with the scheme's default port filled in."""
+    try:
+        parts = urlsplit(f"//{netloc}")
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.hostname:
+        return None
+    return parts.hostname.lower(), port or DEFAULT_PORTS.get(scheme)
+
+
+def cross_site(request: Request) -> bool:
+    """Whether a request was sent by a page from another site.
+
+    There are no logins, so any page open in a browser on the tailnet could
+    otherwise post a form here and delete runs. Browsers send Origin (or at
+    least Referer) with such requests; a request carrying neither did not come
+    from a web page (curl, the test client) and is allowed.
+    """
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if source is None:
+        return False
+    sent_from = urlsplit(source)
+    origin = _endpoint(sent_from.netloc, sent_from.scheme)
+    target = _endpoint(request.headers.get("host", ""), request.url.scheme)
+    return origin is None or origin != target
 
 
 def duration(seconds: float | None) -> str:
@@ -48,7 +82,11 @@ def create_app(
     config: UIConfig,
     library: Library | None = None,
     worker_command: Callable[[Job], list[str]] | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> FastAPI:
+    """allowed_hosts: the Host names the server answers to (None: any). The
+    server sets it so a DNS-rebinding page cannot reach the UI under a name
+    of its own; the tests leave it unset."""
     queue = Queue(config.db_path)
     library = library or default_library(config.cad_root, config.case_path)
     worker = Worker(queue, command=worker_command or default_command, cad_root=config.cad_root)
@@ -64,6 +102,15 @@ def create_app(
 
     app = FastAPI(title="SimDev", lifespan=lifespan)
     app.state.ctx = Context(config, queue, library, worker, templates)
+
+    @app.middleware("http")
+    async def same_origin_only(request: Request, call_next):
+        if request.method not in SAFE_METHODS and cross_site(request):
+            return PlainTextResponse("cross-site request refused", status_code=403)
+        return await call_next(request)
+
+    if allowed_hosts is not None:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     for router in (routes_queue.router, routes_runs.router, routes_cad.router, routes_system.router):
         app.include_router(router)

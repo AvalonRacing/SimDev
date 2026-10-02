@@ -44,7 +44,7 @@ def stock_library(root: Path, tmp_path: Path) -> Library:
 
 
 @contextmanager
-def make_client(tmp_path: Path, start_worker: bool = False, worker_command=None):
+def make_client(tmp_path: Path, start_worker: bool = False, worker_command=None, **app_kwargs):
     from fastapi.testclient import TestClient
 
     from simdev.ui.app import create_app
@@ -58,6 +58,6 @@ def make_client(tmp_path: Path, start_worker: bool = False, worker_command=None)
         db_path=tmp_path / "ui.db",
         start_worker=start_worker,
     )
-    app = create_app(config, library=library, worker_command=worker_command)
+    app = create_app(config, library=library, worker_command=worker_command, **app_kwargs)
     with TestClient(app) as client:
         yield client, app
