@@ -1,0 +1,20 @@
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<label>Run name
+  <input name="run_name" value="{{ run_name }}" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*">
+</label>
+{% if fields %}
+<fieldset>
+  <legend>Overrides <span class="muted">pre-filled from {{ state }} and {{ profile }}; only changed values are applied</span></legend>
+  {% for f in fields %}
+  <label>{{ f.label }}
+    {% if f.choices %}
+    <select name="{{ f.key }}">
+      {% for c in f.choices %}<option {% if c == f.value %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    {% else %}
+    <input name="{{ f.key }}" value="{{ f.value if f.value is not none else '' }}" inputmode="decimal">
+    {% endif %}
+  </label>
+  {% endfor %}
+</fieldset>
+{% endif %}

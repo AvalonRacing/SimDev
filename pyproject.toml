@@ -29,6 +29,16 @@ dependencies = [
     "gmsh>=4.11",
 ]
 
+[project.optional-dependencies]
+# The web UI (simdev ui). Optional so the pipeline itself stays free of a web
+# stack; httpx is here because FastAPI's TestClient needs it.
+ui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+]
+
 [project.scripts]
 simdev = "simdev.cli:main"
 
@@ -39,7 +49,7 @@ package-dir = {"" = "pipeline"}
 where = ["pipeline"]
 
 [tool.setuptools.package-data]
-simdev = ["render/templates/*.jinja"]
+simdev = ["render/templates/*.jinja", "ui/templates/*.html", "ui/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

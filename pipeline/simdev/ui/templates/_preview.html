@@ -1,0 +1,13 @@
+{% if error %}
+<div class="error">{{ error }}</div>
+{% else %}
+<div class="card">
+  <h3>Resolved</h3>
+  <dl class="grid">
+    {% for k, v in numbers.items() %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
+  </dl>
+  <p class="muted">Overrides: {{ overrides|overrides }}</p>
+  {% for w in warnings %}<div class="warn">{{ w }}</div>{% endfor %}
+  <details><summary>Full resolved spec</summary><pre>{{ spec_json }}</pre></details>
+</div>
+{% endif %}

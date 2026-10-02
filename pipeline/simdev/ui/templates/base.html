@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}SimDev{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+{% block head %}{% endblock %}
+</head>
+<body>
+<nav>
+  <strong>SimDev</strong>
+  <a href="/">Queue</a>
+  <a href="/runs/new">New run</a>
+  <a href="/runs">Runs</a>
+  <a href="/cad">CAD library</a>
+  <a href="/system">System</a>
+</nav>
+<main>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if message %}<div class="ok">{{ message }}</div>{% endif %}
+  {% block main %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<section id="queue" hx-get="/partials/queue" hx-trigger="every 5s" hx-swap="outerHTML">
+  <h2>Running</h2>
+  {% for item in running %}
+  <div class="card">
+    <div class="row">
+      <a href="/runs/{{ item.job.run_name }}"><strong>{{ item.job.run_name }}</strong></a>
+      <span class="muted">{{ item.job.design }} · {{ item.job.state }} · {{ item.job.profile }} · {{ item.job.n_ranks }} ranks · started {{ item.job.started_at|clock }}</span>
+      <form method="post" action="/jobs/{{ item.job.id }}/cancel"
+            onsubmit="return confirm('Cancel {{ item.job.run_name }}? The solver will be stopped.')">
+        <button class="danger">Cancel</button>
+      </form>
+    </div>
+    <ol class="stagebar">
+      {% for s in item.stages %}<li class="{{ s.state }}">{{ s.name }}</li>{% endfor %}
+    </ol>
+    {% if item.progress.iteration %}
+    <div class="muted">
+      iteration {{ item.progress.iteration }}{% if item.max_iterations %} / {{ item.max_iterations }}{% endif %}
+      {% if item.progress.seconds_per_iteration %}
+        · {{ '%.1f'|format(item.progress.seconds_per_iteration) }} s/iter
+        · ETA {{ item.progress.eta_seconds|duration }}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Nothing running.</p>
+  {% endfor %}
+
+  <h2>Queued</h2>
+  {% if queued %}
+  <table>
+    <tr><th>#</th><th>Run</th><th>Design</th><th>State</th><th>Profile</th><th>Ranks</th><th>Overrides</th><th></th></tr>
+    {% for job in queued %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ job.run_name }}{% if job.force_from %} <span class="badge">from {{ job.force_from }}</span>{% endif %}</td>
+      <td>{{ job.design }}</td><td>{{ job.state }}</td><td>{{ job.profile }}</td>
+      <td>{{ job.n_ranks }}</td><td class="muted">{{ job.overrides|overrides }}</td>
+      <td class="actions">
+        <form method="post" action="/jobs/{{ job.id }}/move"><input type="hidden" name="direction" value="up"><button title="Move up">↑</button></form>
+        <form method="post" action="/jobs/{{ job.id }}/move"><input type="hidden" name="direction" value="down"><button title="Move down">↓</button></form>
+        {% if not job.force_from %}<a class="button" href="/runs/new?job={{ job.id }}">Edit</a>{% endif %}
+        <form method="post" action="/jobs/{{ job.id }}/cancel"><button>Remove</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Queue is empty. <a href="/runs/new">Queue a run</a>.</p>
+  {% endif %}
+
+  <h2>Recent</h2>
+  {% if finished %}
+  <table>
+    <tr><th>Run</th><th>Result</th><th>Finished</th><th>Note</th></tr>
+    {% for job in finished %}
+    <tr>
+      <td><a href="/runs/{{ job.run_name }}">{{ job.run_name }}</a></td>
+      <td><span class="badge {{ job.status }}">{{ {'done': '✓ converged', 'gate_failed': '⚠ gate failed', 'failed': '✗ failed', 'cancelled': 'cancelled'}[job.status] }}</span></td>
+      <td>{{ job.finished_at|clock }}</td>
+      <td class="muted">{{ job.error or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No finished runs yet.</p>
+  {% endif %}
+</section>

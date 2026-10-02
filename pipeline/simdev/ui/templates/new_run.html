@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}New run · SimDev{% endblock %}
+{% block main %}
+<h1>{% if job %}Edit queued run{% else %}New run{% endif %}</h1>
+{% if not pairs %}
+<p>No design has Body and Wing for any driving state yet. <a href="/cad">Upload CAD first</a>.</p>
+{% else %}
+<form method="post" action="/runs" id="run-form" class="stack">
+  {% if job %}<input type="hidden" name="job_id" value="{{ job.id }}">{% endif %}
+  <label>Design · driving state
+    <select name="pair" hx-get="/runs/new/fields" hx-target="#fields" hx-include="#run-form">
+      {% for d, s in pairs %}
+      <option value="{{ d }}/{{ s }}" {% if (d, s) == selected %}selected{% endif %}>{{ d }} · {{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Resolution profile
+    <select name="profile" hx-get="/runs/new/fields" hx-target="#fields" hx-include="#run-form">
+      {% for p in profiles %}<option {% if p == profile %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+  </label>
+  <div id="fields">{% include "_fields.html" %}</div>
+  <div class="row">
+    <button type="button" hx-post="/runs/preview" hx-include="#run-form" hx-target="#preview">Preview</button>
+    <button type="submit" class="primary">{% if job %}Save{% else %}Queue{% endif %}</button>
+  </div>
+</form>
+<div id="preview"></div>
+{% endif %}
+{% endblock %}
