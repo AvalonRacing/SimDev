@@ -1,0 +1,14 @@
+<div id="stages" {% if live %}hx-get="/runs/{{ name }}/partials/stages" hx-trigger="every 10s" hx-swap="outerHTML"{% endif %}>
+  <table>
+    <tr><th>Stage</th><th>State</th><th>Took</th><th>Finished</th><th>Reasons</th></tr>
+    {% for s in stages %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td><span class="badge {{ s.state }}">{{ s.state }}</span></td>
+      <td>{{ s.seconds|duration }}</td>
+      <td>{{ s.finished_at|clock }}</td>
+      <td>{% for r in s.reasons %}<div>{{ r }}</div>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>

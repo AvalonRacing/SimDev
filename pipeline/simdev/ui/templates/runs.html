@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Runs · SimDev{% endblock %}
+{% block main %}
+<h1>Runs</h1>
+<p class="muted">Every run directory under the runs folder, including runs started from the shell.</p>
+<table>
+  <tr><th>Run</th><th>Stages</th><th>Job</th></tr>
+  {% for row in rows %}
+  <tr>
+    <td><a href="/runs/{{ row.name }}">{{ row.name }}</a></td>
+    <td><ol class="stagebar">{% for s in row.stages %}<li class="{{ s.state }}">{{ s.name }}</li>{% endfor %}</ol></td>
+    <td>{% if row.job %}<span class="badge {{ row.job.status }}">{{ row.job.status }}</span>{% else %}<span class="muted">shell</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No runs yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

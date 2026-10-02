@@ -38,7 +38,7 @@ def ctx(request: Request) -> Context:
     return request.app.state.ctx
 
 
-def render(request: Request, name: str, status_code: int = 200, **values: Any):
+def render(request: Request, name: str, /, status_code: int = 200, **values: Any):
     return ctx(request).templates.TemplateResponse(
         request, name, values, status_code=status_code
     )

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · SimDev{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="/static/run.js" defer></script>
+{% endblock %}
+{% block main %}
+<h1>{{ name }}</h1>
+{% if job %}
+<p class="muted">
+  {{ job.design }} · {{ job.state }} · {{ job.profile }} · {{ job.n_ranks }} ranks
+  · overrides: {{ job.overrides|overrides }}
+  · <span class="badge {{ job.status }}">{{ job.status }}</span>
+  {% if job.error %}<br>{{ job.error }}{% endif %}
+</p>
+{% else %}
+<p class="muted">Started from the shell.</p>
+{% endif %}
+
+{% for e in errors %}
+<div class="error">
+  <strong>{{ e.source }}</strong>: {{ e.message }}
+  {% if e.context %}<pre>{{ e.context|join('\n') }}</pre>{% endif %}
+</div>
+{% endfor %}
+
+<h2>Stages</h2>
+{% include "_stages.html" %}
+
+<div class="row">
+  {% if job and not active %}
+  <form method="post" action="/runs/{{ name }}/resume"><button>Resume</button></form>
+  <form method="post" action="/runs/{{ name }}/rerun" class="row">
+    <select name="stage">{% for s in stage_names %}<option>{{ s }}</option>{% endfor %}</select>
+    <button>Re-run from stage</button>
+  </form>
+  {% endif %}
+  {% if job and job.status == 'running' %}
+  <form method="post" action="/jobs/{{ job.id }}/cancel" onsubmit='return confirm({{ ("Cancel " ~ name ~ "?")|tojson }})'><button class="danger">Cancel</button></form>
+  {% endif %}
+  {% if not active %}
+  <form method="post" action="/runs/{{ name }}/strip" onsubmit='return confirm({{ ("Delete the mesh and field data of " ~ name ~ "? Results, logs and plots are kept.")|tojson }})'><button>Strip mesh</button></form>
+  <form method="post" action="/runs/{{ name }}/delete" onsubmit='return confirm({{ ("Delete " ~ name ~ " completely?")|tojson }})'><button class="danger">Delete run</button></form>
+  {% endif %}
+</div>
+
+<h2>Forces</h2>
+<div id="plots" data-run="{{ name }}" data-live="{{ 'true' if live else 'false' }}">
+  <div class="row">
+    <label class="row">Show <select id="component"><option value="">whole car</option></select></label>
+    <span id="gate" class="muted"></span>
+  </div>
+  <div id="force-plot" class="plot"></div>
+  <h3>Residuals</h3>
+  <div id="residual-plot" class="plot"></div>
+</div>
+
+<h2>Images</h2>
+{% if images.summary %}
+<div class="gallery">
+  {% for rel in images.summary %}
+  <figure><a href="/runs/{{ name }}/files/{{ rel }}" target="_blank"><img loading="lazy" src="/runs/{{ name }}/files/{{ rel }}"></a>
+  <figcaption>{{ rel.split('/')[-1] }}</figcaption></figure>
+  {% endfor %}
+</div>
+{% endif %}
+{% for group, pictures in images.groups.items() %}
+<details>
+  <summary>{{ group }} <span class="muted">({{ pictures|length }})</span></summary>
+  <div class="gallery">
+    {% for rel in pictures %}
+    <figure><a href="/runs/{{ name }}/files/{{ rel }}" target="_blank"><img loading="lazy" src="/runs/{{ name }}/files/{{ rel }}"></a>
+    <figcaption>{{ rel.split('/')[-1] }}</figcaption></figure>
+    {% endfor %}
+  </div>
+</details>
+{% else %}
+{% if not images.summary %}<p class="muted">No images yet.</p>{% endif %}
+{% endfor %}
+
+<h2>Logs</h2>
+<div class="tabs">
+  {% for log in logs %}
+  <button hx-get="/runs/{{ name }}/logs/{{ log }}" hx-target="#log">{{ log }}</button>
+  {% endfor %}
+</div>
+<div id="log"></div>
+{% endblock %}

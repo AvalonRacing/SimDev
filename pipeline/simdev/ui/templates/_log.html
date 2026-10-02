@@ -1,0 +1,6 @@
+<div class="row">
+  <strong>{{ log }}</strong>
+  <span class="muted">last {{ lines|length }} lines</span>
+  <a href="/runs/{{ name }}/files/logs/{{ log }}" target="_blank">full file</a>
+</div>
+<pre>{{ lines|join('\n') }}</pre>
