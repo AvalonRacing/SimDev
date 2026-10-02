@@ -53,6 +53,7 @@ simdev = ["render/templates/*.jinja", "ui/templates/*.html", "ui/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
 # The repo root, so `pytest` alone works from a clean checkout.
 #
 # Three test modules import sibling packages by their root-relative names -

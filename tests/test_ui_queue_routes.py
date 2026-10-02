@@ -60,6 +60,7 @@ def test_preview_shows_the_resolved_numbers(tmp_path: Path) -> None:
 def test_editing_a_job_that_started_is_refused(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         client.post("/runs", data=FORM, follow_redirects=False)
+        (tmp_path / "runs" / "r1").mkdir(parents=True)
         queue = app.state.ctx.queue
         job = queue.latest_for("r1")
         queue.mark_running(job.id, 1, 1)
@@ -79,3 +80,18 @@ def test_reorder_and_cancel(tmp_path: Path) -> None:
         assert [j.run_name for j in queue.queued()] == ["r2", "r1"]
         client.post(f"/jobs/{r2.id}/cancel", follow_redirects=False)
         assert queue.get(r2.id).status == "cancelled"
+
+
+def test_a_hostile_run_name_cannot_break_out_of_the_confirm_dialog(tmp_path: Path) -> None:
+    from simdev.ui.queue import JobSpec
+
+    name = "x');alert(1);('"
+    with make_client(tmp_path) as (client, app):
+        queue = app.state.ctx.queue
+        job = queue.enqueue(JobSpec(name, str(tmp_path / "runs" / "x"), "c", "v01", "corner", "car_dev", 4))
+        queue.mark_running(getattr(job, "id", job), 1, 1)
+        for url in ("/", "/partials/queue"):
+            page = client.get(url).text
+            assert "confirm('Cancel x');alert(1)" not in page
+            assert "confirm(&#39;" not in page
+            assert "\\u0027);alert(1);(\\u0027" in page

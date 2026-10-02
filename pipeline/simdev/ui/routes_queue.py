@@ -172,6 +172,10 @@ async def queue_run(request: Request):
     job_id = int(form["job_id"]) if form.get("job_id") else None
     name = str(form.get("run_name") or "").strip()
     try:
+        if job_id is not None:
+            existing = c.queue.get(job_id)
+            if existing is None or existing.status != "queued":
+                raise QueueError("this job has already started and can no longer be edited")
         design, state, profile, overrides, spec, _ = _build(c, form)
         run_dir = forms.check_run_name(name, c.config.runs_root, c.queue, exclude_id=job_id)
         job_spec = JobSpec(

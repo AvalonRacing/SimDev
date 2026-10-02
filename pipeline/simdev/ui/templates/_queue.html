@@ -6,7 +6,7 @@
       <a href="/runs/{{ item.job.run_name }}"><strong>{{ item.job.run_name }}</strong></a>
       <span class="muted">{{ item.job.design }} · {{ item.job.state }} · {{ item.job.profile }} · {{ item.job.n_ranks }} ranks · started {{ item.job.started_at|clock }}</span>
       <form method="post" action="/jobs/{{ item.job.id }}/cancel"
-            onsubmit="return confirm('Cancel {{ item.job.run_name }}? The solver will be stopped.')">
+            onsubmit='return confirm({{ ("Cancel " ~ item.job.run_name ~ "? The solver will be stopped.")|tojson }})'>
         <button class="danger">Cancel</button>
       </form>
     </div>
