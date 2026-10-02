@@ -77,6 +77,7 @@ def resolve(
     profile: str,
     wall_treatment: str | None = None,
     overrides: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
 ) -> CaseSpec:
     """Merge defaults, resolution profile, wall profile, case, state, overrides."""
     if profile not in RESOLUTION_PROFILES:
@@ -87,6 +88,11 @@ def resolve(
     # Before the wall profile is chosen, because a driving state may set the
     # wall treatment along with everything else it changes.
     case = apply_driving_state(case)
+
+    # A state from the CAD library (CAD/states/<name>/state.yaml) sits at the
+    # same point in the merge as an inline driving state, for the same reason.
+    if state:
+        case = deep_merge(case, state)
 
     merged = deep_merge(DEFAULTS, RESOLUTION_PROFILES[profile])
 
@@ -119,6 +125,7 @@ def load_case(
     profile: str,
     wall_treatment: str | None = None,
     overrides: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
 ) -> CaseSpec:
     case = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    return resolve(case, profile, wall_treatment, overrides)
+    return resolve(case, profile, wall_treatment, overrides, state)

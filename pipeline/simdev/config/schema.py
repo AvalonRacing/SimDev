@@ -676,6 +676,21 @@ class GeometryConfig(BaseModel):
         return seen
 
 
+class CadProvenance(BaseModel):
+    """Which library entries a run's geometry was assembled from.
+
+    Recorded, never read back to find files: prepare meshes the run's own
+    copy in <run_dir>/cad. The digests are what make a result traceable to
+    the exact Body.step it came from after the library entry has been
+    replaced - and, being in the spec, they put a changed part into the hash,
+    so prepare cannot skip over new CAD.
+    """
+
+    design: str
+    state: str
+    parts: dict[str, str]
+
+
 class CaseSpec(BaseModel):
     """Fully resolved case. Every value explicit; no downstream defaults."""
 
@@ -685,6 +700,8 @@ class CaseSpec(BaseModel):
     # reads this. It is here so a result can be traced to a state by name
     # without diffing the whole spec.
     driving_state: str | None = None
+    # Set only for runs built from the CAD library (--design/--state).
+    cad: CadProvenance | None = None
     flow: FlowConfig
     ground: GroundConfig
     physics: PhysicsConfig
