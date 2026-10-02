@@ -52,3 +52,24 @@ def test_system_page_and_settings(tmp_path: Path) -> None:
                                follow_redirects=True)
         assert "between" in response.text
         assert app.state.ctx.queue.setting("core_budget") == 40
+
+
+def test_the_budget_cannot_drop_below_a_queued_job(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("fastapi")
+    from simdev.ui.queue import JobSpec
+    from tests.ui_support import make_client
+
+    monkeypatch.setattr("os.cpu_count", lambda: 64)
+    with make_client(tmp_path) as (client, app):
+        queue = app.state.ctx.queue
+        queue.enqueue(JobSpec("narrow", str(tmp_path / "runs" / "narrow"),
+                              "case.yaml", "v01", "corner", "car_dev", 8))
+        queue.enqueue(JobSpec("wide", str(tmp_path / "runs" / "wide"),
+                              "case.yaml", "v01", "corner", "car_dev", 32))
+        response = client.post("/system/settings", data={"core_budget": "16", "max_parallel": "1"},
+                               follow_redirects=True)
+        assert "below the 32 cores the queued run wide needs" in response.text
+        assert queue.setting("core_budget") == 40
+        client.post("/system/settings", data={"core_budget": "32", "max_parallel": "1"},
+                    follow_redirects=False)
+        assert queue.setting("core_budget") == 32

@@ -95,3 +95,33 @@ def test_a_hostile_run_name_cannot_break_out_of_the_confirm_dialog(tmp_path: Pat
             assert "confirm('Cancel x');alert(1)" not in page
             assert "confirm(&#39;" not in page
             assert "\\u0027);alert(1);(\\u0027" in page
+
+
+def test_a_run_wider_than_the_core_budget_is_refused(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        app.state.ctx.queue.set_setting("core_budget", 2)
+        response = client.post("/runs", data=FORM)
+        assert response.status_code == 400
+        assert "needs 4 cores but the core budget is 2" in response.text
+        assert app.state.ctx.queue.queued() == []
+
+
+def test_editing_a_job_beyond_the_core_budget_is_refused(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        client.post("/runs", data=FORM, follow_redirects=False)
+        job = app.state.ctx.queue.latest_for("r1")
+        app.state.ctx.queue.set_setting("core_budget", 6)
+        response = client.post("/runs", data={**FORM, "job_id": str(job.id), "solve.n_ranks": "8"})
+        assert response.status_code == 400
+        assert "needs 8 cores but the core budget is 6" in response.text
+        assert app.state.ctx.queue.get(job.id).n_ranks == 4
+
+
+def test_a_queued_job_wider_than_the_budget_says_why_it_waits(tmp_path: Path) -> None:
+    from simdev.ui.queue import JobSpec
+
+    with make_client(tmp_path) as (client, app):
+        # A resumed job keeps the width it was queued with, whatever the budget is now.
+        app.state.ctx.queue.enqueue(JobSpec("wide", str(tmp_path / "runs" / "wide"),
+                                            "case.yaml", "v01", "corner", "car_dev", 64))
+        assert "needs 64 cores, budget is 40" in client.get("/").text

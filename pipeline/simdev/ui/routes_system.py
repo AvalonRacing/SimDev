@@ -38,6 +38,15 @@ def settings(request: Request, core_budget: int = Form(...), max_parallel: int =
     if not 1 <= max_parallel <= MAX_PARALLEL:
         return back("/system", error=f"parallel runs must be between 1 and {MAX_PARALLEL}")
     queue = ctx(request).queue
+    # A queued job wider than the budget would never start; refuse rather
+    # than strand it.
+    widest = max(queue.queued(), key=lambda job: job.n_ranks, default=None)
+    if widest is not None and widest.n_ranks > core_budget:
+        return back(
+            "/system",
+            error=f"core budget {core_budget} is below the {widest.n_ranks} cores the "
+            f"queued run {widest.run_name} needs",
+        )
     queue.set_setting("core_budget", core_budget)
     queue.set_setting("max_parallel", max_parallel)
     return back("/system", message="settings saved")

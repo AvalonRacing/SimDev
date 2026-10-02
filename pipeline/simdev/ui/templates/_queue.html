@@ -36,7 +36,7 @@
       <td>{{ loop.index }}</td>
       <td>{{ job.run_name }}{% if job.force_from %} <span class="badge">from {{ job.force_from }}</span>{% endif %}</td>
       <td>{{ job.design }}</td><td>{{ job.state }}</td><td>{{ job.profile }}</td>
-      <td>{{ job.n_ranks }}</td><td class="muted">{{ job.overrides|overrides }}</td>
+      <td>{{ job.n_ranks }}{% if job.n_ranks > core_budget %} <span class="badge gate_failed">needs {{ job.n_ranks }} cores, budget is {{ core_budget }}</span>{% endif %}</td><td class="muted">{{ job.overrides|overrides }}</td>
       <td class="actions">
         <form method="post" action="/jobs/{{ job.id }}/move"><input type="hidden" name="direction" value="up"><button title="Move up">↑</button></form>
         <form method="post" action="/jobs/{{ job.id }}/move"><input type="hidden" name="direction" value="down"><button title="Move down">↓</button></form>

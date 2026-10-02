@@ -42,6 +42,7 @@ def _queue_values(request: Request) -> dict[str, Any]:
         "running": _running_items(c),
         "queued": c.queue.queued(),
         "finished": c.queue.finished(),
+        "core_budget": c.queue.setting("core_budget"),
     }
 
 
@@ -177,6 +178,14 @@ async def queue_run(request: Request):
             if existing is None or existing.status != "queued":
                 raise QueueError("this job has already started and can no longer be edited")
         design, state, profile, overrides, spec, _ = _build(c, form)
+        budget = c.queue.setting("core_budget")
+        if spec.solve.n_ranks > budget:
+            # The worker would never find room for it and would skip it
+            # forever without a word, so say so now.
+            raise forms.FormError(
+                f"this run needs {spec.solve.n_ranks} cores but the core budget is "
+                f"{budget}; lower solve.n_ranks or raise the budget on the System page"
+            )
         run_dir = forms.check_run_name(name, c.config.runs_root, c.queue, exclude_id=job_id)
         job_spec = JobSpec(
             run_name=name, run_dir=str(run_dir), case_path=str(c.config.case_path),
