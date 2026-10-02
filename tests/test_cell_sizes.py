@@ -20,9 +20,15 @@ from pathlib import Path
 
 import pytest
 
-from simdev.config.resolve import load_case
+from simdev.config.resolve import load_case as _load_case
+from tests.test_split_driving_states import TESTCASE_STATE
 
 CASE = Path(__file__).resolve().parents[1] / "cases" / "car" / "config.yaml"
+
+
+def load_case(path, profile, wall_treatment, overrides):
+    """The car case, in the driving state that used to be selected inline."""
+    return _load_case(path, profile, wall_treatment, overrides, TESTCASE_STATE)
 
 # What each surface must resolve to, in metres, whatever the background is.
 #

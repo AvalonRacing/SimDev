@@ -19,7 +19,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from simdev.config.resolve import load_case
+from simdev.config.resolve import load_case as _load_case
+from tests.test_split_driving_states import TESTCASE_STATE
 from simdev.config.validate import validate
 from simdev.render.context import (
     VEHICLE_SURFACE,
@@ -31,6 +32,11 @@ from simdev.stages.prepare import prepare
 from tests.test_car_prepare import CORNERS, car_case, write_car
 
 CASE = Path(__file__).resolve().parents[1] / "cases" / "car" / "config.yaml"
+
+
+def load_case(path, profile, wall_treatment, overrides):
+    """The car case, in the driving state that used to be selected inline."""
+    return _load_case(path, profile, wall_treatment, overrides, TESTCASE_STATE)
 
 
 def _block(text: str, name: str) -> str:

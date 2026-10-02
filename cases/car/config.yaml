@@ -1,66 +1,21 @@
 # AvalonRacing RC car.
 #
-#   simdev run cases/car/config.yaml --run-dir ~/runs/car-01 --profile car_dev
+#   simdev run cases/car/config.yaml --run-dir ~/runs/car-01 --profile car_dev \
+#       --design baseline --state testcase
 #
 # ---------------------------------------------------------------------------
-# SWITCHING DRIVING STATE
+# DRIVING STATES AND DESIGNS LIVE IN THE CAD LIBRARY, NOT HERE
 #
-# Change the one line `driving_state:` below. Everything that moves together
-# when the car is doing something different - which geometry folder to read,
-# how fast it is going, whether it is cornering and how tightly - lives in the
-# matching entry under `driving_states:` further down.
+#   CAD/states/<state>/            Chassis, SUS_*, Tire_*, MRF_* + state.yaml
+#   CAD/designs/<design>/<state>/  Body.step + Wing.step for that state
 #
-# To add a state: export a complete folder under CAD/ using the same 15 part
-# names as CAD/Testcase, then add an entry here. Nothing else changes: the
-# wheel axes, centres, rolling radii and ride height are all measured from the
-# geometry of whichever state is selected.
-#
-# The selected state is merged over this file during config resolution, so
-# caseSpec.json still contains one fully explicit specification and records
-# which state produced it.
+# A state's state.yaml holds what changes with it - speed, straight or
+# cornering, radius and direction, domain and ground motion - and is merged
+# over this file (after it, before --set). The attitude itself is in the CAD.
+# Manage both from the web UI (simdev ui) or by hand; see docs/handbook.md.
 # ---------------------------------------------------------------------------
 
 name: car
-
-driving_state: testcase
-
-driving_states:
-
-  # 4 m radius at 15 m/s: omega = 3.75 rad/s, about 5.7 g lateral.
-  #
-  # The attitude for this state - body slip, steer, camber, ride height - is
-  # already in the CAD and is used exactly as exported.
-  testcase:
-    geometry:
-      source_dir: CAD/Testcase
-    flow:
-      u_inf: 15.0
-    physics:
-      mode: cornering
-      corner_radius: 4.0
-      corner_direction: left
-    domain:
-      kind: annulus
-    ground:
-      # In a rotating frame the road is stationary in the ground frame and its
-      # sweep under the car comes out of the frame transform. Setting 'moving'
-      # here would be ignored, and the validator says so.
-      motion: static
-
-  # A straight-line baseline for the same car. Add the folder when you have
-  # one; until then this state points at the same geometry and simply does not
-  # corner, which is still useful for a drag reference.
-  straight:
-    geometry:
-      source_dir: CAD/Testcase
-    flow:
-      u_inf: 15.0
-    physics:
-      mode: straight
-    domain:
-      kind: box
-    ground:
-      motion: moving
 
 flow:
   nu: 1.5e-05

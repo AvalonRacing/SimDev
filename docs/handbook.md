@@ -901,63 +901,43 @@ from NURBS control hulls and run large — an earlier session recorded one about
 
 ### Switch driving state
 
-A driving state is a named bundle of everything that changes together when the
-car is doing something different: which geometry folder to read, how fast it is
-going, whether it is cornering and how tightly. Switching is one line:
+Driving states and design iterations live in the CAD library, not in the case
+file:
+
+```
+CAD/states/<state>/            Chassis, SUS_*, Tire_*, MRF_* + state.yaml
+CAD/designs/<design>/<state>/  Body.step + Wing.step for that state
+```
+
+The attitude (ride height, roll, steer, camber) is baked into the export,
+including Body.step, so a design iteration is exported once per state it
+will run in. A run is one (design, state) pair that has both:
+
+```
+simdev run cases/car/config.yaml --run-dir ~/runs/x --profile car_dev \
+    --design baseline --state testcase
+```
+
+`state.yaml` carries what changes with the state:
 
 ```yaml
-driving_state: testcase
-
-driving_states:
-  testcase:
-    geometry: {source_dir: CAD/Testcase}
-    flow:     {u_inf: 15.0}
-    physics:  {mode: cornering, corner_radius: 4.0, corner_direction: left}
-    domain:   {kind: annulus}
+description: 4 m radius at 15 m/s, left
+flow:    {u_inf: 15.0}
+physics: {mode: cornering, corner_radius: 4.0, corner_direction: left}
+domain:  {kind: annulus}
+ground:  {motion: static}
 ```
 
-To add one: export a complete folder under `CAD/` with the same part names,
-then add an entry. Nothing else changes — the wheel axes, rolling radii and
-ride height are measured from whichever state is selected.
+The run copies its 15 parts into `<run_dir>/cad/` and records the design,
+state and a SHA-256 for each part in `caseSpec.json`, so editing the library
+later never changes a past run. Upload and edit states and designs from the
+web UI (`simdev ui`, see `docs/ui-setup.md`).
 
-It is a **merge layer in `resolve.py`**, not something read later, for the
-reason the whole config design exists: after resolution there is one object in
-which every value is explicit and nothing downstream consults raw config. The
-order is:
+It is still a **merge layer in `resolve.py`**. The order is:
 
 ```
-defaults ◄ resolution profile ◄ wall profile ◄ case file ◄ driving state ◄ CLI --set
+defaults ◄ resolution profile ◄ wall profile ◄ case file ◄ state ◄ CLI --set
 ```
-
-The table is dropped once the selected state is merged, and only its *name*
-survives into the spec. Keeping the whole table would put every unselected
-state into the spec hash, so editing the braking state would invalidate cached
-cornering runs it cannot possibly have affected.
-
-Two checks are deliberately hard failures rather than warnings:
-
-- **A missing STL for a patch whose role carries one.** Silently skipping it
-  used to be the behaviour, and it turns a mistyped part name into a car with
-  no rear wing that meshes, solves and converges.
-- **Geometry through the road.** snappy meshes the intersection of a wheel and
-  the ground into a shape nobody drew, and the run looks entirely normal.
-  `geometry.max_ground_penetration` sets the tolerance.
-
-Keep every STL **watertight and whole**, even for half models — half models come
-from the *domain* restricting to y ≥ 0 with a `symmetry` patch, never from
-cutting geometry. Note that STL stores each facet's vertices separately, so a
-sound solid loads as unconnected triangles; `load_surface()` merges them first,
-and without that every mesh ever exported reports as leaking.
-
-For a *procedural* source instead, implement a writer with the same contract as
-`write_ahmed_stl`: `(params, out_dir) -> dict[str, Path]` mapping patch name to
-STL path. Add a branch in `_write_geometry()` in `stages/prepare.py` and a
-`kind` value in `GeometryConfig`.
-
-Keep the STL **full-body and watertight** even for half models. Half models are
-produced by the *domain* restricting to y ≥ 0 with a `symmetry` patch, not by
-cutting geometry. Cutting geometry makes it non-watertight, and snappyHexMesh
-leaks into non-watertight surfaces.
 
 ### How cornering works
 
