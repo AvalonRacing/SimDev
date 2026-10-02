@@ -62,6 +62,12 @@ def write_contact_sheet(
                 (image["out"], surface_name, sort_key)
             )
 
+    # cp-over-x plots, one per car-y station, in y order like the y slices.
+    for station in (plan.get("cp_lines") or {}).get("stations", []):
+        groups.setdefault("cp_line_y", []).append(
+            (station["out"], station["name"], station["offset"])
+        )
+
     parts = [
         "<!doctype html><meta charset='utf-8'>",
         f"<title>{html.escape(str(record['run']))}</title>",

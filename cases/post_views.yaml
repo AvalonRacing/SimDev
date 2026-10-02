@@ -132,6 +132,25 @@ camera:
     bottom: 0.26
   resolution: [1600, 1200]
 
+cp_lines:
+  # cp over x on the parts under development, cut at fixed car-y stations
+  # and drawn as one plot per station into images/cp_line_y/. Body and Wing
+  # only: Chassis is an aero dummy and the tyres would bury both curves.
+  patches: [Body, Wing]
+  # Body spans car y -0.109..+0.085 about the datum and Wing -0.108..+0.083,
+  # so every station below cuts both. Centreline included.
+  y: {from: -0.10, to: 0.08, step: 0.02}   # 10 stations
+  # Fixed axes, like every colour scale above. Negative cp plots upward,
+  # the convention for pressure distributions; x runs nose-left to match
+  # the y slices. Measured on car-fullsize-colors: Body -1.72..+1.05,
+  # Wing -2.14..+0.93 - so +1.2 keeps the nose's stagnation peak on the
+  # plot and -2.5 leaves the wing's suction peak room to grow.
+  cp_limits: [-2.5, 1.2]
+  x_limits: [-0.25, 0.25]
+  # The section panel under each plot: the cut's own outline, true to
+  # scale. Ground to just over the wing's top at 0.126.
+  z_limits: [0.0, 0.14]
+
 # off | lic | seeded. Off by default until the cost is measured on a real
 # case: the sampled slices carry U_rel as a vector, so this needs no return
 # to the volume, but it is still 548 extra filter evaluations.

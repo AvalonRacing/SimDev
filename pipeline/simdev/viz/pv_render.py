@@ -18,10 +18,11 @@ import json
 import os
 import sys
 
+from paraview import servermanager  # type: ignore[import-not-found]
 from paraview.simple import (  # type: ignore[import-not-found]
     Calculator, ColorBy, CreateRenderView, Delete, GetColorTransferFunction,
-    GetScalarBar, Hide, LegacyVTKReader, Render, SaveScreenshot, Show,
-    XMLPolyDataReader,
+    GetScalarBar, Hide, LegacyVTKReader, MergeBlocks, Render, SaveScreenshot,
+    Show, Slice, XMLPolyDataReader,
 )
 
 # View-file field name -> the array name actually present on the sampled
@@ -282,6 +283,62 @@ def _draw(source, field, style, camera, out_path, resolution, unlit=False):
     Delete(view)
 
 
+def _cut_cp_lines(spec, missing):
+    """Cut each part at each car-y station and write the points to CSV.
+
+    Only the cut happens here - it needs VTK, which the venv does not have.
+    The plots are drawn from these CSVs by viz/cplines.py on the venv side,
+    where they can be tested without ParaView. Raw pMean goes out, not cp:
+    the dynamic head is the venv's to apply, from the same u_inf as the
+    force coefficients.
+
+    Returns how many station CSVs were written.
+    """
+    if not spec:
+        return 0
+    readers = {}
+    for patch, sample in spec.get("samples", {}).items():
+        if sample and os.path.exists(sample):
+            readers[patch] = _reader(sample)
+        else:
+            missing.append(f"cpline_{patch}")
+    if not readers:
+        return 0
+
+    datum = spec["datum"]
+    x_axis, z_axis = spec["x_axis"], spec["z_axis"]
+    written = 0
+    for station in spec["stations"]:
+        rows = []
+        for patch, reader in readers.items():
+            cut = Slice(Input=reader)
+            cut.SliceType = "Plane"
+            cut.SliceType.Origin = station["point"]
+            cut.SliceType.Normal = station["normal"]
+            merged = MergeBlocks(Input=cut)
+            data = servermanager.Fetch(merged)
+            pressure = data.GetPointData().GetArray("pMean")
+            if pressure is not None:
+                for i in range(data.GetNumberOfPoints()):
+                    point = data.GetPoint(i)
+                    d = [point[k] - datum[k] for k in range(3)]
+                    rows.append((
+                        patch,
+                        sum(d[k] * x_axis[k] for k in range(3)),
+                        sum(d[k] * z_axis[k] for k in range(3)),
+                        pressure.GetValue(i),
+                    ))
+            Delete(merged)
+            Delete(cut)
+        os.makedirs(os.path.dirname(station["csv"]), exist_ok=True)
+        with open(station["csv"], "w", encoding="utf-8") as handle:
+            handle.write("patch,x,z,pMean\n")
+            for row in rows:
+                handle.write(f"{row[0]},{row[1]!r},{row[2]!r},{row[3]!r}\n")
+        written += 1
+    return written
+
+
 def main(argv):
     with open(argv[1], encoding="utf-8") as handle:
         plan = json.load(handle)
@@ -322,7 +379,9 @@ def main(argv):
                 )
                 written += 1
 
-    print(json.dumps({"written": written, "missing": missing}))
+    cut = _cut_cp_lines(plan.get("cp_lines"), missing)
+
+    print(json.dumps({"written": written, "missing": missing, "cut": cut}))
     return 0
 
 

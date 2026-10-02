@@ -297,3 +297,18 @@ def test_the_disk_fields_match_what_the_template_samples() -> None:
         f"template samples {sorted(sampled - derived)}, "
         f"DISK_FIELDS is {sorted(DISK_FIELDS)}"
     )
+
+
+def test_cp_line_parts_are_sampled_one_surface_each(tmp_path: Path) -> None:
+    """The merged 'vehicle' cannot tell Body from Wing; the section plots
+    colour them apart, so each gets a surface of its own."""
+    render_sample_dict(
+        _spec(MULTI_FORCE_PATCH), tmp_path, SLICES, cp_line_patches=["body", "wing"]
+    )
+    text = (tmp_path / "system" / "sampleSurfaces").read_text(encoding="utf-8")
+    assert "cpline_body" in text and "cpline_wing" in text
+    assert "patches     (wing);" in text
+
+
+def test_no_cp_line_surfaces_unless_asked(tmp_path: Path) -> None:
+    assert "cpline_" not in _render(tmp_path)

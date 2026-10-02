@@ -47,6 +47,7 @@ def render_sample_dict(
     spec: CaseSpec,
     out_dir: Path,
     slices: Sequence[Mapping[str, Any]],
+    cp_line_patches: Sequence[str] = (),
 ) -> Path:
     """Write system/sampleSurfaces for this run's plane list.
 
@@ -62,6 +63,7 @@ def render_sample_dict(
         ],
         "solver_function_names": solver_function_names(spec),
         "slices": list(slices),
+        "cp_line_patches": list(cp_line_patches),
     }
 
     target = Path(out_dir) / SAMPLE_DICT

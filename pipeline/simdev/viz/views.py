@@ -62,6 +62,21 @@ class FieldStyle:
 
 
 @dataclass(frozen=True)
+class CpLines:
+    """cp-over-x section plots: which parts, at which car-y stations.
+
+    The axis limits are fixed for the same reason every colour scale is:
+    a plot that autoscales cannot be laid beside another run's.
+    """
+    patches: tuple[str, ...]
+    stations: Axis
+    cp_limits: tuple[float, float]
+    x_limits: tuple[float, float]
+    # Height range of the section panel under each plot, from the datum.
+    z_limits: tuple[float, float]
+
+
+@dataclass(frozen=True)
 class Views:
     datum_patches: tuple[str, ...]
     axes: dict[str, Axis]
@@ -74,6 +89,9 @@ class Views:
     surface_focus_height: float
     resolution: tuple[int, int]
     streamlines: str
+    # None when the views file has no cp_lines block: an older definition
+    # still loads, it just draws no section plots.
+    cp_lines: CpLines | None
     # sha256 of the file text, truncated. Recorded beside every picture so a
     # PNG can always be traced back to the definition that framed it.
     digest: str
@@ -121,6 +139,22 @@ def _focus_height(camera: dict) -> dict[str, float]:
     if isinstance(declared, dict):
         return {axis: float(declared.get(axis, 0.0)) for axis in ("x", "y")}
     return {"x": float(declared), "y": float(declared)}
+
+
+def _cp_lines(raw: dict | None) -> CpLines | None:
+    if not raw:
+        return None
+    y = raw["y"]
+    return CpLines(
+        patches=tuple(str(p) for p in raw["patches"]),
+        stations=Axis(float(y["from"]), float(y["to"]), float(y["step"])),
+        cp_limits=(float(raw["cp_limits"][0]), float(raw["cp_limits"][1])),
+        x_limits=(float(raw["x_limits"][0]), float(raw["x_limits"][1])),
+        z_limits=(
+            float(raw.get("z_limits", (0.0, 0.14))[0]),
+            float(raw.get("z_limits", (0.0, 0.14))[1]),
+        ),
+    )
 
 
 def load_views(path: Path) -> Views:
@@ -185,5 +219,6 @@ def load_views(path: Path) -> Views:
         ),
         resolution=(int(camera["resolution"][0]), int(camera["resolution"][1])),
         streamlines=streamlines,
+        cp_lines=_cp_lines(raw.get("cp_lines")),
         digest=hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
     )

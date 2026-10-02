@@ -12,6 +12,7 @@ from simdev.report.results import read_result
 from simdev.run.runner import StageError
 from simdev.run.status import StageStatus, read_status, write_status
 from simdev.stages.common import load_spec
+from simdev.viz.cplines import draw_cp_lines
 from simdev.viz.plan import CAR_AXES_IDENTITY, build_render_plan
 from simdev.viz.sample import find_sample, render_sample_dict, run_sampling
 from simdev.viz.sheet import write_contact_sheet
@@ -120,6 +121,11 @@ def images(
 
     if axes:
         plan["slices"] = [s for s in plan["slices"] if s["axis"] in set(axes)]
+        # Cut at y stations, so they ride with the y axis.
+        if "y" not in axes:
+            plan["cp_lines"] = None
+    if fields and "cp" not in fields:
+        plan["cp_lines"] = None
     if fields:
         wanted = set(fields)
         for entry in (*plan["slices"], *plan["surfaces"]):
@@ -142,9 +148,27 @@ def images(
                 f"widen planes.{axis} in {views_path.name} if that matters"
             )
 
+    cp_lines = plan.get("cp_lines")
+    if cp_lines:
+        # A name that is not a patch of this case would be sampled as
+        # nothing, without an error - so it is dropped here, and said so.
+        known = {p.name for p in spec.geometry.patches}
+        unknown = [p for p in cp_lines["patches"] if p not in known]
+        if unknown:
+            reasons.append(
+                f"cp_lines patches {', '.join(unknown)} are not patches of "
+                "this case and were left out"
+            )
+            cp_lines["patches"] = [p for p in cp_lines["patches"] if p in known]
+        if not cp_lines["patches"]:
+            plan["cp_lines"] = cp_lines = None
+
     # Written before anything runs, so the dictionary is on disk to read even
     # when the OpenFOAM call is what fails.
-    render_sample_dict(spec, run_dir, plan["slices"])
+    render_sample_dict(
+        spec, run_dir, plan["slices"],
+        cp_line_patches=cp_lines["patches"] if cp_lines else (),
+    )
 
     sampled_at = time.monotonic()
     roots = run_sampling(run_dir, spec.solve.n_ranks)
@@ -171,6 +195,13 @@ def images(
     for entry in plan["surfaces"]:
         entry["sample"] = str(found) if found else None
 
+    # Each part on its own, under patchSurfaces next to 'vehicle'.
+    if cp_lines:
+        cp_lines["samples"] = {}
+        for patch in cp_lines["patches"]:
+            sample = find_sample(roots.patches, f"cpline_{patch}")
+            cp_lines["samples"][patch] = str(sample) if sample else None
+
     plan_path = results / "render_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (results / "views.yaml").write_text(
@@ -179,6 +210,7 @@ def images(
 
     drawn_at = time.monotonic()
     summary = _render(spec.post.paraview_python, plan_path)
+    plots_written = draw_cp_lines(cp_lines, spec.flow.u_inf)
     render_seconds = time.monotonic() - drawn_at
 
     if summary.get("missing"):
@@ -192,7 +224,7 @@ def images(
         "spec_hash": spec.spec_hash(),
         "views_digest": views.digest,
         "datum": list(datum),
-        "images_written": summary.get("written", 0),
+        "images_written": summary.get("written", 0) + plots_written,
         "sample_seconds": round(sample_seconds, 1),
         "render_seconds": round(render_seconds, 1),
         "reasons": reasons,

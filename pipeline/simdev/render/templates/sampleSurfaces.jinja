@@ -144,6 +144,18 @@ functions
                 // The slices above already interpolate for the same reason.
                 interpolate true;
             }
+{% for p in cp_line_patches %}
+
+            // ONE PART ON ITS OWN, for the cp-over-x section plots. The
+            // merged `vehicle` above cannot say which points are Body and
+            // which are Wing, and those plots colour the two apart.
+            cpline_{{ p }}
+            {
+                type        patch;
+                patches     ({{ p }});
+                interpolate true;
+            }
+{% endfor %}
         }
     }
 }

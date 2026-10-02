@@ -36,15 +36,18 @@ SURFACE_VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, f
 CAMERA_DISTANCE = 2.0
 
 # The direction each slice family is viewed along, and its up vector.
-#   x: from downstream looking upstream, so car-left (+y) is on the right -
-#      the conventional way to read streamwise vortices.
-#   y: from the car's right, so the nose points right.
+#   x: from in front of the car looking rearward, so car-left (+y) is on
+#      the right of the picture.
+#   y: from the car's left, so the nose points left.
 #   z: from above, nose right. A plan view, with the car's length across
-#      the long side of the landscape frame - the same way round as the y
-#      slices and the `top` surface view.
+#      the long side of the landscape frame - the same way round as the
+#      `top` surface view.
+#
+# x and y were flipped to view their planes from the other side; the cuts
+# themselves, their offsets and their file names did not change.
 SLICE_VIEW = {
-    "x": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-    "y": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+    "x": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    "y": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
     "z": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
 }
 
@@ -270,4 +273,55 @@ def build_render_plan(
             ],
         })
 
+    plan["cp_lines"] = _cp_lines(views, datum, axes, images_dir)
     return plan
+
+
+def _cp_lines(
+    views: Views,
+    datum: tuple[float, float, float],
+    axes: Sequence[Sequence[float]],
+    images_dir: Path,
+) -> dict[str, Any] | None:
+    """Where to cut Body and Wing for the cp-over-x plots, and where each
+    station's points and plot go.
+
+    The renderer cuts and writes the CSVs (it has VTK; the venv does not).
+    viz/cplines.py draws the plots from them afterwards, so the plotting
+    stays testable without ParaView. "samples" is filled in by the images
+    stage once the per-patch surfaces are found on disk, exactly as
+    "sample" is for slices.
+    """
+    spec = views.cp_lines
+    if spec is None:
+        return None
+    normal = _rotate([0.0, 1.0, 0.0], axes)
+    offsets = spec.stations.offsets()
+    data_dir = images_dir.parent / "cp_lines"
+    stations = []
+    for number, offset in enumerate(sorted(offsets), start=1):
+        name = slice_name("y", offset)
+        stations.append({
+            "name": name,
+            "offset": offset,
+            "point": [datum[i] + offset * normal[i] for i in range(3)],
+            "normal": normal,
+            "csv": str(data_dir / f"{name}.csv"),
+            "out": str(
+                images_dir / "cp_line_y"
+                / f"cp_line_y_{number:02d}_{offset:+.3f}.png"
+            ),
+        })
+    return {
+        "patches": list(spec.patches),
+        "datum": list(datum),
+        # Car x and z in mesh coordinates: the CSV carries each point's
+        # position along them from the datum, so the plot's x axis is the
+        # car's own whatever attitude it was posed at.
+        "x_axis": _rotate([1.0, 0.0, 0.0], axes),
+        "z_axis": _rotate([0.0, 0.0, 1.0], axes),
+        "cp_limits": list(spec.cp_limits),
+        "x_limits": list(spec.x_limits),
+        "z_limits": list(spec.z_limits),
+        "stations": stations,
+    }

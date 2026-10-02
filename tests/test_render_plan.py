@@ -75,8 +75,8 @@ def test_every_plane_gets_every_slice_field() -> None:
 
 
 def test_z_slices_put_the_nose_on_the_right() -> None:
-    """Plan view with the car lengthwise across the landscape frame, the
-    same way round as the y slices and the `top` surface view."""
+    """Plan view from above with the car lengthwise across the landscape
+    frame, the same way round as the `top` surface view."""
     plan = _plan()
     camera = next(s for s in plan["slices"] if s["axis"] == "z")["camera"]
     look = [camera["focal"][i] - camera["position"][i] for i in range(3)]
@@ -237,3 +237,29 @@ def test_images_go_in_one_flat_directory_per_field_and_axis() -> None:
     surface = next(s for s in plan["surfaces"] if s["name"] == "iso")
     sout = next(i["out"] for i in surface["images"] if i["field"] == "yplus")
     assert sout.endswith("surface_yplus/iso.png")
+
+
+def test_cp_lines_cut_ten_y_stations_in_order() -> None:
+    lines = _plan()["cp_lines"]
+    assert lines["patches"] == ["Body", "Wing"]
+    offsets = [s["offset"] for s in lines["stations"]]
+    assert len(offsets) == 10 and offsets == sorted(offsets)
+    assert 0.0 in offsets
+    first = lines["stations"][0]
+    # Cut across the car's y axis, at that offset from the datum.
+    assert first["normal"] == pytest.approx([0.0, 1.0, 0.0])
+    assert first["point"][1] == pytest.approx(DATUM[1] + offsets[0])
+    assert first["out"].endswith("cp_line_y/cp_line_y_01_-0.100.png")
+    assert first["csv"].endswith("cp_lines/y_-0.100.csv")
+
+
+def test_a_views_file_without_cp_lines_draws_none(tmp_path: Path) -> None:
+    text = (REPO / "cases" / "post_views.yaml").read_text(encoding="utf-8")
+    trimmed = text[: text.index("cp_lines:")] + text[text.index("# off | lic"):]
+    path = tmp_path / "views.yaml"
+    path.write_text(trimmed, encoding="utf-8")
+    plan = build_render_plan(
+        u_inf=15.0, views=load_views(path), datum=DATUM, frame=None,
+        images_dir=Path("results/images"), stamp=STAMP,
+    )
+    assert plan["cp_lines"] is None
