@@ -240,3 +240,15 @@ def test_first_error_with_multiple_markers_uses_last_one(tmp_path: Path) -> None
 
     # Should use the second marker
     assert first_error(tmp_path) == "second attempt error"
+
+
+def test_a_crash_after_a_solve_gate_is_still_a_failure(tmp_path: Path) -> None:
+    statuses(tmp_path, prepare="ok", mesh="ok", solve="gate_failed")
+    crashed = {"steps": [{"argv": ["run"], "exit": 1}, {"argv": ["images"], "exit": 2}]}
+    assert classify(tmp_path, crashed) == ("failed", "simdev images exited with code 2")
+
+
+def test_a_mesh_gate_followed_by_another_exit_code_is_a_failure(tmp_path: Path) -> None:
+    statuses(tmp_path, prepare="ok", mesh="gate_failed")
+    crashed = {"steps": [{"argv": ["run"], "exit": 3}]}
+    assert classify(tmp_path, crashed) == ("failed", "simdev run exited with code 3")

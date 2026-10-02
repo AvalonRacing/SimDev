@@ -203,8 +203,18 @@ def classify(
     failed = [name for name, st in statuses.items() if st is not None and st.state == "failed"]
 
     present = [name for name in STAGES if statuses[name] is not None]
-    if hard and not failed and present and statuses[present[-1]].state == "gate_failed":
-        # The pipeline stopped at a gate (CLI exit 2): a verdict, not a crash.
+    if (
+        len(hard) == 1
+        and hard[0]["argv"][0] in ("run", "mesh")
+        and hard[0]["exit"] == 2
+        and not failed
+        and present
+        and present[-1] == "mesh"
+        and statuses["mesh"].state == "gate_failed"
+    ):
+        # The mesh gate refused to start the solve (CLI exit 2): a verdict,
+        # not a crash. Exit 2 is shared by every error, so only this exact
+        # shape counts; any other hard exit stays a failure.
         return "gate_failed", first_error(run_dir)
     if hard or failed:
         detail = first_error(run_dir)
