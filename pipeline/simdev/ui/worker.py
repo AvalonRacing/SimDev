@@ -8,6 +8,7 @@ server must not kill a solve, and recover() adopts the survivors.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -24,6 +25,7 @@ from simdev.ui.queue import Job, Queue
 
 log = logging.getLogger(__name__)
 
+PROCESS_FILE = "ui/process.json"
 RESTARTED = "service restarted while the run was in progress; resume it to continue"
 
 
@@ -34,11 +36,29 @@ def default_command(job: Job) -> list[str]:
 def group_alive(pgid: int) -> bool:
     try:
         os.killpg(pgid, 0)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        # Our own job groups never raise PermissionError; a group we may not
+        # signal belongs to someone else and is not ours.
         return False
-    except PermissionError:
-        return True
     return True
+
+
+def current_boot_id() -> str:
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def _owns_group(job: Job) -> bool:
+    """A running job is ours to adopt only if its recorded group survived this boot."""
+    try:
+        recorded = json.loads((Path(job.run_dir) / PROCESS_FILE).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(recorded, dict) or recorded.get("boot_id") != current_boot_id():
+        return False
+    return bool(job.pgid) and recorded.get("pgid") == job.pgid and group_alive(job.pgid)
 
 
 class Worker:
@@ -69,7 +89,7 @@ class Worker:
             for job in self.queue.running():
                 if job.id in self._procs:
                     continue
-                if job.pgid and group_alive(job.pgid):
+                if _owns_group(job):
                     self._adopted.add(job.id)
                 else:
                     self.queue.mark_finished(job.id, "failed", None, RESTARTED)
@@ -104,23 +124,29 @@ class Worker:
     def _reap(self) -> None:
         for job in self.queue.running():
             proc = self._procs.get(job.id)
+            code: int | None = None
             if proc is not None:
                 code = proc.poll()
                 if code is None:
                     continue
-                del self._procs[job.id]
-            elif job.id in self._adopted:
-                if job.pgid and group_alive(job.pgid):
-                    continue
-                self._adopted.discard(job.id)
-                code = None
-            else:
+            elif job.id not in self._adopted:
+                continue
+            # The leader exiting is not the end: ranks may outlive it.
+            if job.pgid and group_alive(job.pgid):
                 continue
 
-            cancelled = self._cancelling.pop(job.id, None) is not None
+            cancelled = job.id in self._cancelling
             run_dir = Path(job.run_dir)
-            status, error = classify(run_dir, read_outcome(run_dir), cancelled)
+            try:
+                status, error = classify(run_dir, read_outcome(run_dir), cancelled)
+            except Exception as problem:
+                log.exception("could not classify job %s", job.id)
+                status, error = "failed", f"could not classify the result: {problem}"
             self.queue.mark_finished(job.id, status, code, error)
+            # Only now forget the job, so a failed mark_finished is retried.
+            self._procs.pop(job.id, None)
+            self._adopted.discard(job.id)
+            self._cancelling.pop(job.id, None)
 
     def _escalate(self) -> None:
         now = time.monotonic()
@@ -131,7 +157,7 @@ class Worker:
             if job is not None and job.pgid:
                 try:
                     os.killpg(job.pgid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
             self._cancelling[job_id] = float("inf")
 
@@ -167,6 +193,10 @@ class Worker:
 
         self._procs[job.id] = proc
         # start_new_session makes the child its own group leader: pgid == pid.
+        (run_dir / "ui").mkdir(parents=True, exist_ok=True)
+        (run_dir / PROCESS_FILE).write_text(
+            json.dumps({"pgid": proc.pid, "boot_id": current_boot_id()}), encoding="utf-8"
+        )
         self.queue.mark_running(job.id, proc.pid, proc.pid)
 
     # --- requests from the UI ------------------------------------------------
@@ -182,6 +212,6 @@ class Worker:
                 if job.pgid:
                     try:
                         os.killpg(job.pgid, signal.SIGTERM)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, PermissionError):
                         pass
                 self._cancelling[job_id] = time.monotonic() + self._kill_grace

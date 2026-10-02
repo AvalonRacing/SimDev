@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from simdev.ui.queue import JobSpec, Queue
-from simdev.ui.worker import Worker, group_alive
+from simdev.ui.worker import Worker, current_boot_id, group_alive
 
 STUB = r"""
 import json, os, subprocess, sys, time
@@ -31,6 +31,15 @@ if mode == "sleep":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     (run_dir / "grandchild.pid").write_text(str(child.pid))
     time.sleep(120)
+if mode == "stubborn":
+    code = (
+        "import signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "open(sys.argv[1] + '/grandchild.pid', 'w').write(str(__import__('os').getpid()))\n"
+        "time.sleep(120)\n"
+    )
+    subprocess.Popen([sys.executable, "-c", code, str(run_dir)])
+    time.sleep(120)
 if mode == "crash":
     mark("prepare", "ok"); mark("mesh", "failed")
     print("error: snappyHexMesh failed with exit code 1", flush=True)
@@ -39,6 +48,8 @@ else:
     for stage in ("prepare", "mesh", "solve", "post", "images"):
         mark(stage, "gate_failed" if (mode == "gate" and stage == "solve") else "ok")
     steps = [{"argv": ["run"], "exit": 1 if mode == "gate" else 0}, {"argv": ["images"], "exit": 0}]
+if mode == "badstatus":
+    (status / "solve.json").write_text("{")
 (run_dir / "ui").mkdir(exist_ok=True)
 (run_dir / "ui" / "outcome.json").write_text(json.dumps({"steps": steps}))
 """
@@ -164,14 +175,60 @@ def test_recover_adopts_a_live_job_and_finishes_it(tmp_path, queue) -> None:
         [sys.executable, "-c", "import time; time.sleep(1)"], start_new_session=True
     )
     queue.mark_running(job.id, survivor.pid, survivor.pid)
+    _write_process_file(job, survivor.pid, current_boot_id())
 
-    worker = worker_for(queue)
-    worker.recover()
-    assert queue.get(job.id).status == "running"
-    survivor.wait()
-    worker.tick()
-    # No outcome file was written by this stand-in, so it cannot be "done".
-    assert queue.get(job.id).status == "failed"
+    try:
+        worker = worker_for(queue)
+        worker.recover()
+        assert queue.get(job.id).status == "running"
+        survivor.wait()
+        worker.tick()
+        # No outcome file was written by this stand-in, so it cannot be "done".
+        assert queue.get(job.id).status == "failed"
+    finally:
+        survivor.kill()
+        survivor.wait()
+
+
+def test_recover_does_not_adopt_a_group_from_another_boot(tmp_path, queue) -> None:
+    job = queue.enqueue(spec(tmp_path, "a"))
+    Path(job.run_dir).mkdir(parents=True)
+    survivor = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
+    )
+    try:
+        queue.mark_running(job.id, survivor.pid, survivor.pid)
+        _write_process_file(job, survivor.pid, "some-earlier-boot")
+        worker_for(queue).recover()
+        assert queue.get(job.id).status == "failed"
+        assert "restarted" in queue.get(job.id).error
+    finally:
+        survivor.kill()
+        survivor.wait()
+
+
+def test_recover_does_not_adopt_a_job_without_a_process_record(tmp_path, queue) -> None:
+    job = queue.enqueue(spec(tmp_path, "a"))
+    Path(job.run_dir).mkdir(parents=True)
+    survivor = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
+    )
+    try:
+        queue.mark_running(job.id, survivor.pid, survivor.pid)
+        worker_for(queue).recover()
+        assert queue.get(job.id).status == "failed"
+    finally:
+        survivor.kill()
+        survivor.wait()
+
+
+def _write_process_file(job, pgid: int, boot_id: str) -> None:
+    import json
+
+    (Path(job.run_dir) / "ui").mkdir(parents=True, exist_ok=True)
+    (Path(job.run_dir) / "ui" / "process.json").write_text(
+        json.dumps({"pgid": pgid, "boot_id": boot_id})
+    )
 
 
 def test_recover_fails_a_job_whose_process_is_gone(tmp_path, queue) -> None:
@@ -185,9 +242,71 @@ def test_recover_fails_a_job_whose_process_is_gone(tmp_path, queue) -> None:
     assert "restarted" in queue.get(job.id).error
 
 
-def test_group_alive() -> None:
+def test_group_alive(monkeypatch) -> None:
     assert group_alive(os.getpgid(0))
     assert not group_alive(2**22 + 12345)
+
+    def denied(pgid, sig):
+        raise PermissionError
+
+    monkeypatch.setattr(os, "killpg", denied)
+    assert not group_alive(os.getpgid(0))
+
+
+def test_a_truncated_status_file_fails_the_job_instead_of_sticking(tmp_path, queue) -> None:
+    job = queue.enqueue(spec(tmp_path, "a", "badstatus"))
+    assert run_to_end(worker_for(queue), queue, job.id) == "failed"
+    assert queue.get(job.id).error.startswith("could not classify the result")
+
+
+def _start_stubborn(tmp_path, queue):
+    job = queue.enqueue(spec(tmp_path, "a", "stubborn"))
+    queue.enqueue(spec(tmp_path, "b", "ok"))
+    worker = worker_for(queue)
+    worker.tick()
+    pid_file = Path(job.run_dir) / "grandchild.pid"
+    wait_until(pid_file.exists)
+    wait_until(lambda: pid_file.read_text() != "")
+    return worker, job, int(pid_file.read_text())
+
+
+def test_cancel_escalates_to_sigkill_while_ranks_survive_the_leader(tmp_path, queue) -> None:
+    worker, job, grandchild = _start_stubborn(tmp_path, queue)
+    try:
+        worker.cancel(job.id)
+        leader = queue.get(job.id).pid
+        wait_until(lambda: not _pid_alive(leader))
+        worker.tick()
+        # The leader is gone but the grandchild ignores SIGTERM: still running.
+        assert queue.get(job.id).status == "running"
+        assert _pid_alive(grandchild)
+        wait_until(lambda: (worker.tick(), queue.get(job.id).status != "running")[1])
+        assert queue.get(job.id).status == "cancelled"
+        wait_until(lambda: not _pid_alive(grandchild))
+    finally:
+        _kill(grandchild)
+        drain(worker, queue)
+
+
+def test_the_next_job_waits_for_the_whole_group_to_die(tmp_path, queue) -> None:
+    worker, job, grandchild = _start_stubborn(tmp_path, queue)
+    try:
+        worker.cancel(job.id)
+        leader = queue.get(job.id).pid
+        wait_until(lambda: not _pid_alive(leader))
+        worker.tick()
+        assert [j.run_name for j in queue.running()] == ["a"]
+        assert [j.run_name for j in queue.queued()] == ["b"]
+    finally:
+        _kill(grandchild)
+        drain(worker, queue)
+
+
+def _kill(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _pid_alive(pid: int) -> bool:
