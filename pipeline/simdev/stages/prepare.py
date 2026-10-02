@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 import trimesh
 
-from simdev.config.resolve import load_case
+from simdev.cad.library import Library, default_cad_root
+from simdev.config.resolve import deep_merge, load_case
 from simdev.config.schema import CaseSpec
 from simdev.config.validate import validate
 from simdev.domain.annulus import AnnulusDomainBuilder, check_sweep
@@ -536,6 +537,32 @@ def _wheel_warnings(
     return warnings
 
 
+def cad_layers(
+    run_dir: Path, design: str | None, state: str | None, cad_root: Path | None
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """The library state's parameters, and the overrides that point this run
+    at its own copy of the CAD.
+
+    The copy happens here, before the spec is resolved, because the part
+    digests are part of the spec: new CAD under an old name changes the
+    hash, so prepare cannot be skipped over it.
+    """
+    if (design is None) != (state is None):
+        raise ValueError("--design and --state go together")
+    if design is None:
+        return None, {}
+
+    library = Library(cad_root or default_cad_root())
+    params = library.state(state).params
+    target = Path(run_dir) / "cad"
+    digests = library.assemble(design, state, target)
+    return params, {
+        "driving_state": state,
+        "geometry": {"source_dir": str(target)},
+        "cad": {"design": design, "state": state, "parts": digests},
+    }
+
+
 def prepare(
     case_path: Path,
     run_dir: Path,
@@ -543,8 +570,19 @@ def prepare(
     wall_treatment: str | None = None,
     overrides: dict[str, Any] | None = None,
     force: bool = False,
+    design: str | None = None,
+    state: str | None = None,
+    cad_root: Path | None = None,
 ) -> PrepareResult:
-    spec = load_case(Path(case_path), profile, wall_treatment, overrides)
+    state_params, cad_overrides = cad_layers(Path(run_dir), design, state, cad_root)
+    # The user's --set still wins over everything the library supplied.
+    spec = load_case(
+        Path(case_path),
+        profile,
+        wall_treatment,
+        deep_merge(cad_overrides, overrides or {}),
+        state=state_params,
+    )
     warnings = validate(spec)
 
     run_dir = Path(run_dir)

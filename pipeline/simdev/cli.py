@@ -54,6 +54,18 @@ def _parser() -> argparse.ArgumentParser:
                 "not need a copy of the case per point."
             ),
         )
+        sub.add_argument(
+            "--design", default=None,
+            help="design iteration from the CAD library (with --state)",
+        )
+        sub.add_argument(
+            "--state", default=None,
+            help="driving state from the CAD library (with --design)",
+        )
+        sub.add_argument(
+            "--cad-root", type=Path, default=None,
+            help="CAD library folder, default <repo>/CAD",
+        )
 
     for name in ("mesh", "solve", "post"):
         sub = subparsers.add_parser(name)
@@ -230,6 +242,9 @@ def main(argv: list[str] | None = None) -> int:
                 wall_treatment=args.wall_treatment,
                 overrides=parse_overrides(args.overrides),
                 force=args.force,
+                design=args.design,
+                state=args.state,
+                cad_root=args.cad_root,
             )
             if args.command == "prepare":
                 return 0
