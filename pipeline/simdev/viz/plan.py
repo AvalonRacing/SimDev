@@ -39,16 +39,16 @@ CAMERA_DISTANCE = 2.0
 #   x: from in front of the car looking rearward, so car-left (+y) is on
 #      the right of the picture.
 #   y: from the car's left, so the nose points left.
-#   z: from above, nose right. A plan view, with the car's length across
-#      the long side of the landscape frame - the same way round as the
-#      `top` surface view.
+#   z: from above, nose left - the same way round as the y slices. A plan
+#      view, with the car's length across the long side of the landscape
+#      frame; up is car-right (-y), so car-left (+y) is at the bottom.
 #
 # x and y were flipped to view their planes from the other side; the cuts
 # themselves, their offsets and their file names did not change.
 SLICE_VIEW = {
     "x": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
     "y": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-    "z": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+    "z": ((0.0, 0.0, -1.0), (0.0, -1.0, 0.0)),
 }
 
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}

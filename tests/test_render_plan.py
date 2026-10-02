@@ -74,9 +74,9 @@ def test_every_plane_gets_every_slice_field() -> None:
     }
 
 
-def test_z_slices_put_the_nose_on_the_right() -> None:
+def test_z_slices_put_the_nose_on_the_left() -> None:
     """Plan view from above with the car lengthwise across the landscape
-    frame, the same way round as the `top` surface view."""
+    frame, the same way round as the y slices."""
     plan = _plan()
     camera = next(s for s in plan["slices"] if s["axis"] == "z")["camera"]
     look = [camera["focal"][i] - camera["position"][i] for i in range(3)]
@@ -86,8 +86,8 @@ def test_z_slices_put_the_nose_on_the_right() -> None:
         look[2] * up[0] - look[0] * up[2],
         look[0] * up[1] - look[1] * up[0],
     ]
-    assert up == pytest.approx([0.0, 1.0, 0.0])
-    assert right[0] > 0 and right[1] == pytest.approx(0) and right[2] == pytest.approx(0)
+    assert up == pytest.approx([0.0, -1.0, 0.0])
+    assert right[0] < 0 and right[1] == pytest.approx(0) and right[2] == pytest.approx(0)
 
 
 def test_the_surface_suite_is_seven_views_of_two_fields() -> None:

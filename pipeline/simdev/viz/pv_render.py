@@ -22,7 +22,7 @@ from paraview import servermanager  # type: ignore[import-not-found]
 from paraview.simple import (  # type: ignore[import-not-found]
     Calculator, ColorBy, CreateRenderView, Delete, GetColorTransferFunction,
     GetScalarBar, Hide, LegacyVTKReader, MergeBlocks, Render, SaveScreenshot,
-    Show, Slice, XMLPolyDataReader,
+    Show, Slice, XMLPolyDataReader, _DisableFirstRenderCameraReset,
 )
 
 # View-file field name -> the array name actually present on the sampled
@@ -210,10 +210,8 @@ def _draw(source, field, style, camera, out_path, resolution, unlit=False):
     view.UseColorPaletteForBackground = 0
 
     display = Show(source, view)
-    # CAMERA AFTER Show, NOT BEFORE. The first Show in a session resets the
-    # camera to fit the data, so a camera set beforehand is thrown away for
-    # that one picture: the first slice of every run came out zoomed to the
-    # whole domain plane, with nothing saying why only that one was wrong.
+    # Camera after Show. main() also switches off Render's own first-render
+    # reset; between them nothing refits the camera to the data.
     view.CameraParallelProjection = 1
     view.CameraPosition = camera["position"]
     view.CameraFocalPoint = camera["focal"]
@@ -342,6 +340,13 @@ def _cut_cp_lines(spec, missing):
 def main(argv):
     with open(argv[1], encoding="utf-8") as handle:
         plan = json.load(handle)
+
+    # paraview.simple.Render resets the camera on the FIRST render of the
+    # session, whatever was set before it - so the first picture of every
+    # run came out zoomed to the whole domain, and only that one. It went
+    # unnoticed while the first picture was a plane ahead of the car, which
+    # fills the frame at any zoom.
+    _DisableFirstRenderCameraReset()
 
     if plan.get("streamlines", "off") != "off":
         # Not implemented yet - see the plan, Task 14. The sampled surfaces
