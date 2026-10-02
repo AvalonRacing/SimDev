@@ -41,8 +41,7 @@ def test_a_dev_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
     with TestClient(app) as client:
         response = client.post(
             "/runs",
-            data={"pair": "baseline/testcase", "profile": "car_dev", "run_name": "e2e",
-                  "solve.max_iterations": "60"},
+            data={"pair": "baseline/testcase", "profile": "car_smoke", "run_name": "e2e"},
             follow_redirects=False,
         )
         assert response.status_code == 303, response.text
@@ -55,8 +54,8 @@ def test_a_dev_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
                 break
             time.sleep(10)
 
-    # 60 iterations cannot fill two plateau windows, so the convergence gate
-    # flags it: gate_failed is the expected verdict, a crash is not.
+    # car_smoke exists to exercise the plumbing; its y+ gate is expected to
+    # fail, so gate_failed is the expected verdict, a crash is not.
     assert job.status in ("done", "gate_failed"), job.error
     run_dir = tmp_path / "runs" / "e2e"
     assert (run_dir / "status" / "solve.json").is_file()
