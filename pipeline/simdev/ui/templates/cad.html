@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}CAD library · SimDev{% endblock %}
+{% block main %}
+<h1>CAD library</h1>
+<p class="muted">
+  A <strong>driving state</strong> is the 13 attitude parts (Chassis, SUS_*, Tire_*, MRF_*) plus speed and corner.
+  A <strong>design</strong> is Body + Wing, exported once for every state it should run in - the body's attitude is part of the export.
+</p>
+
+<h2>Driving states</h2>
+{% for row in states %}
+<details class="card">
+  <summary>
+    <strong>{{ row.state.name }}</strong>
+    <span class="muted">{{ row.mode }} · {{ row.u_inf }} m/s{% if row.mode == 'cornering' %} · R {{ row.corner_radius }} m {{ row.corner_direction }}{% endif %}
+      {% if row.state.description %} · {{ row.state.description }}{% endif %}
+      · designs: {{ row.slots|join(', ') or 'none yet' }}</span>
+  </summary>
+  <form method="post" action="/cad/states/{{ row.state.name }}/edit" class="stack">
+    <label>Description <input name="description" value="{{ row.state.description }}"></label>
+    <label>Mode <select name="mode">
+      <option value="straight" {% if row.mode == 'straight' %}selected{% endif %}>straight</option>
+      <option value="cornering" {% if row.mode == 'cornering' %}selected{% endif %}>cornering</option>
+    </select></label>
+    <label>Speed u_inf [m/s] <input name="u_inf" value="{{ row.u_inf }}" required></label>
+    <label>Corner radius [m] <input name="corner_radius" value="{{ row.corner_radius }}"></label>
+    <label>Corner direction <select name="corner_direction">
+      {% for d in ['left', 'right'] %}<option {% if d == row.corner_direction %}selected{% endif %}>{{ d }}</option>{% endfor %}
+    </select></label>
+    <button>Save parameters</button>
+  </form>
+  <form method="post" action="/cad/states/{{ row.state.name }}/parts" enctype="multipart/form-data" class="row">
+    <input type="file" name="files" multiple accept=".step,.stp,.STEP,.STP">
+    <button>Replace parts</button>
+  </form>
+  <form method="post" action="/cad/states/{{ row.state.name }}/rename" class="row">
+    <input name="new_name" placeholder="new name" required><button>Rename</button>
+  </form>
+  <form method="post" action="/cad/states/{{ row.state.name }}/delete" onsubmit='return confirm({{ ("Delete state " ~ row.state.name ~ "?")|tojson }})'>
+    <button class="danger">Delete state</button>
+  </form>
+</details>
+{% else %}
+<p class="muted">No driving states yet.</p>
+{% endfor %}
+
+<details class="card">
+  <summary><strong>+ New driving state</strong></summary>
+  <form method="post" action="/cad/states" enctype="multipart/form-data" class="stack">
+    <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9\-]*" placeholder="corner-r4-left"></label>
+    <label>Description <input name="description"></label>
+    <label>Mode <select name="mode"><option>cornering</option><option>straight</option></select></label>
+    <label>Speed u_inf [m/s] <input name="u_inf" value="15" required></label>
+    <label>Corner radius [m] <input name="corner_radius" value="4"></label>
+    <label>Corner direction <select name="corner_direction"><option>left</option><option>right</option></select></label>
+    <label>The 13 attitude parts (select them all at once)
+      <input type="file" name="files" multiple required accept=".step,.stp,.STEP,.STP"></label>
+    <button class="primary">Upload state</button>
+    <span class="muted">Every file is opened as STEP before it is accepted; this can take a minute.</span>
+  </form>
+</details>
+
+<h2>Designs</h2>
+{% for design, slots in designs.items() %}
+<details class="card" open>
+  <summary><strong>{{ design }}</strong> <span class="muted">{{ slots|length }} state(s)</span></summary>
+  <table>
+    <tr><th>Exported for state</th><th>Fix a mistake</th><th></th></tr>
+    {% for state in slots %}
+    <tr>
+      <td>{{ state }}</td>
+      <td>
+        <form method="post" action="/cad/designs/{{ design }}/slots/{{ state }}/move" class="row">
+          Move to <select name="to">{% for s in state_names if s != state %}<option>{{ s }}</option>{% endfor %}</select>
+          <label class="row"><input type="checkbox" name="overwrite" value="true"> overwrite</label>
+          <button>Move</button>
+        </form>
+        <form method="post" action="/cad/designs/{{ design }}/slots/{{ state }}/replace" enctype="multipart/form-data" class="row">
+          <input type="file" name="files" multiple accept=".step,.stp,.STEP,.STP"><button>Replace Body/Wing</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/cad/designs/{{ design }}/slots/{{ state }}/delete" onsubmit='return confirm({{ ("Delete " ~ design ~ " for " ~ state ~ "?")|tojson }})'><button class="danger">Delete</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="/cad/designs/{{ design }}/slots" enctype="multipart/form-data" class="row">
+    Add Body + Wing for
+    <select name="state">{% for s in state_names if s not in slots %}<option>{{ s }}</option>{% endfor %}</select>
+    <input type="file" name="files" multiple required accept=".step,.stp,.STEP,.STP">
+    <button class="primary">Upload</button>
+  </form>
+  <div class="row">
+    <form method="post" action="/cad/designs/{{ design }}/rename" class="row"><input name="new_name" placeholder="new name" required><button>Rename</button></form>
+    <form method="post" action="/cad/designs/{{ design }}/delete" onsubmit='return confirm({{ ("Delete design " ~ design ~ " and all its Body/Wing files?")|tojson }})'><button class="danger">Delete design</button></form>
+  </div>
+</details>
+{% else %}
+<p class="muted">No designs yet.</p>
+{% endfor %}
+
+<form method="post" action="/cad/designs" class="row card">
+  <input name="name" required pattern="[a-z0-9][a-z0-9\-]*" placeholder="v02-bigger-wing">
+  <button class="primary">+ New design</button>
+</form>
+{% endblock %}

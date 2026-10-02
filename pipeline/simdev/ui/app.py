@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from simdev.cad.checks import default_library
 from simdev.cad.library import Library
-from simdev.ui import routes_queue, routes_runs
+from simdev.ui import routes_cad, routes_queue, routes_runs
 from simdev.ui.context import Context, UIConfig
 from simdev.ui.queue import Job, Queue
 from simdev.ui.worker import Worker, default_command
@@ -65,6 +65,6 @@ def create_app(
     app = FastAPI(title="SimDev", lifespan=lifespan)
     app.state.ctx = Context(config, queue, library, worker, templates)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
-    for router in (routes_queue.router, routes_runs.router):
+    for router in (routes_queue.router, routes_runs.router, routes_cad.router):
         app.include_router(router)
     return app
