@@ -117,6 +117,13 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def read_state_file(path: Path) -> tuple[str, dict[str, Any]]:
+    """The description and the parameters of a state.yaml."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    description = str(raw.pop("description", "") or "")
+    return description, raw
+
+
 @dataclass(frozen=True)
 class State:
     name: str
@@ -160,9 +167,8 @@ class Library:
         path = self.states_dir / name / STATE_FILE
         if not path.is_file():
             raise LibraryError(f"no driving state {name!r}")
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        description = str(raw.pop("description", "") or "")
-        return State(name=name, description=description, params=raw)
+        description, params = read_state_file(path)
+        return State(name=name, description=description, params=params)
 
     def designs(self) -> dict[str, list[str]]:
         if not self.designs_dir.is_dir():
@@ -409,6 +415,9 @@ class Library:
             destination = target / f"{part}.step"
             shutil.copy2(source, destination)
             digests[part] = sha256(destination)
+        # The parameters travel with the parts, so a run resumed after the
+        # library state was edited still runs with the values it was built with.
+        shutil.copy2(self.states_dir / state / STATE_FILE, target / STATE_FILE)
 
         cache = self.root / CACHE_DIR_NAME
         cache.mkdir(parents=True, exist_ok=True)

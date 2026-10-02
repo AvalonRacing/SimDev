@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,8 +8,17 @@ from typing import Any
 
 import numpy as np
 import trimesh
+import yaml
 
-from simdev.cad.library import Library, default_cad_root
+from simdev.cad.library import (
+    DESIGN_PARTS,
+    STATE_FILE,
+    STATE_PARTS,
+    Library,
+    default_cad_root,
+    read_state_file,
+    sha256,
+)
 from simdev.config.resolve import deep_merge, load_case
 from simdev.config.schema import CaseSpec
 from simdev.config.validate import validate
@@ -537,8 +547,35 @@ def _wheel_warnings(
     return warnings
 
 
+def _recorded_cad(
+    run_dir: Path, design: str, state: str
+) -> tuple[dict[str, Any], dict[str, str]] | None:
+    """The state parameters and part digests of this run's own CAD copy, if
+    it is intact and is the (design, state) the run was prepared with."""
+    try:
+        payload = json.loads((run_dir / "caseSpec.json").read_text(encoding="utf-8"))
+        cad = payload["spec"]["cad"]
+        if cad["design"] != design or cad["state"] != state:
+            return None
+        recorded: dict[str, str] = cad["parts"]
+        if set(recorded) != set(STATE_PARTS) | set(DESIGN_PARTS):
+            return None
+        target = run_dir / "cad"
+        for part, digest in recorded.items():
+            if sha256(target / f"{part}.step") != digest:
+                return None
+        _, params = read_state_file(target / STATE_FILE)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError):
+        return None
+    return params, recorded
+
+
 def cad_layers(
-    run_dir: Path, design: str | None, state: str | None, cad_root: Path | None
+    run_dir: Path,
+    design: str | None,
+    state: str | None,
+    cad_root: Path | None,
+    force: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """The library state's parameters, and the overrides that point this run
     at its own copy of the CAD.
@@ -546,16 +583,25 @@ def cad_layers(
     The copy happens here, before the spec is resolved, because the part
     digests are part of the spec: new CAD under an old name changes the
     hash, so prepare cannot be skipped over it.
+
+    A run that was already prepared keeps the copy and the state parameters
+    it was built with, so editing, renaming or deleting library CAD cannot
+    change or break it on resume (spec 3.5). Only force re-assembles from the
+    library as it is now.
     """
     if (design is None) != (state is None):
         raise ValueError("--design and --state go together")
     if design is None:
         return None, {}
 
-    library = Library(cad_root or default_cad_root())
-    params = library.state(state).params
     target = Path(run_dir) / "cad"
-    digests = library.assemble(design, state, target)
+    recorded = None if force else _recorded_cad(Path(run_dir), design, state)
+    if recorded is not None:
+        params, digests = recorded
+    else:
+        library = Library(cad_root or default_cad_root())
+        params = library.state(state).params
+        digests = library.assemble(design, state, target)
     return params, {
         "driving_state": state,
         "geometry": {"source_dir": str(target)},
@@ -574,7 +620,7 @@ def prepare(
     state: str | None = None,
     cad_root: Path | None = None,
 ) -> PrepareResult:
-    state_params, cad_overrides = cad_layers(Path(run_dir), design, state, cad_root)
+    state_params, cad_overrides = cad_layers(Path(run_dir), design, state, cad_root, force)
     # The user's --set still wins over everything the library supplied.
     spec = load_case(
         Path(case_path),
