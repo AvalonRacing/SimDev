@@ -1,0 +1,29 @@
+# systemd user unit for the SimDev web UI.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/simdev-ui.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now simdev-ui
+#   sudo loginctl enable-linger $USER     # keep it running while logged out
+#
+# See docs/ui-setup.md.
+
+[Unit]
+Description=SimDev web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/SimDev
+# OpenFOAM's environment comes from its bashrc, which a service does not read.
+# No `set -e` here: that bashrc returns non-zero on success (docs/environment-setup.md).
+ExecStart=/bin/bash -c 'source /usr/lib/openfoam/openfoam2412/etc/bashrc; exec %h/SimDev/.venv/bin/simdev ui'
+Restart=on-failure
+RestartSec=10
+# Jobs are children of this service. KillMode=process stops only the server on
+# a restart or upgrade, so a solve in progress survives and is adopted when
+# the server comes back. The default (control-group) would kill every rank.
+KillMode=process
+
+[Install]
+WantedBy=default.target

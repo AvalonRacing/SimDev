@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}System · SimDev{% endblock %}
+{% block main %}
+<h1>System</h1>
+<dl class="grid card">
+  <dt>Runs folder</dt><dd>{{ config.runs_root }} · {{ '%.0f'|format(disk_free) }} GB free of {{ '%.0f'|format(disk_total) }} GB</dd>
+  <dt>CAD library</dt><dd>{{ config.cad_root }}</dd>
+  <dt>Case</dt><dd>{{ config.case_path }}</dd>
+  <dt>Load (1/5/15 min)</dt><dd>{{ '%.1f / %.1f / %.1f'|format(*load) }} on {{ cpus }} logical CPUs</dd>
+</dl>
+
+<h2>Queue</h2>
+<form method="post" action="/system/settings" class="stack card">
+  <label>Core budget <span class="muted">MPI ranks that may run at once, summed over running jobs. 40 physical cores on the Z8.</span>
+    <input name="core_budget" type="number" min="1" value="{{ core_budget }}"></label>
+  <label>Parallel runs <span class="muted">1 = strictly one at a time. Raise only after re-measuring rank scaling on native Linux.</span>
+    <input name="max_parallel" type="number" min="1" max="8" value="{{ max_parallel }}"></label>
+  <button>Save</button>
+</form>
+
+<h2>Environment check</h2>
+<button hx-post="/system/doctor" hx-target="#doctor" hx-indicator="#doctor-wait">Run simdev doctor</button>
+<span id="doctor-wait" class="htmx-indicator muted">running… (up to a few minutes)</span>
+<div id="doctor"></div>
+{% endblock %}

@@ -103,6 +103,21 @@ def _parser() -> argparse.ArgumentParser:
     rep.add_argument("run_dirs", type=Path, nargs="+")
     rep.add_argument("--out", type=Path, default=None)
 
+    ui = subparsers.add_parser(
+        "ui", help="serve the web UI on the Tailscale address (needs simdev[ui])"
+    )
+    ui.add_argument(
+        "--host", default=None,
+        help="address to listen on; default: this machine's Tailscale IPv4",
+    )
+    ui.add_argument("--port", type=int, default=8000)
+    ui.add_argument("--runs-root", type=Path, default=Path.home() / "runs")
+    ui.add_argument("--cad-root", type=Path, default=None)
+    ui.add_argument("--case", type=Path, default=None, help="default: cases/car/config.yaml")
+    ui.add_argument(
+        "--db", type=Path, default=Path.home() / ".local/share/simdev-ui/ui.db"
+    )
+
     return parser
 
 
@@ -204,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
     try:
+        if args.command == "ui":
+            from simdev.ui.serve import serve
+
+            return serve(args.host, args.port, args.runs_root, args.cad_root,
+                         args.case, args.db)
         if args.command == "doctor":
             return _doctor()
 
