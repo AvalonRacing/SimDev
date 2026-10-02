@@ -218,10 +218,15 @@ class Queue:
             if cursor.rowcount == 0:
                 raise QueueError(f"job {job_id} is not {expected}")
 
-    def mark_running(self, job_id: int, pid: int, pgid: int) -> None:
+    def mark_running(self, job_id: int, pid: int | None = None, pgid: int | None = None) -> None:
+        # The worker claims a job before it starts the process, so a job can be
+        # running with no pid yet; set_process fills it in once the process exists.
         self._transition(
             job_id, "queued", status="running", pid=pid, pgid=pgid, started_at=self._clock()
         )
+
+    def set_process(self, job_id: int, pid: int, pgid: int) -> None:
+        self._transition(job_id, "running", pid=pid, pgid=pgid)
 
     def mark_finished(
         self, job_id: int, status: str, exit_code: int | None, error: str | None

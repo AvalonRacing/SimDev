@@ -50,6 +50,13 @@ def current_boot_id() -> str:
         return ""
 
 
+def write_process_file(run_dir: Path, pgid: int) -> None:
+    (run_dir / "ui").mkdir(parents=True, exist_ok=True)
+    (run_dir / PROCESS_FILE).write_text(
+        json.dumps({"pgid": pgid, "boot_id": current_boot_id()}), encoding="utf-8"
+    )
+
+
 def _owns_group(job: Job) -> bool:
     """A running job is ours to adopt only if its recorded group survived this boot."""
     try:
@@ -130,6 +137,10 @@ class Worker:
                 if code is None:
                     continue
             elif job.id not in self._adopted:
+                if job.pgid is None:
+                    # Claimed but never given a process by this worker: the
+                    # service stopped between the claim and the start.
+                    self.queue.mark_finished(job.id, "failed", None, RESTARTED)
                 continue
             # The leader exiting is not the end: ranks may outlive it.
             if job.pgid and group_alive(job.pgid):
@@ -171,13 +182,17 @@ class Worker:
             self._spawn(job)
 
     def _spawn(self, job: Job) -> None:
+        # Claim the job before anything can fail, so a job that cannot start is
+        # finished as failed once instead of staying queued and being retried
+        # (and blocking the queue) on every tick, and so a process that did
+        # start can never be started a second time.
+        self.queue.mark_running(job.id)
         run_dir = Path(job.run_dir)
-        (run_dir / "logs").mkdir(parents=True, exist_ok=True)
-        write_job_file(job, str(self._cad_root) if self._cad_root else None)
-        (run_dir / OUTCOME_FILE).unlink(missing_ok=True)
-
-        with open(run_dir / UI_LOG, "a", encoding="utf-8") as output:
-            try:
+        try:
+            (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+            write_job_file(job, str(self._cad_root) if self._cad_root else None)
+            (run_dir / OUTCOME_FILE).unlink(missing_ok=True)
+            with open(run_dir / UI_LOG, "a", encoding="utf-8") as output:
                 proc = subprocess.Popen(
                     self._command(job),
                     cwd=self._cwd,
@@ -186,18 +201,20 @@ class Worker:
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-            except OSError as error:
-                self.queue.mark_running(job.id, 0, 0)
-                self.queue.mark_finished(job.id, "failed", None, f"could not start: {error}")
-                return
+        except Exception as error:
+            log.exception("could not start job %s", job.id)
+            self.queue.mark_finished(job.id, "failed", None, f"could not start: {error}")
+            return
 
         self._procs[job.id] = proc
         # start_new_session makes the child its own group leader: pgid == pid.
-        (run_dir / "ui").mkdir(parents=True, exist_ok=True)
-        (run_dir / PROCESS_FILE).write_text(
-            json.dumps({"pgid": proc.pid, "boot_id": current_boot_id()}), encoding="utf-8"
-        )
-        self.queue.mark_running(job.id, proc.pid, proc.pid)
+        self.queue.set_process(job.id, proc.pid, proc.pid)
+        try:
+            write_process_file(run_dir, proc.pid)
+        except OSError:
+            # Only recover() after a restart needs the record; without it the
+            # job is reported as lost then, which is better than not running it.
+            log.exception("could not record the process of job %s", job.id)
 
     # --- requests from the UI ------------------------------------------------
 

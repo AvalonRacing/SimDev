@@ -320,3 +320,64 @@ def _pid_alive(pid: int) -> bool:
             return handle.read().split()[2] != "Z"
     except FileNotFoundError:
         return False
+
+
+def test_a_job_that_cannot_start_fails_and_the_queue_moves_on(tmp_path, queue) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("a regular file where the run directory's parent should be")
+    broken = queue.enqueue(
+        JobSpec(
+            run_name="a", run_dir=str(blocker / "a"), case_path="case.yaml",
+            design="ok", state="corner", profile="dev", n_ranks=40,
+        )
+    )
+    second = queue.enqueue(spec(tmp_path, "b", "ok"))
+    worker = worker_for(queue)
+    worker.tick()
+    failed = queue.get(broken.id)
+    assert failed.status == "failed"
+    assert failed.error.startswith("could not start: ")
+    assert run_to_end(worker, queue, second.id) == "done"
+
+
+def test_a_lost_process_record_does_not_start_the_job_twice(tmp_path, queue, monkeypatch) -> None:
+    import simdev.ui.worker as worker_module
+
+    def disk_full(run_dir, pgid):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(worker_module, "write_process_file", disk_full)
+    starts = []
+
+    def counting(job):
+        starts.append(job.id)
+        return stub_command(job)
+
+    job = queue.enqueue(spec(tmp_path, "a", "ok"))
+    worker = Worker(queue, command=counting, kill_grace=1.0)
+    worker.tick()
+    running = queue.get(job.id)
+    assert running.status == "running"
+    assert running.pgid == running.pid and running.pid is not None
+    assert run_to_end(worker, queue, job.id) == "done"
+    for _ in range(3):
+        worker.tick()
+    assert starts == [job.id]
+
+
+def test_a_claimed_job_without_a_process_is_lost(tmp_path, queue) -> None:
+    job = queue.enqueue(spec(tmp_path, "a"))
+    queue.mark_running(job.id)
+    worker_for(queue).recover()
+    assert queue.get(job.id).status == "failed"
+    assert "restarted" in queue.get(job.id).error
+
+
+def test_a_tick_fails_a_claimed_job_this_worker_never_started(tmp_path, queue) -> None:
+    worker = worker_for(queue)
+    worker.recover()
+    job = queue.enqueue(spec(tmp_path, "a"))
+    queue.mark_running(job.id)
+    worker.tick()
+    assert queue.get(job.id).status == "failed"
+    assert "restarted" in queue.get(job.id).error
