@@ -118,8 +118,13 @@ def sha256(path: Path) -> str:
 
 
 def read_state_file(path: Path) -> tuple[str, dict[str, Any]]:
-    """The description and the parameters of a state.yaml."""
+    """The description and the parameters of a state.yaml.
+
+    Raises yaml.YAMLError or ValueError for a file that is not a mapping.
+    """
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"expected a mapping, found a {type(raw).__name__}")
     description = str(raw.pop("description", "") or "")
     return description, raw
 
@@ -152,22 +157,50 @@ class Library:
 
     # --- reading -------------------------------------------------------------
 
-    def states(self) -> list[State]:
+    def _state_names(self) -> list[str]:
         if not self.states_dir.is_dir():
             return []
         return [
-            self.state(folder.name)
+            folder.name
             for folder in sorted(self.states_dir.iterdir())
             if (folder / STATE_FILE).is_file()
         ]
 
-    def state(self, name: str) -> State:
+    def states(self) -> list[State]:
+        """Every state that can be read; see broken_states() for the rest."""
+        states = []
+        for name in self._state_names():
+            try:
+                states.append(self.state(name))
+            except LibraryError:
+                continue
+        return states
+
+    def broken_states(self) -> dict[str, str]:
+        """States whose state.yaml was hand-edited into something unreadable,
+        with the reason, so the library page can show them instead of failing."""
+        broken = {}
+        for name in self._state_names():
+            try:
+                self.state(name)
+            except LibraryError as error:
+                broken[name] = str(error)
+        return broken
+
+    def _state_file(self, name: str) -> Path:
         if not NAME_PATTERN.fullmatch(name or ""):
             raise LibraryError(f"no driving state {name!r}")
         path = self.states_dir / name / STATE_FILE
         if not path.is_file():
             raise LibraryError(f"no driving state {name!r}")
-        description, params = read_state_file(path)
+        return path
+
+    def state(self, name: str) -> State:
+        path = self._state_file(name)
+        try:
+            description, params = read_state_file(path)
+        except (yaml.YAMLError, ValueError) as error:
+            raise LibraryError(f"state {name}: state.yaml is not valid: {error}") from None
         return State(name=name, description=description, params=params)
 
     def designs(self) -> dict[str, list[str]]:
@@ -180,11 +213,13 @@ class Library:
         }
 
     def pairs(self) -> list[tuple[str, str]]:
+        # A broken state cannot be resolved, so it offers no runnable pair.
+        usable = {state.name for state in self.states()}
         return [
             (design, state)
             for design, states in self.designs().items()
             for state in states
-            if (self.states_dir / state / STATE_FILE).is_file()
+            if state in usable
         ]
 
     def slots_for_state(self, state: str) -> list[str]:
@@ -299,7 +334,8 @@ class Library:
             (self.designs_dir / design / old).rename(self.designs_dir / design / new)
 
     def delete_state(self, name: str) -> None:
-        self.state(name)
+        # Only the folder has to exist: deleting is how a broken state goes.
+        self._state_file(name)
         used = self.slots_for_state(name)
         if used:
             raise LibraryError(

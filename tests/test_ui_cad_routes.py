@@ -107,9 +107,20 @@ def test_a_hostile_name_cannot_break_out_of_the_confirm_dialogs(tmp_path: Path) 
         row = {"state": SimpleNamespace(name=name, description=""), "mode": "straight",
                "u_inf": 1, "corner_radius": "", "corner_direction": "left", "slots": [name]}
         page = app.state.ctx.templates.get_template("cad.html").render(
-            states=[row], designs={name: [name]}, state_names=[name, "other"],
-            error=None, message=None,
+            states=[row], broken={name: "bad"}, designs={name: [name]},
+            state_names=[name, "other"], error=None, message=None,
         )
         assert "confirm('" not in page
         assert "confirm(&#39;" not in page
-        assert page.count("\\u0027);alert(1);(\\u0027") == 4  # state, slot (design + state), design
+        # state, broken state, slot (design + state), design
+        assert page.count("\\u0027);alert(1);(\\u0027") == 5
+
+
+def test_a_broken_state_is_shown_on_the_library_page(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        (tmp_path / "CAD" / "states" / "corner" / "state.yaml").write_text("[1, 2")
+        page = client.get("/cad")
+        assert page.status_code == 200
+        assert "state corner: state.yaml is not valid" in page.text
+        # The only pair used the broken state, so New Run has nothing to offer.
+        assert client.get("/runs/new").status_code == 200

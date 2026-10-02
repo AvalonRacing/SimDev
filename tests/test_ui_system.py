@@ -8,7 +8,7 @@ import pytest
 from simdev.ui.serve import resolve_host
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "::", " "])
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", " ", "0", "::0", "[::]", "0.0", "0x0"])
 def test_every_interface_is_refused(host: str) -> None:
     with pytest.raises(ValueError, match="every interface"):
         resolve_host(host)
@@ -16,6 +16,8 @@ def test_every_interface_is_refused(host: str) -> None:
 
 def test_an_explicit_address_is_used() -> None:
     assert resolve_host("127.0.0.1") == "127.0.0.1"
+    assert resolve_host("::1") == "::1"
+    assert resolve_host("z8.tail1234.ts.net") == "z8.tail1234.ts.net"
 
 
 def test_the_default_is_the_tailscale_address() -> None:

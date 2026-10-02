@@ -1,7 +1,7 @@
-"""Queue a real dev run through the HTTP API and wait for the pipeline.
+"""Queue a real car_smoke run through the HTTP API and wait for the pipeline.
 
-Long (tens of minutes: a full mesh and 60 iterations), so it runs only when
-asked: SIMDEV_UI_E2E=1 with OpenFOAM on PATH and the library migrated.
+Long (a full mesh and a short solve), so it runs only when asked:
+SIMDEV_UI_E2E=1 with OpenFOAM on PATH and the library migrated.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ pytestmark = [
 ]
 
 
-def test_a_dev_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
+def test_a_car_smoke_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
@@ -54,8 +54,8 @@ def test_a_dev_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
                 break
             time.sleep(10)
 
-    # car_smoke exists to exercise the plumbing; its y+ gate is expected to
-    # fail, so gate_failed is the expected verdict, a crash is not.
+    # car_smoke exists to exercise the plumbing; its y+ gate may fail, so
+    # gate_failed is an acceptable verdict, a crash is not.
     assert job.status in ("done", "gate_failed"), job.error
     run_dir = tmp_path / "runs" / "e2e"
     assert (run_dir / "status" / "solve.json").is_file()

@@ -105,7 +105,8 @@ def _page(request: Request, error: str | None = None, message: str | None = None
             "slots": library.slots_for_state(state.name),
         })
     return render(
-        request, "cad.html", states=rows, designs=library.designs(),
+        request, "cad.html", states=rows, broken=library.broken_states(),
+        designs=library.designs(),
         state_names=[r["state"].name for r in rows],
         error=error, message=message, status_code=status_code,
     )

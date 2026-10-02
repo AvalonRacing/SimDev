@@ -2,13 +2,38 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import shutil
+import socket
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 EVERYWHERE = {"0.0.0.0", "::", ""}
+
+
+def _everywhere(host: str) -> bool:
+    """Whether binding to host listens on every interface.
+
+    Spellings like "0", "::0" and "[::]" mean the same as "0.0.0.0" and
+    "::", so an address is judged by its value; the string set catches the
+    rest (the empty name).
+    """
+    host = host.strip()
+    if host in EVERYWHERE:
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_unspecified
+    except ValueError:
+        pass
+    # The resolver also takes the old inet_aton shorthands ("0", "0.0", "0x0")
+    # that ipaddress rejects; inet_aton reads them the same way and never
+    # looks a name up.
+    try:
+        return socket.inet_aton(host) == bytes(4)
+    except OSError:
+        return False
 SNAP_TAILSCALE = Path("/snap/bin/tailscale")
 
 
@@ -18,7 +43,7 @@ def resolve_host(
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> str:
     if host is not None:
-        if host.strip() in EVERYWHERE:
+        if _everywhere(host):
             raise ValueError(
                 "refusing to listen on every interface: the UI has no logins, so "
                 "anyone who can reach the port can start and delete runs. Use the "

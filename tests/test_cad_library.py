@@ -280,3 +280,19 @@ def test_state_rejects_path_traversal(lib: Library, tmp_path: Path) -> None:
     lib.create_state("corner", "", CORNER, state_files(tmp_path))
     with pytest.raises(LibraryError, match="no driving state"):
         lib.state("../states/corner")
+
+
+@pytest.mark.parametrize(
+    "text, reason",
+    [("- just\n- a list\n", "expected a mapping"), ("flow: {u_inf: [\n", "not valid")],
+)
+def test_a_hand_broken_state_is_reported_not_raised(stocked: Library, text: str, reason: str) -> None:
+    (stocked.states_dir / "straight" / "state.yaml").write_text(text)
+
+    with pytest.raises(LibraryError, match="state straight: state.yaml is not valid"):
+        stocked.state("straight")
+    assert [s.name for s in stocked.states()] == ["corner"]
+    assert reason in stocked.broken_states()["straight"]
+    assert stocked.pairs() == [("v01", "corner")]
+    stocked.delete_state("straight")
+    assert stocked.broken_states() == {}

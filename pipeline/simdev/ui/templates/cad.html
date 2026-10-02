@@ -41,7 +41,15 @@
   </form>
 </details>
 {% else %}
-<p class="muted">No driving states yet.</p>
+{% if not broken %}<p class="muted">No driving states yet.</p>{% endif %}
+{% endfor %}
+{% for name, reason in broken.items() %}
+<div class="error">
+  <strong>{{ name }}</strong> is broken: {{ reason }}. Fix its state.yaml by hand or delete the state.
+  <form method="post" action="/cad/states/{{ name }}/delete" onsubmit='return confirm({{ ("Delete state " ~ name ~ "?")|tojson }})'>
+    <button class="danger">Delete state</button>
+  </form>
+</div>
 {% endfor %}
 
 <details class="card">
