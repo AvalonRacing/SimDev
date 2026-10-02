@@ -8,6 +8,7 @@ exactly like one made from the browser.
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,15 @@ CONTEXT_LINES = 25
 
 _TIME = re.compile(r"^Time = (\d+)\s*$", re.MULTILINE)
 _EXEC = re.compile(r"^ExecutionTime = ([\d.eE+-]+) s", re.MULTILINE)
+
+
+def _read_status(run_dir: Path, stage: str):
+    """Read status safely, returning None if the file is corrupted."""
+    try:
+        return read_status(run_dir, stage)
+    except (ValueError, TypeError):
+        # Half-written or invalid status file
+        return None
 
 
 @dataclass(frozen=True)
@@ -64,7 +74,7 @@ def stages(
 
     for index, name in enumerate(STAGES):
         path = run_dir / "status" / f"{name}.json"
-        status = read_status(run_dir, name) if path.is_file() else None
+        status = _read_status(run_dir, name) if path.is_file() else None
         mtime = path.stat().st_mtime if status else None
         old = since is not None and mtime is not None and mtime < since
         current = status is not None and not (
@@ -111,6 +121,9 @@ def _series(frame: pd.DataFrame, after: int, columns: dict[str, str]) -> dict[st
     if frame.empty:
         return {"iteration": [], **{name: [] for name in columns}}
     frame = frame[frame["Time"] > after]
+    # Drop rows with NaN in Time or any requested column
+    cols_to_check = ["Time"] + list(columns.values())
+    frame = frame.dropna(subset=cols_to_check, how="any")
     return {
         "iteration": frame["Time"].astype(int).tolist(),
         **{name: frame[column].astype(float).tolist() for name, column in columns.items()},
@@ -217,16 +230,31 @@ def errors(run_dir: Path) -> list[ErrorView]:
     run_dir = Path(run_dir)
     found: list[ErrorView] = []
     for name in STAGES:
-        status = read_status(run_dir, name)
+        status = _read_status(run_dir, name)
         if status is not None and status.state == "failed":
             found.append(ErrorView(f"stage {name}", "; ".join(status.reasons) or "failed"))
     for name in log_names(run_dir):
-        lines = (run_dir / "logs" / name).read_text(encoding="utf-8", errors="replace").splitlines()
-        for index, line in enumerate(lines):
-            if is_fatal_line(line):
-                context = lines[max(0, index - CONTEXT_LINES): index + CONTEXT_LINES + 1]
-                found.append(ErrorView(f"logs/{name}", line.strip(), context))
-                break
+        log_path = run_dir / "logs" / name
+        # Stream log file line-by-line to avoid memory issues with large logs
+        preceding = deque(maxlen=CONTEXT_LINES)
+        try:
+            with log_path.open(encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.rstrip("\n")
+                    if is_fatal_line(line):
+                        # Collect following lines
+                        context = list(preceding) + [line]
+                        for _ in range(CONTEXT_LINES):
+                            try:
+                                context.append(next(f).rstrip("\n"))
+                            except StopIteration:
+                                break
+                        found.append(ErrorView(f"logs/{name}", line.strip(), context))
+                        break
+                    preceding.append(line)
+        except (OSError, IOError):
+            # Log file disappeared or can't be read
+            continue
     return found
 
 
@@ -248,11 +276,15 @@ def images(run_dir: Path) -> dict[str, Any]:
 
 def safe_file(run_dir: Path, rel: str) -> Path:
     """A file inside the run directory, or KeyError - never anything else."""
-    root = Path(run_dir).resolve()
-    target = (root / rel).resolve()
-    if not target.is_relative_to(root) or not target.is_file():
+    try:
+        root = Path(run_dir).resolve()
+        target = (root / rel).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            raise KeyError(rel)
+        return target
+    except (ValueError, OSError):
+        # NUL byte or other path issues
         raise KeyError(rel)
-    return target
 
 
 def list_runs(runs_root: Path) -> list[Path]:

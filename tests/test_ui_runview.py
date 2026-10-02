@@ -134,7 +134,7 @@ def test_images_grouped_by_folder(run: Path) -> None:
     assert found["groups"] == {"cp_x": ["results/images/cp_x/cp_x_01_+0.100.png"]}
 
 
-@pytest.mark.parametrize("rel", ["../r2/x", "/etc/passwd", "results/../../r2/x", "results"])
+@pytest.mark.parametrize("rel", ["../r2/x", "/etc/passwd", "results/../../r2/x", "results", "a\x00b"])
 def test_safe_file_refuses_anything_outside_or_not_a_file(run: Path, rel: str) -> None:
     (run.parent / "r2").mkdir()
     (run.parent / "r2" / "x").write_text("secret")
@@ -168,3 +168,64 @@ def test_strip_mesh_keeps_results(run: Path) -> None:
 def test_delete_run(run: Path) -> None:
     delete_run(run)
     assert not run.exists()
+
+
+def test_force_series_with_truncated_line_drops_nan(tmp_path: Path) -> None:
+    """A solver mid-write leaves a truncated last line; pandas pads with NaN."""
+    import json
+    import shutil
+    run_dir = tmp_path / "runs" / "r1"
+    coeffs = run_dir / "postProcessing" / "forceCoeffs" / "0"
+    coeffs.mkdir(parents=True)
+    # Copy fixture and add a truncated line
+    shutil.copy(FIXTURES / "coefficient.dat", coeffs / "coefficient.dat")
+    with open(coeffs / "coefficient.dat", "a") as f:
+        f.write("6               0.3")  # Truncated, will have NaN columns
+    result = runview.force_series(run_dir)
+    # Should drop the truncated row, keeping only [1..5]
+    assert result["iteration"] == [1, 2, 3, 4, 5]
+    # Verify json.dumps works (no bare NaN values)
+    json.dumps(result, allow_nan=False)
+
+
+def test_residual_series_with_truncated_line_drops_nan(tmp_path: Path) -> None:
+    """Residual series should also drop rows with NaN."""
+    import json
+    run_dir = tmp_path / "runs" / "r1"
+    residuals = run_dir / "postProcessing" / "residuals" / "0"
+    residuals.mkdir(parents=True)
+    solver_info = SOLVER_INFO + "3               \tpartialSolver\t1.1e-03\t9.9e-05"  # Truncated
+    (residuals / "solverInfo.dat").write_text(solver_info)
+    result = runview.residual_series(run_dir)
+    # Should drop the truncated row
+    assert result["iteration"] == [1, 2]
+    # Verify json.dumps works
+    json.dumps(result, allow_nan=False)
+
+
+def test_safe_file_with_nul_byte_raises_keyerror(run: Path) -> None:
+    """NUL byte in path should raise KeyError, not ValueError."""
+    with pytest.raises(KeyError):
+        runview.safe_file(run, "a\x00b")
+
+
+def test_stages_with_half_written_status_file(tmp_path: Path) -> None:
+    """Half-written (truncated) JSON status file should not raise."""
+    run_dir = tmp_path / "runs" / "r1"
+    status_dir = run_dir / "status"
+    status_dir.mkdir(parents=True)
+    (status_dir / "prepare.json").write_text("{")  # Truncated JSON
+    # Should not raise; prepare should be pending or treated as missing
+    views = runview.stages(run_dir, running=True, since=0.0)
+    assert len(views) == 5
+
+
+def test_errors_with_half_written_status_file(tmp_path: Path) -> None:
+    """Corrupted status file in errors() should not raise."""
+    run_dir = tmp_path / "runs" / "r1"
+    status_dir = run_dir / "status"
+    status_dir.mkdir(parents=True)
+    (status_dir / "mesh.json").write_text("{")  # Truncated JSON
+    # Should not raise; errors() should return empty or skip the stage
+    errors_found = runview.errors(run_dir)
+    assert isinstance(errors_found, list)
