@@ -66,11 +66,28 @@ def test_no_entry_is_seeded_with_a_sample_path() -> None:
 
 def test_every_plane_gets_every_slice_field() -> None:
     plan = _plan()
-    assert len(plan["slices"]) == 32 + 21 + 17
-    assert len(plan["slices"][0]["images"]) == 5
+    assert len(plan["slices"]) == 63 + 41 + 33
+    assert len(plan["slices"][0]["images"]) == 4
+    # No vort: it showed the same vortex cores as lambda2.
     assert {i["field"] for i in plan["slices"][0]["images"]} == {
-        "cp", "cpt", "U", "vort", "lambda2"
+        "cp", "cpt", "U", "lambda2"
     }
+
+
+def test_z_slices_put_the_nose_on_the_right() -> None:
+    """Plan view with the car lengthwise across the landscape frame, the
+    same way round as the y slices and the `top` surface view."""
+    plan = _plan()
+    camera = next(s for s in plan["slices"] if s["axis"] == "z")["camera"]
+    look = [camera["focal"][i] - camera["position"][i] for i in range(3)]
+    up = camera["up"]
+    right = [
+        look[1] * up[2] - look[2] * up[1],
+        look[2] * up[0] - look[0] * up[2],
+        look[0] * up[1] - look[1] * up[0],
+    ]
+    assert up == pytest.approx([0.0, 1.0, 0.0])
+    assert right[0] > 0 and right[1] == pytest.approx(0) and right[2] == pytest.approx(0)
 
 
 def test_the_surface_suite_is_seven_views_of_two_fields() -> None:
@@ -93,7 +110,7 @@ def test_slice_cameras_track_their_own_plane() -> None:
     assert first["camera"]["focal"][0] == pytest.approx(DATUM[0] - 0.30)
     # Laterally pinned to the datum, so the car does not drift across frame.
     assert first["camera"]["focal"][1] == pytest.approx(DATUM[1])
-    assert first["camera"]["focal"][2] == pytest.approx(VIEWS.focus_height)
+    assert first["camera"]["focal"][2] == pytest.approx(VIEWS.focus_height["x"])
     # From the views file, not a literal: the camera scale is a tuning knob
     # and hardcoding it here makes every adjustment look like a regression.
     # What is being tested is that the plan USES the configured value.

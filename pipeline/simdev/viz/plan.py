@@ -39,11 +39,13 @@ CAMERA_DISTANCE = 2.0
 #   x: from downstream looking upstream, so car-left (+y) is on the right -
 #      the conventional way to read streamwise vortices.
 #   y: from the car's right, so the nose points right.
-#   z: from above, nose up. A plan view.
+#   z: from above, nose right. A plan view, with the car's length across
+#      the long side of the landscape frame - the same way round as the y
+#      slices and the `top` surface view.
 SLICE_VIEW = {
     "x": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
     "y": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-    "z": ((0.0, 0.0, -1.0), (1.0, 0.0, 0.0)),
+    "z": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
 }
 
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
@@ -191,7 +193,7 @@ def build_render_plan(
                 focal = [
                     datum[0] + offset * normal[0],
                     datum[1] + offset * normal[1],
-                    datum[2] + views.focus_height,
+                    datum[2] + views.focus_height[axis],
                 ]
 
             plan["slices"].append({
@@ -216,9 +218,6 @@ def build_render_plan(
                 "images": [
                     {
                         "field": field,
-                        # vort on a plane is the component NORMAL to it - the
-                        # one that shows streamwise vortices punching through.
-                        "component": index if field == "vort" else None,
                         # FLAT LAYOUT: one directory per field-and-axis,
                         # e.g. cp_x/ holding cp_x_+0.120.png. Every
                         # directory under results/images therefore holds
@@ -265,7 +264,6 @@ def build_render_plan(
             "images": [
                 {
                     "field": field,
-                    "component": None,
                     "out": str(images_dir / f"surface_{field}" / f"{name}.png"),
                 }
                 for field in SURFACE_FIELDS

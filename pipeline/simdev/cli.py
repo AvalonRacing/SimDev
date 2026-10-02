@@ -68,7 +68,7 @@ def _parser() -> argparse.ArgumentParser:
     img.add_argument("--force", action="store_true")
     img.add_argument(
         "--axes", nargs="+", default=None, choices=["x", "y", "z"],
-        help="only these slice axes. Iterating on one view should not cost 364 images",
+        help="only these slice axes. Iterating on one view should not cost 562 images",
     )
     img.add_argument(
         "--fields", nargs="+", default=None,

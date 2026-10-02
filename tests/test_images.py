@@ -40,7 +40,6 @@ fields:
   cp:      {limits: [-3.0, 1.0], colormap: spectrum}
   cpt:     {limits: [-3.0, 1.0], colormap: spectrum}
   U:       {limits: [0.0, 60.0], colormap: spectrum}
-  vort:    {limits: [0.0, 2000.0], colormap: spectrum}
   lambda2: {limits: [-50000.0, 0.0], colormap: spectrum}
   yplus:   {limits: [0.0, 300.0], colormap: thermal}
 camera:
@@ -110,7 +109,7 @@ def test_the_plan_covers_the_configured_planes(run_dir: Path, monkeypatch) -> No
 
 
 def test_axes_and_fields_narrow_the_work(run_dir: Path, monkeypatch) -> None:
-    """The flag exists so iterating on one view does not cost 364 images."""
+    """The flag exists so iterating on one view does not cost 562 images."""
     from simdev.stages import images as module
 
     write_status(run_dir, StageStatus("solve", "ok", "h", [], {}))

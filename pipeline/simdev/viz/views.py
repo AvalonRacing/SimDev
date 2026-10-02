@@ -17,18 +17,22 @@ DEFAULT_VIEWS_PATH = (
     Path(__file__).resolve().parents[3] / "cases" / "post_views.yaml"
 )
 
-SLICE_FIELDS: tuple[str, ...] = ("cp", "cpt", "U", "vort", "lambda2")
+SLICE_FIELDS: tuple[str, ...] = ("cp", "cpt", "U", "lambda2")
 SURFACE_FIELDS: tuple[str, ...] = ("cp", "yplus")
 STREAMLINE_MODES: tuple[str, ...] = ("off", "lic", "seeded")
 
-# The StarCCM+ colourmaps, named as the old pipeline's simConfig.txt named
-# them. viz/pv_render.py maps them onto ParaView presets.
+# `banded` is the old pipeline's 32-band pressure bar and the default: a
+# field that names no colormap gets it. `spectrum` and `thermal` are the
+# StarCCM+ ramps, named as the old pipeline's simConfig.txt named them.
+# viz/pv_render.py builds `banded` itself and maps the other two onto
+# ParaView presets.
 #
 # VALIDATED HERE, IN THE VENV, because the failure downstream is silent:
 # ParaView's ApplyPreset returns without complaint on a preset name it does
-# not know and leaves the default map in place. A typo would produce 364
+# not know and leaves the default map in place. A typo would produce 562
 # pictures in the wrong colours with nothing anywhere saying so.
-COLORMAPS: tuple[str, ...] = ("spectrum", "thermal")
+COLORMAPS: tuple[str, ...] = ("banded", "spectrum", "thermal")
+DEFAULT_COLORMAP = "banded"
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,9 @@ class Views:
     fields: dict[str, FieldStyle]
     parallel_scale: dict[str, float]
     surface_scale: dict[str, float]
-    focus_height: float
+    # Per slice axis, x and y only - z slices look straight down and centre
+    # on the datum.
+    focus_height: dict[str, float]
     surface_focus_height: float
     resolution: tuple[int, int]
     streamlines: str
@@ -104,6 +110,19 @@ def _surface_scale(camera: dict) -> dict[str, float]:
     }
 
 
+def _focus_height(camera: dict) -> dict[str, float]:
+    """Slice focal heights for x and y.
+
+    One number for both, or a per-axis mapping. A single number is what
+    every views file written before the x zoom says, and it must still load
+    and frame the way it used to.
+    """
+    declared = camera.get("focus_height", 0.0)
+    if isinstance(declared, dict):
+        return {axis: float(declared.get(axis, 0.0)) for axis in ("x", "y")}
+    return {"x": float(declared), "y": float(declared)}
+
+
 def load_views(path: Path) -> Views:
     text = Path(path).read_text(encoding="utf-8")
     raw = yaml.safe_load(text)
@@ -128,7 +147,8 @@ def load_views(path: Path) -> Views:
     }
     fields = {
         name: FieldStyle(
-            (float(v["limits"][0]), float(v["limits"][1])), str(v["colormap"])
+            (float(v["limits"][0]), float(v["limits"][1])),
+            str(v.get("colormap", DEFAULT_COLORMAP)),
         )
         for name, v in raw["fields"].items()
     }
@@ -157,11 +177,11 @@ def load_views(path: Path) -> Views:
         fields=fields,
         parallel_scale={k: float(v) for k, v in camera["parallel_scale"].items()},
         surface_scale=_surface_scale(camera),
-        focus_height=float(camera.get("focus_height", 0.0)),
+        focus_height=_focus_height(camera),
         # Defaults to the slice height when unset, so an older views
         # file still loads and still frames the way it used to.
         surface_focus_height=float(
-            camera.get("surface_focus_height", camera.get("focus_height", 0.0))
+            camera.get("surface_focus_height", _focus_height(camera)["y"])
         ),
         resolution=(int(camera["resolution"][0]), int(camera["resolution"][1])),
         streamlines=streamlines,

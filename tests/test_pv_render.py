@@ -67,7 +67,7 @@ def test_it_renders_a_plane_to_a_png(tmp_path: Path) -> None:
                 "focal": [0.0, 0.0, 0.0], "position": [-2.0, 0.0, 0.0],
                 "up": [0.0, 0.0, 1.0], "parallel_scale": 1.0,
             },
-            "images": [{"field": "cp", "component": None, "out": str(out)}],
+            "images": [{"field": "cp", "out": str(out)}],
         }],
         "surfaces": [],
     }

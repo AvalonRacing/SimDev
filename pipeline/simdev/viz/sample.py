@@ -17,11 +17,10 @@ SAMPLE_DICT = "system/sampleSurfaces"
 # The fields postProcess must READ FROM THE TIME DIRECTORY, passed to -fields.
 #
 # Exactly the on-disk inputs of sampleSurfaces.jinja, and nothing else:
-# `surfaces` samples (pMean UMean vorticityMean Lambda2Mean) and
-# `patchSurfaces` samples (pMean UMean yPlus), but the two *Mean derivatives
-# are computed in memory by the fieldExpression objects rather than read, so
-# listing them here would send postProcess looking for files that do not
-# exist. Keep this in step with the template's two `fields` entries.
+# `surfaces` samples (pMean UMean Lambda2Mean) and
+# `patchSurfaces` samples (pMean UMean yPlus), but Lambda2Mean is computed
+# in memory by its fieldExpression object rather than read, so listing it
+# here would send postProcess looking for a file that does not exist. Keep this in step with the template's two `fields` entries.
 DISK_FIELDS = ("pMean", "UMean", "yPlus")
 
 
@@ -31,7 +30,7 @@ class SampleRoots:
 
     Deliberately two directories, not one. `surfaces` and `patchSurfaces` are
     separate function objects because they sample different field lists (the
-    slices carry vorticityMean/Lambda2Mean; the merged vehicle patch carries
+    slices carry Lambda2Mean; the merged vehicle patch carries
     yPlus, which exists only on walls) - see sampleSurfaces.jinja. OpenFOAM
     writes each function object's output under
     postProcessing/<its own name>/<time>/, so one glob root can only ever
@@ -107,10 +106,10 @@ def run_sampling(run_dir: Path, n_ranks: int) -> SampleRoots:
             # correctly-named, entirely colourless pictures, and a check that
             # counts files says 364/364.
             #
-            # Only the fields READ FROM DISK belong here. vorticityMean and
-            # Lambda2Mean are derived in-memory by the two fieldExpression
-            # objects and must NOT be listed - they do not exist on disk, and
-            # naming them would make postProcess fail looking for them.
+            # Only the fields READ FROM DISK belong here. Lambda2Mean is
+            # derived in-memory by its fieldExpression object and must NOT
+            # be listed - it does not exist on disk, and naming it would
+            # make postProcess fail looking for it.
             "-fields", f"({' '.join(DISK_FIELDS)})",
         ],
         n_ranks,

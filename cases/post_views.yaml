@@ -28,9 +28,13 @@ planes:
   # Fixed. NOT fitted to the geometry. A range that quietly extends to cover
   # a longer wing produces a different picture wearing the same file name;
   # the images stage warns when the car pokes outside instead.
-  x: {from: -0.30, to: 0.32, step: 0.02}   # 32 planes
-  y: {from: -0.20, to: 0.20, step: 0.02}   # 21 planes
-  z: {from:  0.00, to: 0.16, step: 0.01}   # 17 planes
+  #
+  # Halved from 0.02/0.02/0.01 once rendering proved quick: twice the
+  # stations for the same ranges, so every old plane is still drawn (same
+  # offset, same file-name suffix) with a new one between each pair.
+  x: {from: -0.30, to: 0.32, step: 0.01}    # 63 planes
+  y: {from: -0.20, to: 0.20, step: 0.01}    # 41 planes
+  z: {from:  0.00, to: 0.16, step: 0.005}   # 33 planes
 
 fields:
   # EVERY LIMIT IS A ROUND NUMBER, AND FIXED FOR ALL RUNS.
@@ -44,15 +48,16 @@ fields:
   # else would also have picked. So the measurements below inform the
   # choice and a round number is what gets written down.
   #
-  # COLOURMAPS ARE THE STARCCM+ ONES, by preference and for continuity with
-  # the archive: the old pipeline's simConfig.txt offered exactly `thermal`
-  # and `spectrum`, and every scene was exported with `spectrum` - so a
-  # plane from the old pipeline and one from this pipeline read the same way.
+  # COLOURMAP: `banded`, the old pipeline's 32-band pressure bar (black,
+  # blue, cyan, green, yellow, red, magenta, white), for continuity with the
+  # archive - a plane from the old pipeline and one from this pipeline read
+  # the same way. It is the default, so a field that names no colormap gets
+  # it too. `spectrum` and `thermal` (the StarCCM+ ramps) remain available.
   #
-  # `spectrum` is a rainbow and rainbows band perceptually: equal steps in
-  # value are not equal steps in apparent colour. That cost is accepted
-  # deliberately, because a map the team already reads fluently is worth
-  # more than one that is technically better and unfamiliar.
+  # Flat bands rather than a smooth ramp: every band edge is a contour line
+  # at a fixed value, which is what makes two pictures readable against
+  # each other. The bands are stretched over each field's own limits, so a
+  # band is 1/32 of the range - 0.0625 in cp on -1..+1.
 
   # -1..+1 is the conventional surface-pressure scale: +1 is the stagnation
   # point, 0 is freestream static, and negative is suction. Measured on the
@@ -60,7 +65,7 @@ fields:
   # the bulk of the field and uses the full blue-to-red ramp. The old
   # -3..+1 put every value above the 58% mark of the ramp, which is why
   # nothing came out blue and so much read as red.
-  cp:      {limits: [-1.0, 1.0],       colormap: spectrum}
+  cp:      {limits: [-1.0, 1.0],       colormap: banded}
 
   # Total-pressure coefficient on the convention where UNDISTURBED FLOW
   # READS 1 and loss reads below it - what StarCCM+ reports and what
@@ -68,26 +73,21 @@ fields:
   # convention the bulk sits between about -0.5 and 1.0, with the freestream
   # pinned at the top of the ramp, so wake and separation read as the
   # departure from red that they are.
-  cpt:     {limits: [-1.0, 1.0],       colormap: spectrum}
+  cpt:     {limits: [-1.0, 1.0],       colormap: banded}
 
   # 0..25 m/s against a 15 m/s freestream - a round ceiling at 1.67x u_inf,
   # which covers the acceleration over the body and the rotating frame's
   # outboard sweep.
-  U:       {limits: [0.0, 25.0],       colormap: spectrum}
-
-  # Normal-component magnitude. Measured p99 ~3.0e4 1/s, max 6.3e5: the tail
-  # spans four decades, so any linear ceiling clamps the cores. 30000 keeps
-  # the shear layers readable, which is what the field is plotted for.
-  vort:    {limits: [0.0, 30000.0],    colormap: spectrum}
+  U:       {limits: [0.0, 25.0],       colormap: banded}
 
   # Negative lambda2 marks a vortex core, so only the negative half carries
   # information and the ceiling stays at 0. Measured p1 is -2.4e6; -2e6 is
   # the round number beside it.
-  lambda2: {limits: [-2000000.0, 0.0], colormap: spectrum}
+  lambda2: {limits: [-2000000.0, 0.0], colormap: banded}
 
   # The y+ gate band from post.yplus_min/max. Deliberately the same numbers
   # the gate judges against, so the picture and the verdict agree.
-  yplus:   {limits: [0.0, 5.0],        colormap: spectrum}
+  yplus:   {limits: [0.0, 5.0],        colormap: banded}
 
 camera:
   # Parallel projection half-height, per slice axis. Never "fit to data".
@@ -96,7 +96,11 @@ camera:
   # fills most of the frame width and about a third of its height, leaving
   # room for the wake it sheds. 0.35 was the first guess and spent well over
   # half the frame on empty domain.
-  parallel_scale: {x: 0.20, y: 0.20, z: 0.20}
+  #
+  # x is tighter. An x slice sees only the car's 0.262 m width, and at 0.20
+  # it sat small in a wide frame; 0.15 still clears the car with the frame
+  # 0.40 m wide.
+  parallel_scale: {x: 0.15, y: 0.20, z: 0.20}
   # Height above the datum the x- and y-slice cameras look at.
   #
   # Raised from 0.06 to sit the car lower in frame and cut the dead band
@@ -104,7 +108,12 @@ camera:
   # to draw below it - so a focal point at half the parallel scale would put
   # the horizon exactly at the bottom edge. 0.12 stops just short of that,
   # keeping a little road visible for reference.
-  focus_height: 0.12
+  #
+  # PER AXIS, BECAUSE x ZOOMS TIGHTER. The colour bar and its labels take
+  # the bottom ~13% of the frame. At y's 0.20 scale, 0.12 puts the ground
+  # 20% up, clear of it; at x's 0.15, the same 0.12 put the ground 10% up
+  # and the bar across the car's floor. 0.09 restores the 20%.
+  focus_height: {x: 0.09, y: 0.12}
   # The overall views centre on the car itself rather than on the slice
   # framing: roughly the bodywork's own mid-height, so the car sits in
   # the middle of the frame and clears the colour bar below it.
@@ -125,7 +134,7 @@ camera:
 
 # off | lic | seeded. Off by default until the cost is measured on a real
 # case: the sampled slices carry U_rel as a vector, so this needs no return
-# to the volume, but it is still 350 extra filter evaluations.
+# to the volume, but it is still 548 extra filter evaluations.
 #
 # QUOTED ON PURPOSE - do not "clean this up". YAML 1.1 reads a bare `off` as
 # the boolean False, not the string "off", which is exactly the bug that

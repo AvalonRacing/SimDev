@@ -160,17 +160,17 @@ def test_derived_fields_are_declared_before_the_sampler(tmp_path: Path) -> None:
     yPlus/yPlusArea.
     """
     text = _render(tmp_path)
-    assert text.index("type            vorticity;") < text.index("type            surfaces;")
     assert text.index("type            Lambda2;") < text.index("type            surfaces;")
 
 
 def test_the_derived_fields_come_from_the_averaged_velocity(tmp_path: Path) -> None:
     """A slice off the instantaneous field is one arbitrary phase of a limit
     cycle. `field` is mandatory on a fieldExpression and `result` defaults to
-    vorticity(UMean), so both are set explicitly."""
+    Lambda2(UMean), so both are set explicitly."""
     text = _render(tmp_path)
     assert "field           UMean;" in text
-    assert "result          vorticityMean;" in text
+    # vort was dropped as a duplicate of lambda2; nothing should compute it.
+    assert "vorticity" not in text
     assert "result          Lambda2Mean;" in text
 
 
@@ -268,7 +268,6 @@ def test_sampling_asks_postprocess_to_load_the_fields(tmp_path: Path, monkeypatc
 
     # The derived fields are computed in memory, never read from disk.
     # Naming them would send postProcess looking for files that do not exist.
-    assert "vorticityMean" not in fields
     assert "Lambda2Mean" not in fields
 
 
@@ -293,7 +292,7 @@ def test_the_disk_fields_match_what_the_template_samples() -> None:
         sampled.update(entry.split())
 
     # Everything the template samples is either read from disk or derived.
-    derived = {"vorticityMean", "Lambda2Mean"}
+    derived = {"Lambda2Mean"}
     assert sampled - derived == set(DISK_FIELDS), (
         f"template samples {sorted(sampled - derived)}, "
         f"DISK_FIELDS is {sorted(DISK_FIELDS)}"

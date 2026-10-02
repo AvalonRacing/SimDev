@@ -1,4 +1,4 @@
-"""An index for 364 pictures, so they can be flipped through rather than found."""
+"""An index for 562 pictures, so they can be flipped through rather than found."""
 
 from __future__ import annotations
 

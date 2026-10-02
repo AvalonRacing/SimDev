@@ -36,33 +36,26 @@ functions
     }
 {% endfor %}
 
-    // DERIVED FIELDS FIRST. Function objects execute in dictionary order and
-    // `surfaces` below samples what these produce; the other order finds
+    // DERIVED FIELD FIRST. Function objects execute in dictionary order and
+    // `surfaces` below samples what this produces; the other order finds
     // nothing and reports nothing, with no error - the same hazard
     // controlDict.jinja documents for yPlus/yPlusArea.
     //
-    // Both read UMean, not U. A slice taken off the instantaneous field is
+    // It reads UMean, not U. A slice taken off the instantaneous field is
     // one arbitrary phase of a limit cycle, and comparing two designs that
     // way compares two arbitrary phases of two different cycles.
     //
     // `field` is mandatory on a fieldExpression and `result` would otherwise
-    // default to `vorticity(UMean)` - a name with brackets in it, which then
+    // default to `Lambda2(UMean)` - a name with brackets in it, which then
     // has to be quoted everywhere downstream. Both are set explicitly.
     //
-    // These are the ABSOLUTE-frame vorticity and lambda2, because UMean is
-    // the absolute velocity. Relative differs by a constant 2*omega, about
-    // 7.5 1/s against a 2000 1/s plotting range, and lambda2 by O(omega^2),
-    // about 14 against 5e4. Both negligible; the structures are identical.
-    vorticityMean
-    {
-        type            vorticity;
-        libs            ("libfieldFunctionObjects.so");
-        field           UMean;
-        result          vorticityMean;
-        executeControl  timeStep;
-        writeControl    none;
-    }
-
+    // This is the ABSOLUTE-frame lambda2, because UMean is the absolute
+    // velocity. Relative differs by O(omega^2), about 14 against 5e4 -
+    // negligible; the structures are identical.
+    //
+    // NO VORTICITY. It used to be sampled for a `vort` picture set, which
+    // showed the same vortex cores lambda2 does and was dropped as a
+    // duplicate.
     Lambda2Mean
     {
         type            Lambda2;
@@ -84,7 +77,7 @@ functions
         // (vtkSurfaceWriter.H:76). viz/sample.py::find_sample globs for both.
         surfaceFormat   vtk;
 
-        fields          (pMean UMean vorticityMean Lambda2Mean);
+        fields          (pMean UMean Lambda2Mean);
 
         surfaces
         {

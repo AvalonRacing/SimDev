@@ -25,7 +25,7 @@ from paraview.simple import (  # type: ignore[import-not-found]
 )
 
 # View-file field name -> the array name actually present on the sampled
-# surface. cp, cpt, U and vort are built by the Calculators below and are
+# surface. cp, cpt and U are built by the Calculators below and are
 # named to match; Lambda2Mean comes from the OpenFOAM function object and
 # yPlus is OpenFOAM's own spelling. A mismatch here colours by nothing and
 # renders a uniformly grey picture with no error.
@@ -50,6 +50,59 @@ PRESETS = {
     "thermal": "Black-Body Radiation",
 }
 
+# The old pipeline's pressure-coefficient bar, read off a screenshot of it:
+# 32 flat bands, black through blue, cyan, green, yellow, red and magenta to
+# white. Not a ParaView preset, so it is built here rather than looked up -
+# 0-255 RGB, lowest band first, stretched across whatever limits the field
+# declares.
+BANDED = (
+    (0, 0, 0), (0, 0, 121), (0, 0, 171), (0, 0, 210),
+    (0, 0, 242), (0, 92, 255), (0, 152, 255), (0, 194, 255),
+    (0, 229, 255), (0, 255, 251), (0, 255, 220), (0, 255, 183),
+    (0, 255, 137), (0, 255, 65), (102, 255, 0), (159, 255, 0),
+    (200, 255, 0), (234, 255, 0), (255, 247, 0), (255, 215, 0),
+    (255, 177, 0), (255, 130, 0), (255, 46, 0), (255, 0, 112),
+    (255, 0, 165), (255, 0, 205), (255, 0, 238), (255, 79, 255),
+    (255, 145, 255), (255, 189, 255), (255, 224, 255), (255, 255, 255),
+)
+
+
+def _apply_colormap(lut, name, low, high):
+    """Point `lut` at the named colourmap across [low, high].
+
+    Strict. ApplyPreset does not raise on a name it does not know, it just
+    leaves the default map in place - so an unmapped name has to fail here
+    or it will not fail anywhere.
+    """
+    if name == "banded":
+        # HARD STEPS, NOT A RAMP. Each band is written as two points of the
+        # same colour at its two edges, so nothing is interpolated between
+        # neighbours. Discretizing to exactly one table entry per band keeps
+        # the colour bar drawing the same 32 blocks the old pipeline did.
+        n = len(BANDED)
+        points = []
+        for i, rgb in enumerate(BANDED):
+            colour = [c / 255.0 for c in rgb]
+            points += [low + (high - low) * i / n, *colour]
+            points += [low + (high - low) * (i + 1) / n, *colour]
+        lut.ColorSpace = "RGB"
+        lut.RGBPoints = points
+        lut.Discretize = 1
+        lut.NumberOfTableValues = n
+        lut.RescaleOnVisibilityChange = 0
+        lut.AutomaticRescaleRangeMode = "Never"
+        return
+    if name not in PRESETS:
+        raise KeyError(
+            f"no ParaView colormap for {name!r}; "
+            f"known: banded, {', '.join(sorted(PRESETS))}"
+        )
+    lut.ApplyPreset(PRESETS[name], True)
+    lut.RescaleTransferFunction(low, high)
+
+
+BACKGROUND = [0.85, 0.85, 0.85]
+
 
 def _reader(path):
     if str(path).endswith(".vtp"):
@@ -58,7 +111,7 @@ def _reader(path):
 
 
 def _derive(source, frame):
-    """Add U_rel, cp, cpt, Umag and vorticity magnitude to a sampled surface.
+    """Add U_rel, cp, cpt and Umag to a sampled surface.
 
     THE CAR FRAME, AND WHY IT IS NOT COSMETIC. In a cornering run OpenFOAM
     solves the ABSOLUTE velocity, so UMean's far field is at rest in the
@@ -134,15 +187,6 @@ def _derive(source, frame):
     return cpt
 
 
-def _vorticity(source, component):
-    """|vorticity| normal to this plane - the component that shows vortices
-    punching through the cut, which is what the old pipeline plotted."""
-    axis = ("X", "Y", "Z")[component]
-    out = Calculator(Input=source)
-    out.ResultArrayName = "vort"
-    out.Function = f"abs(vorticityMean_{axis})"
-    return out
-
 
 # NO TEXT IS DRAWN INTO THE IMAGE. Only the colour bar.
 #
@@ -155,32 +199,40 @@ def _vorticity(source, component):
 # was burnt into the pixels.
 
 
-def _draw(source, field, style, camera, out_path, resolution):
+def _draw(source, field, style, camera, out_path, resolution, unlit=False):
     view = CreateRenderView()
+    view.OrientationAxesVisibility = 0
+    # LIGHT GREY, NOT WHITE. The banded map's top band is white, and
+    # freestream sits there in cpt (1) and lambda2 (0) - on a white page the
+    # plane's edge and the ground line vanished into the background.
+    view.Background = BACKGROUND
+    view.UseColorPaletteForBackground = 0
+
+    display = Show(source, view)
+    # CAMERA AFTER Show, NOT BEFORE. The first Show in a session resets the
+    # camera to fit the data, so a camera set beforehand is thrown away for
+    # that one picture: the first slice of every run came out zoomed to the
+    # whole domain plane, with nothing saying why only that one was wrong.
     view.CameraParallelProjection = 1
     view.CameraPosition = camera["position"]
     view.CameraFocalPoint = camera["focal"]
     view.CameraViewUp = camera["up"]
     view.CameraParallelScale = camera["parallel_scale"]
-    view.OrientationAxesVisibility = 0
-    view.Background = [1.0, 1.0, 1.0]
-    view.UseColorPaletteForBackground = 0
 
-    display = Show(source, view)
     ColorBy(display, ("POINTS", field))
+    if unlit:
+        # A slice is a flat cut, so shading tells nothing about shape - it
+        # only darkens every colour by ~20%, which turns the top band's
+        # white into grey and makes the picture disagree with its own bar.
+        # Pure ambient draws the map's exact colours. The car surface views
+        # keep their lighting: there it is what shows the shape.
+        display.Ambient = 1.0
+        display.Diffuse = 0.0
+        display.Specular = 0.0
 
     lut = GetColorTransferFunction(field)
-    # Strict. ApplyPreset does not raise on a name it does not know, it just
-    # leaves the default map in place - so an unmapped name has to fail here
-    # or it will not fail anywhere.
-    if style["colormap"] not in PRESETS:
-        raise KeyError(
-            f"no ParaView preset for colormap {style['colormap']!r}; "
-            f"known: {', '.join(sorted(PRESETS))}"
-        )
-    lut.ApplyPreset(PRESETS[style["colormap"]], True)
     low, high = style["limits"]
-    lut.RescaleTransferFunction(low, high)
+    _apply_colormap(lut, style["colormap"], low, high)
 
     bar = GetScalarBar(lut, view)
     # NO TITLE. "only colourscale" - and the field is already named by the
@@ -215,7 +267,7 @@ def _draw(source, field, style, camera, out_path, resolution):
     bar.LabelFormat = "%-#.3g"
     bar.RangeLabelFormat = "%-#.3g"
     # BLACK. ParaView defaults the bar's text to white, which is sized for
-    # its own dark viewport - on the white background these images use it is
+    # its own dark viewport - on the light background these images use it is
     # drawn, correctly, in white on white. The numbers were there the whole
     # time and invisible, which reads exactly like a bar with no labels.
     bar.LabelColor = [0.0, 0.0, 0.0]
@@ -259,16 +311,14 @@ def main(argv):
             source = _derive(_reader(sample), frame)
             for image in entry["images"]:
                 field = image["field"]
-                node = source
-                if field == "vort":
-                    node = _vorticity(source, image["component"])
                 _draw(
-                    node,
+                    source,
                     ARRAY_NAMES.get(field, field),
                     plan["fields"][field],
                     entry["camera"],
                     image["out"],
                     resolution,
+                    unlit=group is plan["slices"],
                 )
                 written += 1
 

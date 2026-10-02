@@ -18,9 +18,9 @@ def test_the_shipped_definition_loads() -> None:
 
 def test_the_plane_counts_are_what_the_spec_says() -> None:
     views = load_views(REPO / "cases" / "post_views.yaml")
-    assert len(views.axes["x"].offsets()) == 32
-    assert len(views.axes["y"].offsets()) == 21
-    assert len(views.axes["z"].offsets()) == 17
+    assert len(views.axes["x"].offsets()) == 63
+    assert len(views.axes["y"].offsets()) == 41
+    assert len(views.axes["z"].offsets()) == 33
 
 
 def test_offsets_are_exact_so_two_runs_name_the_same_files() -> None:
@@ -34,7 +34,7 @@ def test_offsets_are_exact_so_two_runs_name_the_same_files() -> None:
     offsets = views.axes["x"].offsets()
     assert offsets[0] == -0.30
     assert offsets[-1] == 0.32
-    assert offsets[15] == pytest.approx(0.0, abs=1e-12)
+    assert offsets[30] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_the_digest_changes_with_the_file(tmp_path: Path) -> None:
@@ -46,15 +46,27 @@ def test_the_digest_changes_with_the_file(tmp_path: Path) -> None:
     )
     second = tmp_path / "b.yaml"
     second.write_text(
-        first.read_text(encoding="utf-8").replace("step: 0.02", "step: 0.04"),
+        first.read_text(encoding="utf-8").replace("step: 0.01", "step: 0.04"),
         encoding="utf-8",
     )
     assert load_views(first).digest != load_views(second).digest
 
 
-def test_the_shipped_definition_uses_the_starccm_colourmaps() -> None:
+def test_the_shipped_definition_uses_the_banded_colourmap() -> None:
     views = load_views(REPO / "cases" / "post_views.yaml")
-    assert {s.colormap for s in views.fields.values()} <= {"spectrum", "thermal"}
+    assert {s.colormap for s in views.fields.values()} == {"banded"}
+
+
+def test_a_field_with_no_colormap_gets_the_banded_one(tmp_path: Path) -> None:
+    path = tmp_path / "views.yaml"
+    path.write_text(
+        (REPO / "cases" / "post_views.yaml")
+        .read_text(encoding="utf-8")
+        .replace(",       colormap: banded}", "}", 1),
+        encoding="utf-8",
+    )
+    views = load_views(path)
+    assert views.fields["cp"].colormap == "banded"
 
 
 def test_an_unknown_colormap_is_rejected(tmp_path: Path) -> None:
@@ -67,7 +79,7 @@ def test_an_unknown_colormap_is_rejected(tmp_path: Path) -> None:
     path.write_text(
         (REPO / "cases" / "post_views.yaml")
         .read_text(encoding="utf-8")
-        .replace("colormap: spectrum}", "colormap: chartreuse}", 1),
+        .replace("colormap: banded}", "colormap: chartreuse}", 1),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unknown colormap"):
