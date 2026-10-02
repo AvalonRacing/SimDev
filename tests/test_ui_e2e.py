@@ -41,7 +41,7 @@ def test_a_dev_run_queued_through_the_api_finishes(tmp_path: Path) -> None:
     with TestClient(app) as client:
         response = client.post(
             "/runs",
-            data={"pair": "baseline/testcase", "profile": "dev", "run_name": "e2e",
+            data={"pair": "baseline/testcase", "profile": "car_dev", "run_name": "e2e",
                   "solve.max_iterations": "60"},
             follow_redirects=False,
         )

@@ -111,6 +111,20 @@ def test_classify_a_crash_uses_the_cli_error_line(tmp_path: Path) -> None:
     assert first_error(tmp_path) == "snappyHexMesh failed with exit code 1"
 
 
+def test_classify_a_gate_stop_is_gate_failed_with_the_cli_error(tmp_path: Path) -> None:
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "simdev-ui.log").write_text(
+        "=== simdev-ui job started ===\n$ simdev run ...\n"
+        "error: mesh quality gate failed; layer coverage low; refusing to start the solve\n"
+    )
+    statuses(tmp_path, prepare="ok", mesh="gate_failed")
+    stopped = {"steps": [{"argv": ["run"], "exit": 2}]}
+    assert classify(tmp_path, stopped) == (
+        "gate_failed",
+        "mesh quality gate failed; layer coverage low; refusing to start the solve",
+    )
+
+
 def test_classify_names_stages_that_never_ran(tmp_path: Path) -> None:
     statuses(tmp_path, prepare="ok", mesh="ok")
     status, error = classify(tmp_path, {"steps": [{"argv": ["run"], "exit": 0}]})

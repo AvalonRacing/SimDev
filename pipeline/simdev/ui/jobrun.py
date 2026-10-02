@@ -202,6 +202,10 @@ def classify(
     hard = [s for s in outcome["steps"] if s["exit"] not in (0, 1)]
     failed = [name for name, st in statuses.items() if st is not None and st.state == "failed"]
 
+    present = [name for name in STAGES if statuses[name] is not None]
+    if hard and not failed and present and statuses[present[-1]].state == "gate_failed":
+        # The pipeline stopped at a gate (CLI exit 2): a verdict, not a crash.
+        return "gate_failed", first_error(run_dir)
     if hard or failed:
         detail = first_error(run_dir)
         if detail is None:
