@@ -939,6 +939,33 @@ It is still a **merge layer in `resolve.py`**. The order is:
 defaults ◄ resolution profile ◄ wall profile ◄ case file ◄ state ◄ CLI --set
 ```
 
+### Geometry sources and hard checks
+
+Two checks are deliberately hard failures rather than warnings:
+
+- **A missing STL for a patch whose role carries one.** Silently skipping it
+  used to be the behaviour, and it turns a mistyped part name into a car with
+  no rear wing that meshes, solves and converges.
+- **Geometry through the road.** snappy meshes the intersection of a wheel and
+  the ground into a shape nobody drew, and the run looks entirely normal.
+  `geometry.max_ground_penetration` sets the tolerance.
+
+Keep every STL **watertight and whole**, even for half models — half models come
+from the *domain* restricting to y ≥ 0 with a `symmetry` patch, never from
+cutting geometry. Note that STL stores each facet's vertices separately, so a
+sound solid loads as unconnected triangles; `load_surface()` merges them first,
+and without that every mesh ever exported reports as leaking.
+
+For a *procedural* source instead, implement a writer with the same contract as
+`write_ahmed_stl`: `(params, out_dir) -> dict[str, Path]` mapping patch name to
+STL path. Add a branch in `_write_geometry()` in `stages/prepare.py` and a
+`kind` value in `GeometryConfig`.
+
+Keep the STL **full-body and watertight** even for half models. Half models are
+produced by the *domain* restricting to y ≥ 0 with a `symmetry` patch, not by
+cutting geometry. Cutting geometry makes it non-watertight, and snappyHexMesh
+leaks into non-watertight surfaces.
+
 ### How cornering works
 
 Steady cornering is only steady in a frame that turns with the car, so the
