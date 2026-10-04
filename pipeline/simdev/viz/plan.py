@@ -240,13 +240,13 @@ def build_render_plan(
                 ],
             })
 
-    # SURFACE VIEWS STAY IN THE GLOBAL AXES, UNLIKE THE SLICES.
+    # SURFACE VIEWS ARE IN THE CAR'S AXES, LIKE THE SLICES.
     #
-    # The slices are rotated into the car's frame so plane k cuts the same
-    # station on the car whatever attitude it is posed at. These seven are
-    # the overall views, and holding them in the domain's own axes means a
-    # yawed car LOOKS yawed - the attitude stays visible in the picture
-    # rather than being rotated out of it.
+    # They used to stay in the domain's axes so a yawed car looked yawed.
+    # That made "front" of two driving states two different views of the
+    # car - the posed attitude (about 10 degrees of slip on the testcase)
+    # skewed every cp and y+ picture - so they now rotate with the car and
+    # `front` looks straight down the car's own -x whatever the pose.
     # Lower than the slices': a slice wants the camera high so the dead
     # band under the ground plane is small, but a surface view wants the
     # car CENTRED - at the slice height the bodywork hung low enough in
@@ -257,8 +257,8 @@ def build_render_plan(
             "name": name,
             "camera": _camera(
                 focal,
-                direction,
-                up,
+                _rotate(direction, axes),
+                _rotate(up, axes),
                 # The iso view sees the car along its diagonal, which is
                 # longer than any single axis - at the slice scale the nose
                 # and wing ran off the frame. Its own, wider setting.

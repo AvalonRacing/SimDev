@@ -171,13 +171,12 @@ def test_car_axes_rotate_the_slice_normals() -> None:
     assert first["normal"][1] == pytest.approx(0.1815, abs=1e-3)
 
 
-def test_surface_cameras_stay_in_the_global_axes() -> None:
-    """The seven overall views do NOT rotate with the car, unlike the slices.
+def test_surface_cameras_rotate_with_the_car() -> None:
+    """The seven overall views look along the CAR's axes, like the slices.
 
-    A slice is rotated so plane k cuts the same station on the car whatever
-    attitude it is posed at. These are the overall views, and holding them
-    in the domain's axes keeps the attitude visible: a yawed car should look
-    yawed rather than have the yaw rotated out of the picture.
+    Held in the domain's axes, `front` of a posed car was a skewed view, and
+    `front` of two states posed differently were two different views
+    sharing a file name.
     """
     plan = _yawed_plan()
     front = next(s for s in plan["surfaces"] if s["name"] == "front")
@@ -186,9 +185,9 @@ def test_surface_cameras_stay_in_the_global_axes() -> None:
         for i in range(3)
     ]
     mag = sum(d * d for d in direction) ** 0.5
-    # Straight down -x, with no trace of the 10.5 degree pose.
-    assert direction[0] / mag == pytest.approx(-1.0, abs=1e-6)
-    assert direction[1] / mag == pytest.approx(0.0, abs=1e-6)
+    # Down the car's -x: the same 10.5 degree pose the slice normals carry.
+    assert direction[0] / mag == pytest.approx(-0.9834, abs=1e-3)
+    assert direction[1] / mag == pytest.approx(-0.1815, abs=1e-3)
 
 
 def test_top_and_bottom_lie_the_car_along_the_long_edge() -> None:
