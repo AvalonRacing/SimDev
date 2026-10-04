@@ -78,3 +78,15 @@ benchmark_old_pipeline/*.sim
 .claude/worktrees/
 # Subagent-driven-development scratch: ledgers, briefs, review packages
 .superpowers/
+
+# Test-day logger data (GPS/IMU + transmitter) and what
+# scripts/extract_testing_data.py derives from it. Run data, not pipeline.
+TestingData_Raw/
+TestingData_Processed/
+
+# Old-pipeline reference material that is large or is result output: the
+# best-practice PDF and the StarCCM+ monitor plots. The colormap JSON and
+# legend beside them are small and tracked.
+benchmark_old_pipeline/*.pdf
+benchmark_old_pipeline/Residuals.png
+benchmark_old_pipeline/c?_Monitor_Plot.png

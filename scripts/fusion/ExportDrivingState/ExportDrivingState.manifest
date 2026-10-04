@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Export the driving state (Chassis, SUS_*, Tire_*, MRF_*) as 13 STEP files for SimDev"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Export the bodyshell (AVxxx_01) and wing (AVxxx_02) as Body.step and Wing.step for SimDev"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

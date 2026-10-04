@@ -909,6 +909,11 @@ CAD/states/<state>/            Chassis, SUS_*, Tire_*, MRF_* + state.yaml
 CAD/designs/<design>/<state>/  Body.step + Wing.step for that state
 ```
 
+The 13 state parts are exported from Fusion with the script in
+`scripts/fusion/ExportDrivingState/`, Body.step and Wing.step (part numbers
+AVxxx_01 and AVxxx_02) with `scripts/fusion/ExportDesign/` (Scripts and
+Add-Ins > "+" > the folder).
+
 The attitude (ride height, roll, steer, camber) is baked into the export,
 including Body.step, so a design iteration is exported once per state it
 will run in. A run is one (design, state) pair that has both:
