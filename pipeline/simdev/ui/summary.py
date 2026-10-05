@@ -71,11 +71,14 @@ def load_summary(run_dir: Path) -> RunSummary | None:
     run_dir = Path(run_dir)
     if not (run_dir / "results" / "result.json").is_file():
         return None
-    return _load(str(run_dir), _signature(run_dir))
+    try:
+        return _load(str(run_dir), _signature(run_dir))
+    except (OSError, ValueError):
+        return None
 
 
 @lru_cache(maxsize=256)
-def _load(run_dir_s: str, _signature: tuple) -> RunSummary:
+def _load(run_dir_s: str, _stamp: tuple) -> RunSummary:
     run_dir = Path(run_dir_s)
     result = json.loads((run_dir / "results" / "result.json").read_text(encoding="utf-8"))
     window = (int(result.get("window_start") or 0), int(result.get("window_end") or 0))

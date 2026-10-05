@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 from simdev.ui.summary import load_summary, rolling_noise
 
@@ -67,3 +69,98 @@ def test_a_run_without_histories_still_has_a_summary(tmp_path: Path) -> None:
     assert summary.result["cl_mean"] == -1.0
     assert math.isnan(summary.noise["Cl"])
     assert summary.patches == {}
+
+
+def test_corrupt_result_json_returns_none(tmp_path: Path) -> None:
+    run = tmp_path / "r_corrupt"
+    (run / "results").mkdir(parents=True)
+    (run / "results" / "result.json").write_text("{ invalid json")
+    assert load_summary(run) is None
+
+
+def test_group_noise_with_hand_computable_rolling_noise(tmp_path: Path) -> None:
+    # Use a distinct tmp path to avoid lru_cache interference
+    run = tmp_path / "r_group1"
+    run.mkdir(parents=True)
+    (run / "results").mkdir(parents=True)
+    (run / "results" / "result.json").write_text(json.dumps({
+        "cd_mean": 0.5, "cl_mean": -1.0, "window_start": 3, "window_end": 6,
+        "verdict": "converged",
+    }))
+    # Body: Cd=[1, 2, 3, 4, 5, 6], window [3,6] -> [3, 4, 5, 6]
+    write_coeffs(run / "postProcessing/forceCoeffs_Body/0/coefficient.dat",
+                 [(t, float(t), -0.5) for t in range(1, 7)])
+    # Wing: Cd=[0, 0, 0, 0, 0, 0], window [3,6] -> [0, 0, 0, 0]
+    write_coeffs(run / "postProcessing/forceCoeffs_Wing/0/coefficient.dat",
+                 [(t, 0.0, -0.5) for t in range(1, 7)])
+
+    # Mock load_spec to return a group "chassis" = ("Body", "Wing")
+    def mock_load_spec(run_dir: Path):
+        return types.SimpleNamespace(
+            post=types.SimpleNamespace(groups={"chassis": ("Body", "Wing")})
+        )
+
+    with patch("simdev.ui.summary.load_spec", side_effect=mock_load_spec):
+        summary = load_summary(run)
+
+    assert summary.groups_map == {"chassis": ["Body", "Wing"]}
+    # Sum in window: Body [3,4,5,6] + Wing [0,0,0,0] = [3,4,5,6]
+    # rolling_noise([3,4,5,6]) with half-window 2 -> means [3.5, 4.5, 5.5] -> spread 2 -> noise 1
+    assert summary.noise["Cd_chassis"] == 1.0
+
+
+def test_group_with_missing_patch_data_has_nan_noise(tmp_path: Path) -> None:
+    # Use a distinct tmp path to avoid lru_cache interference
+    run = tmp_path / "r_group2"
+    run.mkdir(parents=True)
+    (run / "results").mkdir(parents=True)
+    (run / "results" / "result.json").write_text(json.dumps({
+        "cd_mean": 0.5, "cl_mean": -1.0, "window_start": 1, "window_end": 3,
+        "verdict": "converged",
+    }))
+    # Only Body has forceCoeffs data; Wing data is missing
+    write_coeffs(run / "postProcessing/forceCoeffs_Body/0/coefficient.dat",
+                 [(t, float(t), -0.5) for t in range(1, 4)])
+
+    def mock_load_spec(run_dir: Path):
+        return types.SimpleNamespace(
+            post=types.SimpleNamespace(groups={"chassis": ("Body", "Wing")})
+        )
+
+    with patch("simdev.ui.summary.load_spec", side_effect=mock_load_spec):
+        summary = load_summary(run)
+
+    # Wing patch has no data, so group noise should be NaN
+    assert math.isnan(summary.noise["Cd_chassis"])
+    assert math.isnan(summary.noise["Cl_chassis"])
+
+
+def test_group_with_misaligned_patch_times(tmp_path: Path) -> None:
+    # Use a distinct tmp path to avoid lru_cache interference
+    run = tmp_path / "r_group3"
+    run.mkdir(parents=True)
+    (run / "results").mkdir(parents=True)
+    (run / "results" / "result.json").write_text(json.dumps({
+        "cd_mean": 0.5, "cl_mean": -1.0, "window_start": 2, "window_end": 4,
+        "verdict": "converged",
+    }))
+    # Body: complete time series
+    write_coeffs(run / "postProcessing/forceCoeffs_Body/0/coefficient.dat",
+                 [(t, 1.0, -0.5) for t in range(1, 6)])
+    # Wing: missing Time=3 (inside window)
+    write_coeffs(run / "postProcessing/forceCoeffs_Wing/0/coefficient.dat",
+                 [(1, 1.0, -0.5), (2, 1.0, -0.5), (4, 1.0, -0.5), (5, 1.0, -0.5)])
+
+    def mock_load_spec(run_dir: Path):
+        return types.SimpleNamespace(
+            post=types.SimpleNamespace(groups={"chassis": ("Body", "Wing")})
+        )
+
+    with patch("simdev.ui.summary.load_spec", side_effect=mock_load_spec):
+        summary = load_summary(run)
+
+    # Groups_map should be set
+    assert summary.groups_map == {"chassis": ["Body", "Wing"]}
+    # The sum only includes common times: [2, 4] in window (no time 3 from Wing)
+    # Sum = [2.0, 2.0] -> rolling_noise with length 1 -> spread 0 -> noise 0
+    assert summary.noise["Cd_chassis"] == 0.0
