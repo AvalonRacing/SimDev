@@ -104,7 +104,8 @@ def _form_page(
     return render(
         request, "new_run.html", pairs=pairs, selected=pair, profiles=forms.profiles(),
         profile=profile, run_name=run_name, fields=rows, job=job, state=state,
-        note=note if note is not None else (job.note if job else None), error=error, status_code=status_code,
+        note=note if note is not None else (job.note if job else None),
+        error=error, status_code=status_code,
     )
 
 

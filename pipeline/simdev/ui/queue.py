@@ -100,11 +100,22 @@ class Queue:
         self._db.executescript(SCHEMA)
         self._lock = threading.RLock()
         self._clock = clock
+        self._add_note_column()
+
+    def _add_note_column(self) -> None:
+        # A database made before change notes existed. Once migrated, an older
+        # server process still running against it cannot read job rows (its Job
+        # has no `note`), so deploying this means restarting the UI service.
         with self._lock:
             columns = {row["name"] for row in self._db.execute("PRAGMA table_info(jobs)")}
-            if "note" not in columns:
-                # A database made before change notes existed.
+            if "note" in columns:
+                return
+            try:
                 self._db.execute("ALTER TABLE jobs ADD COLUMN note TEXT")
+            except sqlite3.OperationalError as problem:
+                # Another process migrated between the check and the ALTER.
+                if "duplicate column name" not in str(problem):
+                    raise
 
     # --- reading -------------------------------------------------------------
 

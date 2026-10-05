@@ -143,3 +143,34 @@ def test_a_database_from_before_notes_gains_the_column(tmp_path) -> None:
     old.close()
     job = Queue(db).latest_for("old")
     assert job is not None and job.note is None
+
+
+def test_the_note_migration_survives_another_process_adding_the_column_first(tmp_path) -> None:
+    import sqlite3
+
+    from simdev.ui.queue import Queue
+
+    queue = Queue(tmp_path / "q.db")
+    # Simulate the race: the check sees no column, then the ALTER finds it present.
+    real = queue._db
+
+    class Racing:
+        def execute(self, sql, *args):
+            if sql.startswith("PRAGMA table_info"):
+                return iter([])
+            return real.execute(sql, *args)
+
+    queue._db = Racing()
+    queue._add_note_column()  # must not raise
+
+    class Broken:
+        def execute(self, sql, *args):
+            if sql.startswith("PRAGMA table_info"):
+                return iter([])
+            raise sqlite3.OperationalError("disk I/O error")
+
+    queue._db = Broken()
+    import pytest
+
+    with pytest.raises(sqlite3.OperationalError):
+        queue._add_note_column()
