@@ -1,0 +1,37 @@
+{% set ref = by_name.get(row.note.compare_with or '') %}
+<tbody id="row-{{ row.name }}" class="result{% if not row.has_result %} pending{% endif %}">
+<tr>
+  <td><input type="checkbox" name="runs" value="{{ row.name }}" form="compare-form" {% if not row.has_result %}disabled{% endif %}></td>
+  <td><a href="/runs/{{ row.name }}">{{ row.name }}</a><br><span class="muted">{{ row.state }}</span></td>
+  <td><textarea class="note-edit" name="note" rows="1" maxlength="2000"
+        hx-post="/runs/{{ row.name }}/note" hx-trigger="change" hx-include="closest tbody"
+        hx-target="closest tbody" hx-swap="outerHTML">{{ row.note.note }}</textarea>
+      {% if row.note.problem %}<div class="warn">{{ row.note.problem }}</div>{% endif %}</td>
+  <td><select class="note-edit" name="compare_with"
+        hx-post="/runs/{{ row.name }}/note" hx-trigger="change" hx-include="closest tbody"
+        hx-target="closest tbody" hx-swap="outerHTML">
+      <option value="">–</option>
+      {% for n in names if n != row.name %}<option {% if n == row.note.compare_with %}selected{% endif %}>{{ n }}</option>{% endfor %}
+      {% if row.note.compare_with and not ref %}<option selected value="{{ row.note.compare_with }}">{{ row.note.compare_with }} (missing)</option>{% endif %}
+    </select></td>
+  {% if row.has_result %}
+    {% for c in columns %}<td class="num">{{ row.values.get(c.key)|num(c.fmt) }}</td>{% endfor %}
+    <td><span class="badge {{ 'ok' if row.verdict == 'converged' else 'gate_failed' }}">{{ row.verdict }}</span></td>
+    <td class="num">{{ row.noise.get('cl')|num('{:.4f}') }} / {{ row.noise.get('cd')|num('{:.4f}') }}</td>
+  {% else %}
+    <td colspan="{{ columns|length + 2 }}" class="muted">no results yet</td>
+  {% endif %}
+</tr>
+{% if ref and row.has_result and ref.has_result %}
+{% set cells = delta(row, ref, columns) %}
+<tr class="delta">
+  <td></td><td colspan="3" class="muted">Δ against {{ ref.name }}</td>
+  {% for c in columns %}{% set d = cells[c.key] %}
+  <td class="num {{ d.tone }}" {% if d.noise is not none %}title="Δ {{ d.value|num('{:+.4f}') }} ± {{ d.noise|num('{:.4f}') }}"{% endif %}>{{ d.value|num(c.fmt) }}</td>
+  {% endfor %}
+  <td colspan="2"></td>
+</tr>
+{% elif row.note.compare_with and not ref %}
+<tr class="delta"><td></td><td colspan="{{ columns|length + 5 }}" class="muted">reference {{ row.note.compare_with }} missing</td></tr>
+{% endif %}
+</tbody>

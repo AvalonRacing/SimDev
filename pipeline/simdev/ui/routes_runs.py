@@ -11,6 +11,7 @@ from simdev.ui import forms, runview
 from simdev.ui.context import back, ctx, render
 from simdev.ui.housekeeping import delete_run, strip_mesh
 from simdev.ui.jobrun import STAGES
+from simdev.ui.notes import read_note
 from simdev.ui.queue import QueueError
 
 router = APIRouter()
@@ -59,7 +60,7 @@ def run_page(request: Request, name: str, error: str | None = None, message: str
         errors=runview.errors(run_dir) if failed else [],
         images=runview.images(run_dir), logs=runview.log_names(run_dir),
         live=job is not None and job.status == "running", stage_names=STAGES,
-        active=_active(job), error=error, message=message,
+        active=_active(job), error=error, message=message, note=read_note(run_dir),
     )
 
 

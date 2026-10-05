@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Results · SimDev{% endblock %}
+{% block main %}
+<h1>Results</h1>
+<form method="get" class="row">
+  <select name="state"><option value="">all states</option>{% for s in states %}<option {% if s == filters.state %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+  <select name="design"><option value="">all designs</option>{% for d in designs %}<option {% if d == filters.design %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
+  <select name="verdict"><option value="">any verdict</option>{% for v in ['converged', 'not_converged', 'not_judged'] %}<option {% if v == filters.verdict %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+  <input name="q" value="{{ filters.q }}" placeholder="name or note">
+  <button>Filter</button>
+  <a class="button" href="/results.tsv">Copy as TSV</a>
+</form>
+<form id="compare-form" method="get" action="/compare" class="row">
+  <button class="primary">Open ticked runs in viewer</button>
+  <span class="muted">the first ticked run is the reference</span>
+</form>
+<div class="scroll">
+<table class="results">
+  <thead><tr><th></th><th>run</th><th>note</th><th>compare with</th>
+    {% for c in columns %}<th class="num">{{ c.label }}</th>{% endfor %}
+    <th>verdict</th><th class="num">noise Cl / Cd</th></tr></thead>
+  {% for row in rows %}{% include "_result_row.html" %}{% else %}
+  <tbody><tr><td colspan="{{ columns|length + 6 }}" class="muted">No runs yet.</td></tr></tbody>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

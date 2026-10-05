@@ -7,6 +7,9 @@
 {% endblock %}
 {% block main %}
 <h1>{{ name }}</h1>
+{% if note and note.compare_with %}
+<p><a href="/compare?runs={{ note.compare_with }},{{ name }}">Compare with reference {{ note.compare_with }}</a></p>
+{% endif %}
 {% if job %}
 <p class="muted">
   {{ job.design }} · {{ job.state }} · {{ job.profile }} · {{ job.n_ranks }} ranks

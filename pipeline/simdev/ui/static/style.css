@@ -45,3 +45,13 @@ pre { background: #fff; border: 1px solid var(--line); padding: 0.6rem; overflow
 .gallery figcaption { font-size: 11px; color: var(--muted); }
 .tabs { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
 .plot { background: #fff; border: 1px solid var(--line); padding: 0.4rem; margin: 0.4rem 0; overflow-x: auto; }
+
+.scroll { overflow-x: auto; }
+table.results td.num, table.results th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.results textarea { width: 16rem; }
+tbody.result { border-top: 2px solid var(--line); }
+tbody.pending { opacity: 0.6; }
+tr.delta td { font-size: 12px; }
+tr.delta td.better { color: var(--ok); font-weight: 600; }
+tr.delta td.worse { color: var(--bad); font-weight: 600; }
+tr.delta td.noise { color: var(--muted); }

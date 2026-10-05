@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from simdev.cad.checks import default_library
 from simdev.cad.library import Library
-from simdev.ui import routes_cad, routes_queue, routes_runs, routes_system
+from simdev.ui import routes_cad, routes_queue, routes_results, routes_runs, routes_system
 from simdev.ui.context import Context, UIConfig
 from simdev.ui.queue import Job, Queue
 from simdev.ui.worker import Worker, default_command
@@ -78,6 +78,10 @@ def clock(timestamp: float | None) -> str:
     return datetime.fromtimestamp(timestamp).strftime("%d.%m. %H:%M")
 
 
+def number(value: float | None, fmt: str = "{:.4f}") -> str:
+    return "" if value is None else fmt.format(value)
+
+
 def create_app(
     config: UIConfig,
     library: Library | None = None,
@@ -91,7 +95,7 @@ def create_app(
     library = library or default_library(config.cad_root, config.case_path)
     worker = Worker(queue, command=worker_command or default_command, cad_root=config.cad_root)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
-    templates.env.filters.update(duration=duration, overrides=overrides_text, clock=clock)
+    templates.env.filters.update(duration=duration, overrides=overrides_text, clock=clock, num=number)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -112,6 +116,6 @@ def create_app(
     if allowed_hosts is not None:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
-    for router in (routes_queue.router, routes_runs.router, routes_cad.router, routes_system.router):
+    for router in (routes_queue.router, routes_runs.router, routes_results.router, routes_cad.router, routes_system.router):
         app.include_router(router)
     return app
