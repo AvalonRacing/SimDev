@@ -104,3 +104,42 @@ def test_settings_default_and_persist(tmp_path: Path) -> None:
     assert queue.setting("max_parallel") == 1
     queue.set_setting("max_parallel", 2)
     assert Queue(tmp_path / "ui.db").setting("max_parallel") == 2
+
+
+def test_a_job_keeps_its_note_through_edit_and_requeue(tmp_path) -> None:
+    from simdev.ui.queue import JobSpec, Queue
+
+    queue = Queue(tmp_path / "q.db")
+    spec = JobSpec("r1", str(tmp_path / "r1"), "case.yaml", "v01", "corner", "car_dev", 4,
+                   note="wing post -5 mm")
+    job = queue.enqueue(spec)
+    assert job.note == "wing post -5 mm"
+    edited = queue.update(job.id, JobSpec(**{**spec.__dict__, "note": "wing post -6 mm"}))
+    assert edited.note == "wing post -6 mm"
+    queue.mark_running(job.id)
+    queue.mark_finished(job.id, "done", 0, None)
+    assert queue.requeue(job.id).note == "wing post -6 mm"
+
+
+def test_a_database_from_before_notes_gains_the_column(tmp_path) -> None:
+    import sqlite3
+
+    from simdev.ui.queue import Queue
+
+    db = tmp_path / "old.db"
+    old = sqlite3.connect(db)
+    old.executescript(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_name TEXT NOT NULL, "
+        "run_dir TEXT NOT NULL, case_path TEXT NOT NULL, design TEXT NOT NULL, "
+        "state TEXT NOT NULL, profile TEXT NOT NULL, n_ranks INTEGER NOT NULL, "
+        "overrides TEXT NOT NULL DEFAULT '{}', force_from TEXT, position REAL NOT NULL, "
+        "status TEXT NOT NULL, pid INTEGER, pgid INTEGER, exit_code INTEGER, error TEXT, "
+        "created_at REAL NOT NULL, started_at REAL, finished_at REAL);"
+        "INSERT INTO jobs (run_name, run_dir, case_path, design, state, profile, n_ranks, "
+        "position, status, created_at) VALUES ('old', '/x', 'c', 'v01', 'corner', 'p', 4, 1, "
+        "'done', 0);"
+    )
+    old.commit()
+    old.close()
+    job = Queue(db).latest_for("old")
+    assert job is not None and job.note is None

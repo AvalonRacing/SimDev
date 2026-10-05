@@ -381,3 +381,16 @@ def test_a_tick_fails_a_claimed_job_this_worker_never_started(tmp_path, queue) -
     worker.tick()
     assert queue.get(job.id).status == "failed"
     assert "restarted" in queue.get(job.id).error
+
+
+def test_the_worker_writes_the_job_note_into_the_run(tmp_path: Path) -> None:
+    import json
+
+    queue = Queue(tmp_path / "q.db")
+    run_dir = tmp_path / "runs" / "r1"
+    job = queue.enqueue(JobSpec("r1", str(run_dir), "case.yaml", "ok", "corner", "car_dev", 1,
+                                note="new rear deck"))
+    worker = Worker(queue, command=stub_command, cwd=tmp_path)
+    worker._spawn(job)
+    worker._procs[job.id].wait(timeout=60)
+    assert json.loads((run_dir / "ui" / "note.json").read_text())["note"] == "new rear deck"

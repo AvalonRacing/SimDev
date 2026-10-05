@@ -82,6 +82,7 @@ def _form_page(
     run_name: str | None = None,
     values: dict[str, Any] | None = None,
     job=None,
+    note: str | None = None,
     error: str | None = None,
     status_code: int = 200,
 ):
@@ -103,7 +104,7 @@ def _form_page(
     return render(
         request, "new_run.html", pairs=pairs, selected=pair, profiles=forms.profiles(),
         profile=profile, run_name=run_name, fields=rows, job=job, state=state,
-        error=error, status_code=status_code,
+        note=note if note is not None else (job.note if job else None), error=error, status_code=status_code,
     )
 
 
@@ -172,6 +173,7 @@ async def queue_run(request: Request):
     c = ctx(request)
     job_id = int(form["job_id"]) if form.get("job_id") else None
     name = str(form.get("run_name") or "").strip()
+    note = str(form.get("note") or "").strip()[:2000] or None
     try:
         if job_id is not None:
             existing = c.queue.get(job_id)
@@ -190,7 +192,7 @@ async def queue_run(request: Request):
         job_spec = JobSpec(
             run_name=name, run_dir=str(run_dir), case_path=str(c.config.case_path),
             design=design, state=state, profile=profile, n_ranks=spec.solve.n_ranks,
-            overrides=overrides,
+            overrides=overrides, note=note,
         )
         if job_id is None:
             c.queue.enqueue(job_spec)
@@ -202,6 +204,7 @@ async def queue_run(request: Request):
             pair=forms.split_pair(form.get("pair")),
             profile=form.get("profile") or forms.DEFAULT_PROFILE,
             run_name=name,
+            note=note,
             values={f.key: form.get(f.key) for f in forms.FIELDS if form.get(f.key)},
             job=c.queue.get(job_id) if job_id else None,
             error=str(error),

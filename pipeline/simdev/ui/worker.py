@@ -21,6 +21,7 @@ from pathlib import Path
 
 from simdev.cad.library import REPO_ROOT
 from simdev.ui.jobrun import OUTCOME_FILE, UI_LOG, classify, read_outcome, write_job_file
+from simdev.ui.notes import write_initial_note
 from simdev.ui.queue import Job, Queue
 
 log = logging.getLogger(__name__)
@@ -191,6 +192,7 @@ class Worker:
         try:
             (run_dir / "logs").mkdir(parents=True, exist_ok=True)
             write_job_file(job, str(self._cad_root) if self._cad_root else None)
+            write_initial_note(run_dir, job.note)
             (run_dir / OUTCOME_FILE).unlink(missing_ok=True)
             with open(run_dir / UI_LOG, "a", encoding="utf-8") as output:
                 proc = subprocess.Popen(

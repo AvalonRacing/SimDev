@@ -20,6 +20,9 @@
     </select>
   </label>
   <div id="fields">{% include "_fields.html" %}</div>
+  <label>What changed in the geometry? <span class="muted">optional, shown in the results table</span>
+    <textarea name="note" rows="2" maxlength="2000">{{ note or '' }}</textarea>
+  </label>
   <div class="row">
     <button type="button" hx-post="/runs/preview" hx-include="#run-form" hx-target="#preview">Preview</button>
     <button type="submit" class="primary">{% if job %}Save{% else %}Queue{% endif %}</button>

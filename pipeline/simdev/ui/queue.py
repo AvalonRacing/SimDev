@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     error       TEXT,
     created_at  REAL NOT NULL,
     started_at  REAL,
-    finished_at REAL
+    finished_at REAL,
+    note        TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
@@ -61,6 +62,7 @@ class JobSpec:
     n_ranks: int
     overrides: dict[str, Any] = field(default_factory=dict)
     force_from: str | None = None
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ class Job:
     created_at: float
     started_at: float | None
     finished_at: float | None
+    note: str | None = None
 
 
 class Queue:
@@ -97,6 +100,11 @@ class Queue:
         self._db.executescript(SCHEMA)
         self._lock = threading.RLock()
         self._clock = clock
+        with self._lock:
+            columns = {row["name"] for row in self._db.execute("PRAGMA table_info(jobs)")}
+            if "note" not in columns:
+                # A database made before change notes existed.
+                self._db.execute("ALTER TABLE jobs ADD COLUMN note TEXT")
 
     # --- reading -------------------------------------------------------------
 
@@ -162,12 +170,12 @@ class Queue:
             ).fetchone()
             cursor = self._db.execute(
                 "INSERT INTO jobs (run_name, run_dir, case_path, design, state, profile, "
-                "n_ranks, overrides, force_from, position, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)",
+                "n_ranks, overrides, force_from, position, status, created_at, note) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
                 (
                     spec.run_name, spec.run_dir, spec.case_path, spec.design, spec.state,
                     spec.profile, spec.n_ranks, json.dumps(spec.overrides, sort_keys=True),
-                    spec.force_from, top + 1, self._clock(),
+                    spec.force_from, top + 1, self._clock(), spec.note,
                 ),
             )
             return self.get(cursor.lastrowid)
@@ -183,12 +191,12 @@ class Queue:
                 )
             self._db.execute(
                 "UPDATE jobs SET run_name = ?, run_dir = ?, case_path = ?, design = ?, "
-                "state = ?, profile = ?, n_ranks = ?, overrides = ?, force_from = ? "
+                "state = ?, profile = ?, n_ranks = ?, overrides = ?, force_from = ?, note = ? "
                 "WHERE id = ? AND status = 'queued'",
                 (
                     spec.run_name, spec.run_dir, spec.case_path, spec.design, spec.state,
                     spec.profile, spec.n_ranks, json.dumps(spec.overrides, sort_keys=True),
-                    spec.force_from, job_id,
+                    spec.force_from, spec.note, job_id,
                 ),
             )
             return self.get(job_id)
@@ -250,6 +258,7 @@ class Queue:
                 run_name=job.run_name, run_dir=job.run_dir, case_path=job.case_path,
                 design=job.design, state=job.state, profile=job.profile,
                 n_ranks=job.n_ranks, overrides=job.overrides, force_from=force_from,
+                note=job.note,
             )
         )
 

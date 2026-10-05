@@ -125,3 +125,16 @@ def test_a_queued_job_wider_than_the_budget_says_why_it_waits(tmp_path: Path) ->
         app.state.ctx.queue.enqueue(JobSpec("wide", str(tmp_path / "runs" / "wide"),
                                             "case.yaml", "v01", "corner", "car_dev", 64))
         assert "needs 64 cores, budget is 40" in client.get("/").text
+
+
+def test_the_change_note_is_queued_and_prefilled_when_editing(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        client.post("/runs", data={**FORM, "note": "rear deck +3 mm"}, follow_redirects=False)
+        job = app.state.ctx.queue.latest_for("r1")
+        assert job.note == "rear deck +3 mm"
+        assert "rear deck +3 mm" in client.get(f"/runs/new?job={job.id}").text
+
+
+def test_the_new_run_form_offers_a_change_note(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        assert 'name="note"' in client.get("/runs/new").text
