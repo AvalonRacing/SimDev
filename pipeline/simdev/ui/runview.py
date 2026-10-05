@@ -112,7 +112,7 @@ def _read_frames(paths: list[Path]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
-def _force_frame(run_dir: Path) -> pd.DataFrame:
+def force_frame(run_dir: Path) -> pd.DataFrame:
     root = Path(run_dir) / "postProcessing" / "forceCoeffs"
     return _read_frames(sorted(root.glob("*/coefficient.dat")))
 
@@ -131,7 +131,7 @@ def _series(frame: pd.DataFrame, after: int, columns: dict[str, str]) -> dict[st
 
 
 def force_series(run_dir: Path, after: int = 0) -> dict[str, list]:
-    return _series(_force_frame(run_dir), after, {"Cd": "Cd", "Cl": "Cl"})
+    return _series(force_frame(run_dir), after, {"Cd": "Cd", "Cl": "Cl"})
 
 
 def component_series(run_dir: Path, after: int = 0) -> dict[str, dict[str, list]]:
@@ -161,7 +161,7 @@ def convergence(run_dir: Path) -> dict[str, Any] | None:
     except (FileNotFoundError, KeyError, ValueError):
         # No caseSpec yet, or one written by an older pipeline: no gate to show.
         return None
-    frame = _force_frame(run_dir)
+    frame = force_frame(run_dir)
     if frame.empty:
         return None
     result = check_convergence(frame, spec)
