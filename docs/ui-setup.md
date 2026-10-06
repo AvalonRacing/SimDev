@@ -59,6 +59,9 @@ Tailscale Funnel.
 - **Results:** one row per run in the old Excel sheet's column order:
   coefficients with their noise, a reference run per row (delta row with
   coloured cells), the change note next to the design, TSV export. Not linked to Compare.
+- Every collapsible section (CAD library states and designs, run-page image groups,
+  the Results column menu) remembers whether it was open, per browser; designs start
+  collapsed.
 - **Compare:** pick up to four runs at the top; pictures side by side with
   sync, blink, swipe and fade; field deltas against a reference; force and
   cp-line charts (cp plot: front of the car on the left).

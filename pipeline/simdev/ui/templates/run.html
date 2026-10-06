@@ -70,7 +70,7 @@
 </div>
 {% endif %}
 {% for group, pictures in images.groups.items() %}
-<details>
+<details data-remember="run-images-{{ group }}">
   <summary>{{ group }} <span class="muted">({{ pictures|length }})</span></summary>
   <div class="gallery">
     {% for rel in pictures %}

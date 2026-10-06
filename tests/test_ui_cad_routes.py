@@ -124,3 +124,15 @@ def test_a_broken_state_is_shown_on_the_library_page(tmp_path: Path) -> None:
         assert "state corner: state.yaml is not valid" in page.text
         # The only pair used the broken state, so New Run has nothing to offer.
         assert client.get("/runs/new").status_code == 200
+
+
+def test_library_sections_remember_open_or_closed(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        text = client.get("/cad").text
+        # Every section is remembered by the shared script; designs start collapsed.
+        assert 'data-remember="cad-state-corner"' in text
+        assert 'data-remember="cad-design-v01"' in text
+        assert 'data-remember="cad-new-state"' in text
+        assert '<details class="card" open' not in text
+        assert "/static/details-memory.js" in text
+        assert client.get("/static/details-memory.js").status_code == 200

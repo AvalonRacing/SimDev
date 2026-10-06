@@ -9,7 +9,7 @@
 
 <h2>Driving states</h2>
 {% for row in states %}
-<details class="card">
+<details class="card" data-remember="cad-state-{{ row.state.name }}">
   <summary>
     <strong>{{ row.state.name }}</strong>
     <span class="muted">{{ row.mode }} · {{ row.u_inf }} m/s{% if row.mode == 'cornering' %} · R {{ row.corner_radius }} m {{ row.corner_direction }}{% endif %}
@@ -52,7 +52,7 @@
 </div>
 {% endfor %}
 
-<details class="card">
+<details class="card" data-remember="cad-new-state">
   <summary><strong>+ New driving state</strong></summary>
   <form method="post" action="/cad/states" enctype="multipart/form-data" class="stack">
     <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9\-]*" placeholder="corner-r4-left"></label>
@@ -70,7 +70,7 @@
 
 <h2>Designs</h2>
 {% for design, slots in designs.items() %}
-<details class="card" open>
+<details class="card" data-remember="cad-design-{{ design }}">
   <summary><strong>{{ design }}</strong> <span class="muted">{{ slots|length }} state(s)</span></summary>
   <table>
     <tr><th>Exported for state</th><th>Fix a mistake</th><th></th></tr>
