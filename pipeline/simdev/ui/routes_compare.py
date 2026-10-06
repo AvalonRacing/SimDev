@@ -41,11 +41,13 @@ def compare_page(request: Request, runs: list[str] = Query([]), ref: str = ""):
     names, dropped = names[:MAX_PANES], names[MAX_PANES:]
     ref = ref if ref in names else (names[0] if names else "")
     # Only runs with pictures: this page is the picture comparison, not the numbers.
-    all_runs = [p.name for p in runview.list_runs(root)
-                if valid_run_name(p.name) and (p / "results" / "render_plan.json").is_file()]
-    payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2}, "all_runs": all_runs}
+    offered = [p.name for p in runview.list_runs(root)
+               if valid_run_name(p.name) and (p / "results" / "render_plan.json").is_file()]
+    # The current selection always round-trips through Show, pictures or not.
+    offered += [n for n in names if n not in offered]
+    payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2}}
     return render(
-        request, "compare.html", ref=ref, runs=names, all_runs=all_runs,
+        request, "compare.html", ref=ref, runs=names, offered=offered,
         missing=missing, dropped=dropped, max_panes=MAX_PANES,
         data_json=json.dumps(payload).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"),
     )

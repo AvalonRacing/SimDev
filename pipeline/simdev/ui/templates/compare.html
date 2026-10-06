@@ -11,9 +11,9 @@
 {% if dropped %}<div class="warn">max {{ max_panes }} runs: left out {{ dropped|join(', ') }}</div>{% endif %}
 <form method="get" action="/compare" class="row">
   {% for i in range(max_panes) %}
-  <select name="runs" aria-label="run {{ i + 1 }}"><option value="">–</option>{% for n in all_runs %}<option value="{{ n }}"{% if i < runs|length and runs[i] == n %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+  <select name="runs" aria-label="run {{ i + 1 }}"><option value="">–</option>{% for n in offered %}<option value="{{ n }}"{% if i < runs|length and runs[i] == n %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
   {% endfor %}
-  <label class="row">REF <select name="ref"><option value="">–</option>{% for n in all_runs %}<option value="{{ n }}"{% if n == ref %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+  <label class="row">REF <select name="ref"><option value="">–</option>{% for n in offered %}<option value="{{ n }}"{% if n == ref %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
   <button class="primary">Show</button>
 </form>
 {% if not runs %}

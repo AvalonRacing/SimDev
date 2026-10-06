@@ -32,7 +32,7 @@ def test_compare_page_keeps_order_and_reference(tmp_path: Path) -> None:
         page = client.get("/compare?runs=b,a&ref=a").text
         data = _payload(page)
         assert data["runs"] == ["b", "a"] and data["ref"] == "a"
-        assert sorted(data["all_runs"]) == ["a", "b"]
+        assert "all_runs" not in data
 
 
 def test_compare_page_is_pictures_only(tmp_path: Path) -> None:
@@ -67,10 +67,20 @@ def test_run_without_pictures_is_not_offered(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         make_pictured_run(tmp_path / "runs", "a")
         make_run(tmp_path / "runs", "b")
-        assert _payload(client.get("/compare?runs=a").text)["all_runs"] == ["a"]
+        page = client.get("/compare?runs=a").text
+        assert '<option value="a"' in page and '<option value="b"' not in page
 
 
-def test_ticked_checkboxes_arrive_as_repeated_parameters(tmp_path: Path) -> None:
+def test_current_selection_without_pictures_round_trips_through_the_picker(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        make_run(tmp_path / "runs", "b")
+        page = client.get("/compare?runs=b,a&ref=b").text
+        assert '<option value="b" selected>' in page and '<option value="a" selected>' in page
+        assert page.count('<option value="b" selected>') == 2  # pane 1 and REF
+
+
+def test_picker_sends_repeated_runs_parameters(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         make_run(tmp_path / "runs", "a")
         make_run(tmp_path / "runs", "b")
@@ -127,7 +137,6 @@ def test_hostile_directory_name_cannot_break_out_of_the_data_script(tmp_path: Pa
         assert "</script><img" not in page
         data = json.loads(page.split('<script id="compare-data" type="application/json">')[1]
                           .split("</script>")[0])
-        assert data["all_runs"] == ["a"]
 
 
 def test_payload_escapes_angle_brackets(tmp_path: Path, monkeypatch) -> None:
@@ -213,3 +222,8 @@ def test_a_busy_delta_answers_503_with_retry_after(tmp_path: Path, monkeypatch) 
         response = client.get("/api/delta/b.png?ref=a&view=x_+0.000&field=cp")
         assert response.status_code == 503
         assert response.headers["retry-after"] == "2"
+
+
+def test_nav_links_to_compare(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        assert 'href="/compare"' in client.get("/").text

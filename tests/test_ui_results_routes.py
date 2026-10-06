@@ -95,6 +95,6 @@ def test_results_table_is_not_linked_to_the_pictures_and_the_note_comes_last(tmp
         make_run(tmp_path / "runs", "base")
         page = client.get("/results").text
         assert 'type="checkbox"' not in page and "compare-form" not in page
-        assert "/compare" not in page
+        assert "/compare" not in page.split("<table")[1]
         head = page.split("<thead>")[1].split("</thead>")[0]
         assert head.index("compare with") < head.index("run") < head.index("Cl") < head.index("note")
