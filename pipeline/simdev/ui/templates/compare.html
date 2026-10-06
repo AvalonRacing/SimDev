@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Compare · SimDev{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="/static/compare.js" defer></script>
+{% endblock %}
+{% block main %}
+<h1>Compare</h1>
+{% if missing %}<div class="warn">not found or not allowed, left out: {{ missing|join(', ') }}</div>{% endif %}
+{% if not rows %}
+<p>No runs chosen. Tick runs on the <a href="/results">Results</a> page.</p>
+{% else %}
+<script id="compare-data" type="application/json">{{ data_json|safe }}</script>
+<div id="strip" class="row"></div>
+<div id="guards"></div>
+
+<h2>Numbers</h2>
+<div class="scroll"><table class="results">
+  <thead><tr><th>run</th><th>note</th>{% for c in columns %}<th class="num">{{ c.label }}</th>{% endfor %}<th>verdict</th></tr></thead>
+  {% for row in rows %}
+  <tbody class="result">
+  <tr><td><a href="/runs/{{ row.name }}">{{ row.name }}</a>{% if ref and row.name == ref.name %} <span class="badge">REF</span>{% endif %}<br><span class="muted">{{ row.state }}</span></td>
+      <td>{{ row.note.note }}</td>
+      {% for c in columns %}<td class="num">{{ row.values.get(c.key)|num(c.fmt) }}</td>{% endfor %}
+      <td>{{ row.verdict or '' }}</td></tr>
+  {% if ref and row.name != ref.name and row.has_result and ref.has_result %}
+  {% set cells = delta(row, ref, columns) %}
+  <tr class="delta"><td colspan="2" class="muted">Δ against {{ ref.name }}</td>
+    {% for c in columns %}{% set d = cells[c.key] %}<td class="num {{ d.tone }}" {% if d.noise is not none %}title="± {{ d.noise|num('{:.4f}') }}"{% endif %}>{{ d.value|num(c.fmt) }}</td>{% endfor %}<td></td></tr>
+  {% endif %}
+  </tbody>
+  {% endfor %}
+</table></div>
+
+<h2>Pictures</h2>
+<div id="viewer"></div>
+
+<h2>Forces</h2>
+<div class="row">
+  <label class="row">Show <select id="force-part"><option value="">whole car</option></select></label>
+  <label class="row"><input type="checkbox" id="force-relative"> relative to window mean (%)</label>
+</div>
+<h3>Cl</h3><div id="plot-Cl" class="plot"></div>
+<h3>Cd</h3><div id="plot-Cd" class="plot"></div>
+
+<h2>Δ by component</h2>
+<div id="bars"></div>
+
+<h2>cp lines</h2>
+<div class="row">
+  <label class="row">Station <select id="cp-station"></select></label>
+  <label class="row"><input type="checkbox" class="cp-patch" value="Body" checked> Body</label>
+  <label class="row"><input type="checkbox" class="cp-patch" value="Wing" checked> Wing</label>
+</div>
+<canvas id="cp-plot" class="plot" width="1100" height="380"></canvas>
+<canvas id="cp-outline" class="plot" width="1100" height="160"></canvas>
+{% endif %}
+{% endblock %}
