@@ -448,19 +448,32 @@
 
   const width = () => Math.max(320, Math.min(document.querySelector("main").clientWidth - 40, 1100));
 
+  // iteration -> value, last occurrence wins (a restart repeats iterations).
+  function lastWins(t, coefficient) {
+    const m = new Map();
+    const v = (t && t[coefficient]) || [];
+    ((t && t.iteration) || []).forEach((it, i) => m.set(it, v[i]));
+    return m;
+  }
+
   function partSeries(run, part, coefficient) {
     const f = forces[run];
     if (!f) return null;
-    if (!f.total || !f.total.iteration) return null;
-    if (!part) return { it: f.total.iteration, v: f.total[coefficient] };
-    const groups = (summaries[run] || {}).groups_map || {};
-    const members = groups[part] || [part];
-    const tables = members.map((m) => (f.components || {})[m]).filter(Boolean);
-    if (tables.length !== members.length) return null;
-    const sums = new Map();
-    for (const t of tables) t.iteration.forEach((it, i) => { const v = t[coefficient][i]; if (v != null) sums.set(it, (sums.get(it) || 0) + v); });
-    const it = [...sums.keys()].sort((a, b) => a - b);
-    return { it, v: it.map((x) => sums.get(x)) };
+    let maps;
+    if (!part) {
+      maps = [lastWins(f.total, coefficient)];
+    } else {
+      const members = ((summaries[run] || {}).groups_map || {})[part] || [part];
+      const tables = members.map((m) => (f.components || {})[m]).filter(Boolean);
+      if (!tables.length || tables.length !== members.length) return null;
+      maps = tables.map((t) => lastWins(t, coefficient));
+    }
+    // Like summary.py: only iterations present in every member, none with a missing value.
+    const it = [...maps[0].keys()]
+      .filter((x) => maps.every((m) => m.has(x) && m.get(x) != null))
+      .sort((x, y) => x - y);
+    if (!it.length) return null;
+    return { it, v: it.map((x) => maps.reduce((acc, m) => acc + m.get(x), 0)) };
   }
 
   function windowMean(run, s) {
@@ -469,21 +482,33 @@
     return values.length ? values.reduce((x, y) => x + y, 0) / values.length : null;
   }
 
+  const plots = {};
+
   function drawForces() {
     const part = document.getElementById("force-part").value;
     const relative = document.getElementById("force-relative").checked;
     for (const coefficient of ["Cl", "Cd"]) {
       const box = document.getElementById(`plot-${coefficient}`);
+      if (plots[coefficient]) { plots[coefficient].destroy(); plots[coefficient] = null; }
       box.innerHTML = "";
-      const runs = C.state.runs.filter((r) => partSeries(r, part, coefficient));
-      if (!runs.length) { box.textContent = "no history"; continue; }
-      const tables = runs.map((r) => {
+      const entries = [];
+      let maxAbs = 0;
+      for (const r of C.state.runs) {
         const s = partSeries(r, part, coefficient);
-        const mean = windowMean(r, s);
-        const v = relative && mean ? s.v.map((x) => (x == null ? null : (100 * (x - mean)) / Math.abs(mean))) : s.v;
-        return [s.it, v];
-      });
-      const joined = uPlot.join(tables);
+        if (!s) continue;
+        let v = s.v;
+        if (relative) {
+          const mean = windowMean(r, s);
+          if (mean == null || mean === 0) continue;
+          v = s.v.map((x) => (100 * (x - mean)) / Math.abs(mean));
+          const [a, b] = (summaries[r] || {}).window || [0, 0];
+          v.forEach((x, i) => { if (s.it[i] >= a && s.it[i] <= b) maxAbs = Math.max(maxAbs, Math.abs(x)); });
+        }
+        entries.push({ run: r, it: s.it, v });
+      }
+      if (!entries.length) { box.textContent = "no history"; continue; }
+      const runs = entries.map((e) => e.run);
+      const joined = uPlot.join(entries.map((e) => [e.it, e.v]));
       const bands = {
         hooks: { drawClear: [(u) => {
           const ctx = u.ctx;
@@ -502,11 +527,14 @@
           ctx.restore();
         }] },
       };
-      new uPlot({
-        width: width(), height: 260, plugins: [bands],
-        scales: { x: { time: false } },
+      // Relative mode zooms on the converged window, not the start-up transient.
+      const r = Math.max(3, 1.5 * maxAbs);
+      const scales = { x: { time: false } };
+      if (relative) scales.y = { range: () => [-r, r] };
+      plots[coefficient] = new uPlot({
+        width: width(), height: 260, plugins: [bands], scales,
         axes: [{}, { label: relative ? `${coefficient} − mean [%]` : coefficient }],
-        series: [{ label: "iteration" }, ...runs.map((r) => ({ label: r, stroke: C.colourOf(r), width: 1.2 }))],
+        series: [{ label: "iteration" }, ...runs.map((x) => ({ label: x, stroke: C.colourOf(x), width: 1.2 }))],
       }, joined, box);
     }
   }
