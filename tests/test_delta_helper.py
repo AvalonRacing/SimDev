@@ -54,6 +54,18 @@ def test_derived_fields_match_the_renderer() -> None:
     assert np.isnan(out["cp"][1])
 
 
+def test_derived_fields_rotating_frame_signs_and_local_head() -> None:
+    # omega=2 about (1, 0); point at (3, 1): dx=2, dy=1.
+    # U_rel = (Ux + w*dy, Uy - w*dx, Uz) = (4+2, 1-4, 2) = (6, -3, 2); |U_rel|^2 = 49
+    # q = 0.5*10^2 = 50; local freestream |w*r|^2 = 4*5 = 20
+    frame = {"mode": "cornering", "u_inf": 10.0, "omega": 2.0, "origin": [1.0, 0.0, 0.0]}
+    out = D.derived_fields(np.array([25.0]), np.array([[4.0, 1.0, 2.0]]),
+                           np.array([True]), np.array([[3.0, 1.0, 0.0]]), frame)
+    assert np.isclose(out["U"][0], 7.0)
+    assert np.isclose(out["cp"][0], 0.5)
+    assert np.isclose(out["cpt"][0], (25 + 0.5 * 49 - 0.5 * 20) / 50 + 1.0)
+
+
 def test_delta_rgb_marks_solid_moved_and_flips_rows() -> None:
     delta = np.array([[0.001, np.nan], [0.5, np.nan]])
     solid = np.array([[False, True], [False, False]])
@@ -111,7 +123,7 @@ def test_surface_interpolation_masks_moved_surface(tmp_path: Path) -> None:
         "import importlib.util, json, sys\n"
         f"spec = importlib.util.spec_from_file_location('d', {str(HELPER)!r})\n"
         "d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)\n"
-        f"_, stats = d.surface_delta_field({str(tmp_path / 'pane.vtp')!r}, {str(tmp_path / 'ref.vtp')!r}, 50.0)\n"
+        f"_, stats = d.surface_delta_field({str(tmp_path / 'pane.vtp')!r}, {str(tmp_path / 'ref.vtp')!r}, 50.0, 50.0)\n"
         "print(json.dumps(stats))\n"
     )
     done = subprocess.run([PVPY, "-c", code], capture_output=True, text=True,

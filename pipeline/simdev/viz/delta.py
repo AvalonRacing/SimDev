@@ -124,9 +124,17 @@ def _write_png(rgb: np.ndarray, out: Path) -> None:
     from PIL import Image
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".tmp.png")
-    Image.fromarray(rgb).save(tmp)
-    os.replace(tmp, out)  # a reader never gets half a picture
+    tmp = _tmp_name(out, ".png")
+    try:
+        Image.fromarray(rgb).save(tmp)
+        os.replace(tmp, out)  # a reader never gets half a picture
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _tmp_name(target: Path, suffix: str) -> Path:
+    """A scratch name next to target, unique per process."""
+    return target.with_name(f"{target.stem}.{os.getpid()}.tmp{suffix}")
 
 
 def _read(path: str):
@@ -174,15 +182,17 @@ def plane_delta(request: dict[str, Any]) -> dict[str, Any]:
     delta = a - b
     solid = ~np.isfinite(a) & ~np.isfinite(b)
     moved = np.isfinite(a) ^ np.isfinite(b)
-    rgb = draw_colour_bar(delta_rgb(delta, solid, moved, limit), limit, f"Δ {field}")
+    rgb = draw_colour_bar(delta_rgb(delta, solid, moved, limit), limit, f"delta {field}")
     _write_png(rgb, Path(request["out"]))
     both = np.isfinite(delta)
     return {"max_abs": float(np.abs(delta[both]).max()) if both.any() else None,
             "moved_pct": float(100 * moved.mean())}
 
 
-def surface_delta_field(pane_path: str, ref_path: str, q: float):
+def surface_delta_field(pane_path: str, ref_path: str, q_pane: float, q_ref: float):
     """Ref's pMean interpolated onto the pane's surface, as delta_cp.
+
+    Each run's pressure is normalised by its own dynamic head.
 
     A pane point with no ref point within SURFACE_RADIUS gets NaN: surface
     that is new or moved in the pane, drawn black.
@@ -210,7 +220,7 @@ def surface_delta_field(pane_path: str, ref_path: str, q: float):
     p_pane = vtk_to_numpy(pane.GetPointData().GetArray("pMean"))
     p_ref = vtk_to_numpy(out.GetArray("pMean"))
     has = vtk_to_numpy(out.GetArray("has_ref")).astype(bool)
-    d = np.where(has, (p_pane - p_ref) / q, np.nan).astype(np.float32)
+    d = np.where(has, p_pane / q_pane - p_ref / q_ref, np.nan).astype(np.float32)
     surface = vtk.vtkPolyData()
     surface.ShallowCopy(pane)
     array = numpy_to_vtk(d, deep=True)
@@ -227,23 +237,41 @@ def surface_delta(request: dict[str, Any]) -> dict[str, Any]:
     limit = float(request["limit"])
     cache = Path(request["cache_vtp"])
     pane_s, ref_s = request["pane"]["sample"], request["ref"]["sample"]
-    stats: dict[str, Any] = {}
-    fresh = cache.is_file() and cache.stat().st_mtime > max(
+    stats_path = cache.with_suffix(".json")
+    fresh = stats_path.is_file() and cache.is_file() and cache.stat().st_mtime > max(
         Path(pane_s).stat().st_mtime, Path(ref_s).stat().st_mtime)
     if not fresh:
-        u_inf = float(request["pane"]["frame"]["u_inf"])
-        surface, stats = surface_delta_field(pane_s, ref_s, 0.5 * u_inf * u_inf)
+        q_pane = 0.5 * float(request["pane"]["frame"]["u_inf"]) ** 2
+        q_ref = 0.5 * float(request["ref"]["frame"]["u_inf"]) ** 2
+        surface, stats = surface_delta_field(pane_s, ref_s, q_pane, q_ref)
         cache.parent.mkdir(parents=True, exist_ok=True)
-        writer = vtk.vtkXMLPolyDataWriter()
-        writer.SetFileName(str(cache.with_suffix(".tmp.vtp")))
-        writer.SetInputData(surface)
-        writer.Write()
-        os.replace(cache.with_suffix(".tmp.vtp"), cache)
+        tmp = _tmp_name(cache, ".vtp")
+        try:
+            writer = vtk.vtkXMLPolyDataWriter()
+            writer.SetFileName(str(tmp))
+            writer.SetInputData(surface)
+            writer.Write()
+            os.replace(tmp, cache)
+        finally:
+            tmp.unlink(missing_ok=True)
+        # Sidecar last: its presence marks a complete cache.
+        side = _tmp_name(stats_path, ".json")
+        try:
+            side.write_text(json.dumps(stats), encoding="utf-8")
+            os.replace(side, stats_path)
+        finally:
+            side.unlink(missing_ok=True)
+    else:
+        stats = json.loads(stats_path.read_text(encoding="utf-8"))
 
     from paraview.simple import (
         CreateRenderView, GetColorTransferFunction, Render, SaveScreenshot, Show,
-        XMLPolyDataReader,
+        XMLPolyDataReader, _DisableFirstRenderCameraReset,
     )
+
+    # The first Render of a session otherwise refits the camera to the data
+    # (as in pv_render.py), so the picture would not match the pipeline's.
+    _DisableFirstRenderCameraReset()
 
     view = CreateRenderView()
     view.ViewSize = list(request["resolution"])
@@ -276,13 +304,15 @@ def surface_delta(request: dict[str, Any]) -> dict[str, Any]:
     Render(view)
     out = Path(request["out"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    raw = out.with_suffix(".raw.png")
-    SaveScreenshot(str(raw), view, ImageResolution=list(request["resolution"]))
+    raw = _tmp_name(out, ".raw.png")
     from PIL import Image
 
-    rgb = draw_colour_bar(np.asarray(Image.open(raw).convert("RGB")), limit, "Δ cp")
-    raw.unlink()
-    _write_png(rgb, out)
+    try:
+        SaveScreenshot(str(raw), view, ImageResolution=list(request["resolution"]))
+        shot = np.asarray(Image.open(raw).convert("RGB"))
+    finally:
+        raw.unlink(missing_ok=True)
+    _write_png(draw_colour_bar(shot, limit, "delta cp"), out)
     return stats
 
 
