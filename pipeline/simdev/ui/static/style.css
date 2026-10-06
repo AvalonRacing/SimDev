@@ -55,3 +55,17 @@ tr.delta td { font-size: 12px; }
 tr.delta td.better { color: var(--ok); font-weight: 600; }
 tr.delta td.worse { color: var(--bad); font-weight: 600; }
 tr.delta td.noise { color: var(--muted); }
+.toolbar { display: grid; gap: 0.4rem; margin-bottom: 0.6rem; }
+.toolbar input[type=range] { width: 22rem; }
+.panes { display: grid; gap: 0.6rem; }
+.panes.n2 { grid-template-columns: 1fr 1fr; }
+.panes.n3, .panes.n4 { grid-template-columns: 1fr 1fr; }
+@media (min-width: 1500px) { .panes.n3 { grid-template-columns: 1fr 1fr 1fr; } }
+.pane-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; border-left: 4px solid; padding: 0.2rem 0.5rem; background: #fff; }
+.viewport { position: relative; overflow: hidden; aspect-ratio: 4 / 3; background: rgb(212, 212, 212); cursor: grab; touch-action: none; }
+.viewport img { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 0 0; user-select: none; }
+.pane-note { position: absolute; left: 0.6rem; top: 0.4rem; background: rgba(255, 255, 255, 0.85); padding: 0.1rem 0.4rem; font-size: 12px; }
+.pane-note:empty { display: none; }
+.handle { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: #fff; box-shadow: 0 0 0 1px #000; cursor: ew-resize; z-index: 2; }
+.overlay-label { font-weight: 600; margin: 0.2rem 0; }
+.chip { border: 1px solid; border-left-width: 4px; border-radius: 4px; padding: 0.2rem 0.5rem; background: #fff; }

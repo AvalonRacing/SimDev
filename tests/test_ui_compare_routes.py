@@ -121,3 +121,9 @@ def test_cplines_nan_becomes_null_and_corrupt_csv_is_404(tmp_path: Path, monkeyp
         monkeypatch.setattr(routes_compare, "cp_station", corrupt)
         response = client.get("/api/runs/a/cplines/s")
         assert response.status_code == 404 and "bad row" in response.json()["detail"]
+
+
+def test_the_compare_script_is_served(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        script = client.get("/static/compare.js")
+        assert script.status_code == 200 and "SimdevCompare" in script.text
