@@ -67,3 +67,94 @@ def test_cp_station_converts_to_cp(tmp_path: Path) -> None:
     assert data["patches"]["Body"]["cp"] == [18 / (0.5 * 36)]
     with pytest.raises(KeyError):
         cp_station(tmp_path / "r1", "y_+9.000")
+
+
+def test_plan_entry_with_missing_keys_is_skipped(tmp_path: Path) -> None:
+    run = tmp_path / "r1"
+    (run / "results/images/cp_x").mkdir(parents=True)
+    (run / "results/images/cp_x/test.png").write_bytes(b"png")
+    plan = {
+        "views_digest": "abc",
+        "frame": {"u_inf": 6.0},
+        "slices": [
+            {"name": "x_+0.000", "axis": "x", "offset": 0.0,
+             "images": [{"field": "cp", "out": f"{OLD}/results/images/cp_x/test.png"}]},
+            {"axis": "x", "offset": 0.0,
+             "images": [{"field": "cp", "out": f"{OLD}/results/images/cp_x/test.png"}]},  # missing name
+            {"name": "missing_axis", "offset": 0.0,
+             "images": [{"field": "cp", "out": f"{OLD}/results/images/cp_x/test.png"}]},  # missing axis
+        ],
+        "surfaces": [
+            {"name": "top", "images": [{"field": "cp", "out": f"{OLD}/results/images/cp_x/test.png"}]},
+            {"images": [{"field": "cp", "out": f"{OLD}/results/images/cp_x/test.png"}]},  # missing name
+        ],
+    }
+    (run / "results/render_plan.json").write_text(json.dumps(plan))
+    (run / "results/result.json").write_text(json.dumps({"window_start": 0, "window_end": 10}))
+    index = build_index(run)
+    assert "x" in index["planes"]
+    assert "cp" in index["planes"]["x"]
+    assert len(index["planes"]["x"]["cp"]) == 1
+    assert "top" in index["surfaces"].get("cp", {})
+    assert len(index["surfaces"].get("cp", {})) == 1
+
+
+def test_unanchored_existing_absolute_path_is_skipped(tmp_path: Path) -> None:
+    run = tmp_path / "r1"
+    (run / "results/images").mkdir(parents=True)
+    (run / "results/images/test.png").write_bytes(b"png")
+    # Create a file at an absolute path without anchors
+    fake_path = tmp_path / "fake.png"
+    fake_path.write_bytes(b"png")
+    plan = {
+        "views_digest": "abc",
+        "frame": {"u_inf": 6.0},
+        "slices": [
+            {"name": "x_+0.000", "axis": "x", "offset": 0.0,
+             "images": [{"field": "cp", "out": str(fake_path)}]},
+        ],
+    }
+    (run / "results/render_plan.json").write_text(json.dumps(plan))
+    (run / "results/result.json").write_text(json.dumps({"window_start": 0, "window_end": 10}))
+    index = build_index(run)
+    assert index["planes"] == {}
+
+
+def test_escaping_path_outside_run_is_skipped(tmp_path: Path) -> None:
+    run = tmp_path / "r1"
+    (run / "results/images").mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "bad.png").write_bytes(b"png")
+    # Path that escapes: results/../../other/bad.png
+    escaping_path = f"{OLD}/results/../../other/bad.png"
+    plan = {
+        "views_digest": "abc",
+        "frame": {"u_inf": 6.0},
+        "slices": [
+            {"name": "x_+0.000", "axis": "x", "offset": 0.0,
+             "images": [{"field": "cp", "out": escaping_path}]},
+        ],
+    }
+    (run / "results/render_plan.json").write_text(json.dumps(plan))
+    (run / "results/result.json").write_text(json.dumps({"window_start": 0, "window_end": 10}))
+    index = build_index(run)
+    assert index["planes"] == {}
+
+
+def test_cp_station_with_escaping_csv_path_returns_empty_patches(tmp_path: Path) -> None:
+    run = tmp_path / "r1"
+    (run / "results").mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "bad.csv").write_text("patch,x,z,pMean\nBody,0.1,0.05,18\n")
+    escaping_path = f"{OLD}/results/../../other/bad.csv"
+    plan = {
+        "views_digest": "abc",
+        "frame": {"u_inf": 6.0},
+        "cp_lines": {"stations": [{"name": "y_+0.000", "offset": 0.0, "csv": escaping_path}]},
+    }
+    (run / "results/render_plan.json").write_text(json.dumps(plan))
+    data = cp_station(run, "y_+0.000")
+    assert data["u_inf"] == 6.0
+    assert data["patches"] == {}

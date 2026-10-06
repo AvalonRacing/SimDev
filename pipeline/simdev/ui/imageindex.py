@@ -38,7 +38,14 @@ def _rel(recorded: str, run_dir: Path) -> str | None:
     path = reroot(recorded, run_dir)
     if not path.is_file():
         return None
-    return str(path.relative_to(run_dir))
+    run_dir_resolved = Path(run_dir).resolve()
+    try:
+        path_resolved = path.resolve()
+        if not path_resolved.is_relative_to(run_dir_resolved):
+            return None
+        return str(path_resolved.relative_to(run_dir_resolved))
+    except ValueError:
+        return None
 
 
 def build_index(run_dir: Path) -> dict[str, Any]:
@@ -46,23 +53,43 @@ def build_index(run_dir: Path) -> dict[str, Any]:
     plan = load_plan(run_dir) or {}
     planes: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for entry in plan.get("slices", []):
+        axis = entry.get("axis")
+        name = entry.get("name")
+        offset = entry.get("offset")
+        if axis is None or name is None or offset is None:
+            continue
         for image in entry.get("images", []):
-            rel = _rel(image["out"], run_dir)
+            field = image.get("field")
+            out = image.get("out")
+            if field is None or out is None:
+                continue
+            rel = _rel(out, run_dir)
             if rel is None:
                 continue
-            planes.setdefault(entry["axis"], {}).setdefault(image["field"], []).append(
-                {"name": entry["name"], "offset": entry["offset"], "rel": rel})
+            planes.setdefault(axis, {}).setdefault(field, []).append(
+                {"name": name, "offset": offset, "rel": rel})
     for fields in planes.values():
         for items in fields.values():
             items.sort(key=lambda p: p["offset"])
     surfaces: dict[str, dict[str, str]] = {}
     for entry in plan.get("surfaces", []):
+        name = entry.get("name")
+        if name is None:
+            continue
         for image in entry.get("images", []):
-            rel = _rel(image["out"], run_dir)
+            field = image.get("field")
+            out = image.get("out")
+            if field is None or out is None:
+                continue
+            rel = _rel(out, run_dir)
             if rel is not None:
-                surfaces.setdefault(image["field"], {})[entry["name"]] = rel
-    stations = [{"name": s["name"], "offset": s["offset"]}
-                for s in (plan.get("cp_lines") or {}).get("stations", [])]
+                surfaces.setdefault(field, {})[name] = rel
+    stations = []
+    for s in (plan.get("cp_lines") or {}).get("stations", []):
+        name = s.get("name")
+        offset = s.get("offset")
+        if name is not None and offset is not None:
+            stations.append({"name": name, "offset": offset})
     summary = load_summary(run_dir)
     job_state = ""
     try:
@@ -83,16 +110,25 @@ def build_index(run_dir: Path) -> dict[str, Any]:
 
 
 def cp_station(run_dir: Path, station: str) -> dict[str, Any]:
+    run_dir = Path(run_dir)
     plan = load_plan(run_dir) or {}
     for entry in (plan.get("cp_lines") or {}).get("stations", []):
-        if entry["name"] == station:
-            path = reroot(entry["csv"], Path(run_dir))
+        if entry.get("name") == station:
+            path = reroot(entry.get("csv", ""), run_dir)
             break
     else:
         raise KeyError(station)
     u_inf = float((plan.get("frame") or {}).get("u_inf") or 0.0)
     q = 0.5 * u_inf * u_inf
-    points = read_station(path) if path.is_file() else {}
+    points: dict[str, tuple[list, list, list]] = {}
+    if path.is_file():
+        run_dir_resolved = run_dir.resolve()
+        try:
+            path_resolved = path.resolve()
+            if path_resolved.is_relative_to(run_dir_resolved):
+                points = read_station(path)
+        except ValueError:
+            pass
     return {
         "u_inf": u_inf,
         "patches": {patch: {"x": xs, "z": zs, "cp": [p / q for p in ps] if q else []}
