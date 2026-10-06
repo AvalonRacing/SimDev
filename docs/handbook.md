@@ -369,7 +369,7 @@ plots, and the result record.
 | `gates/*` | The three gates | parsers, schema, roles |
 | `stages/*` | Orchestration | everything |
 | `report/*` | Result records, plots | nothing |
-| `ui/notes.py`, `ui/summary.py`, `ui/results.py`, `ui/imageindex.py`, `ui/delta.py`, `viz/delta.py` | Results table, compare page, field deltas | run records, `viz/pv_render.py` |
+| `ui/notes.py`, `ui/summary.py`, `ui/results.py`, `ui/imageindex.py`, `ui/delta.py`, `viz/delta.py` | Results table, compare page, field deltas | run records, `viz/cplines.py`, `stages.common` |
 | `cli.py` | Argument parsing, exit codes | stages |
 
 **The dependency rule:** `render/templates/` depends on nothing and contains no
@@ -1252,7 +1252,8 @@ not evidence that a production render is comfortable.
 ### The results table and the compare page
 
 **`/results` is the Excel sheet, kept by the runs themselves.** One row per
-run directory with a `result.json`, newest first. The change note comes from
+run directory, newest first; a run without a `result.json` yet is listed
+greyed as "no results yet" and cannot be ticked. The change note comes from
 the New Run form ("What changed in the geometry?") and is copied into
 `<run>/ui/note.json` when the job starts; it and the "compare with" reference
 are edited inline and saved to the same file - also for runs started from the
@@ -1271,7 +1272,12 @@ negative, Cd lower, -Cl/Cd higher.
 
 **`/compare?runs=a,b,c` shows pictures side by side.** Sync, zoom and pan
 are shared because every picture of a view has the same frame. Blink, swipe
-and fade put two panes in one viewport.
+and fade put two panes in one viewport. At most 4 runs; further runs are
+left out with a warning naming them. REF is one REF for the whole page: the
+numbers table, the bars and the delta pictures all use it, and "make REF"
+reloads the page with `ref=<run>`. Ticking runs on `/results` makes the
+**oldest** ticked run REF, so a new run shows its change against the run it
+improves on; an explicit `ref=` in the URL always wins.
 
 **Deltas are computed from the sampled fields, never from the PNGs.** On the
 banded colour map a small change turns every shifted band edge into a
@@ -1282,17 +1288,35 @@ pressure onto the pane's surface within 0.5 mm. Surface delta-cp uses each
 run's own dynamic head: p_pane/q_pane - p_ref/q_ref, so two runs at different
 speeds compare fairly. Black means "fluid or surface in one run only" -
 geometry that moved. The colour-bar label reads "delta <field>" because PIL's
-default font has no delta glyph.
+default font has no delta glyph. A delta between runs whose planes or surface
+cameras differ (another driving state or attitude) is refused: those are not
+the same planes.
+
+**Surface deltas are unreliable on thin parts.** The surface delta
+interpolates the reference's pressure onto the pane's surface within 0.5 mm.
+On thin parts - the rear wing, sharp edges - points of the opposite side of
+the part fall inside that radius, so point values there are dominated by
+interpolation noise: checked against an independent spike, the delta
+correlated 0.16 on the wing against 0.96 overall, with isolated |delta-cp|
+outliers up to ~33. Read wing delta-cp from the planes and from the force
+numbers instead; surface delta panes say so in a caption ("surface delta:
+thin edges (wing) unreliable"). Normal-aware matching is a known follow-up.
 
 **What a delta costs.** Measured on the 22 M-cell car: a plane delta takes
 about 8.5 s the first time (the probe runs at the full 1600x1200 picture
 resolution), then it is cached. A surface delta takes about 40 s the first
 time for a pair (two 300 MB surfaces are read, then rendered) and about 17 s
 for each further view. Results are cached in `<run>/ui/delta/<reference>/`
-and dropped when either run's spec hash or views digest changes; one delta
-runs at a time, so it never competes with a solve for more than that. The
-browser waits about 300 ms before asking for an uncached delta, so scrubbing
-the slider with the delta switch on only computes where the slider stops.
+and dropped when either run's spec hash, views digest or render-plan stamp
+changes, or when the helper's `HELPER_VERSION` (`ui/delta.py`) is bumped. One
+delta runs at a time, so it never competes with a solve for more than that;
+a request that arrives while one is computing is not queued but answered
+503 with `Retry-After: 2` (a cached picture is still served at once). The
+browser waits about 300 ms before asking for an uncached delta, aborts a
+request the moment the pane wants another picture, and on a 503 keeps
+"computing delta..." and asks again after 2 s - so scrubbing the slider with
+the delta switch on only computes where the slider stops and never piles up
+requests.
 
 ---
 

@@ -78,7 +78,10 @@
       const limit = state.limits[s.field];
       const q = new URLSearchParams({ ref: state.ref, view, field: s.field });
       if (limit) q.set("limit", limit);
-      return { url: `/api/delta/${encodeURIComponent(pane.run)}.png?${q}`, label: `Δ ${item.label}`, delta: true };
+      // The surface delta matches points within 0.5 mm: on thin parts the
+      // other side of the part is inside that radius (handbook, deltas).
+      const caption = s.kind === "surface" ? "surface Δ: thin edges (wing) unreliable" : "";
+      return { url: `/api/delta/${encodeURIComponent(pane.run)}.png?${q}`, label: `Δ ${item.label}`, delta: true, caption };
     }
     const rel = pictureOf(pane.run, s.kind, s.field, item.name);
     return rel ? { url: `/runs/${encodeURIComponent(pane.run)}/files/${rel}`, label: item.label }
@@ -89,10 +92,21 @@
 
   const deltaCache = new Map();  // url -> object URL, so blink is instant
 
-  const timers = new WeakMap();  // img -> pending delta fetch
+  const timers = new WeakMap();       // img -> pending delta fetch (debounce or retry)
+  const controllers = new WeakMap();  // img -> AbortController of its running fetch
+
+  // A picture the img no longer wants must not keep a browser connection or
+  // a server thread busy.
+  function cancel(img) {
+    clearTimeout(timers.get(img));
+    timers.delete(img);
+    const controller = controllers.get(img);
+    if (controller) controller.abort();
+    controllers.delete(img);
+  }
 
   function load(img, note, target) {
-    clearTimeout(timers.get(img));
+    cancel(img);
     img.dataset.want = target.url || "";
     img.onerror = null;
     note.textContent = "";
@@ -102,14 +116,23 @@
       img.src = target.url;
       return;
     }
-    if (deltaCache.has(target.url)) { img.src = deltaCache.get(target.url); return; }
+    if (deltaCache.has(target.url)) { img.src = deltaCache.get(target.url); note.textContent = target.caption || ""; return; }
     note.textContent = "computing delta…";
     img.removeAttribute("src");
-    const wanted = () => img.dataset.want === target.url;
-    // Debounced: stepping through planes must not queue a server delta per step.
-    timers.set(img, setTimeout(async () => {
+    const wanted = () => img.isConnected && img.dataset.want === target.url;
+    const attempt = async () => {
+      timers.delete(img);
+      if (!wanted()) return;
+      const controller = new AbortController();
+      controllers.set(img, controller);
       try {
-        const response = await fetch(target.url);
+        const response = await fetch(target.url, { signal: controller.signal });
+        if (response.status === 503) {
+          // Another delta is being computed: keep "computing delta…" and ask again.
+          const wait = (Number(response.headers.get("Retry-After")) || 2) * 1000;
+          if (wanted()) timers.set(img, setTimeout(attempt, wait));
+          return;
+        }
         if (!response.ok) {
           const body = await response.json().catch(() => ({ error: response.statusText }));
           if (wanted()) note.textContent = body.error || "delta failed";
@@ -119,11 +142,15 @@
         deltaCache.set(target.url, objectUrl);
         if (!wanted()) return;
         img.src = objectUrl;
-        note.textContent = "";
+        note.textContent = target.caption || "";
       } catch (error) {
-        if (wanted()) note.textContent = String(error);
+        if (error.name !== "AbortError" && wanted()) note.textContent = String(error);
+      } finally {
+        if (controllers.get(img) === controller) controllers.delete(img);
       }
-    }, 300));
+    };
+    // Debounced: stepping through planes must not queue a server delta per step.
+    timers.set(img, setTimeout(attempt, 300));
   }
 
   function preload() {
@@ -146,8 +173,10 @@
 
   function attachZoom(viewport, getZoom) {
     viewport.addEventListener("wheel", (event) => {
-      event.preventDefault();
       const zoom = getZoom();
+      // Nothing to zoom out of (or a sideways scroll): let the page scroll.
+      if (event.deltaY === 0 || (zoom.s === 1 && event.deltaY > 0)) return;
+      event.preventDefault();
       const box = viewport.getBoundingClientRect();
       const fx = (event.clientX - box.left) / box.width;
       const fy = (event.clientY - box.top) / box.height;
@@ -268,7 +297,9 @@
           render(); } } }), "sync"]),
       select(state.runs.map((r) => [r, r]), pane.run, (v) => { pane.run = v; render(); }),
       isRef ? el("span", { class: "badge", text: "REF" })
-            : el("button", { type: "button", text: "make REF", on: { click: () => { state.ref = pane.run; render(); } } }),
+            // Reload with the new REF, so the numbers table, bars and pictures share one REF.
+            : el("button", { type: "button", text: "make REF", on: { click: () => {
+                location.href = `/compare?${new URLSearchParams({ runs: state.runs.join(","), ref: pane.run })}`; } } }),
       el("label", { class: "row" }, [el("input", { type: "checkbox", checked: pane.delta && deltaAllowed(pane),
         disabled: !deltaAllowed(pane), on: { change: (e) => { pane.delta = e.target.checked; update(); } } }), "Δ vs REF"]),
       state.panes.length > 1 ? el("button", { type: "button", text: "×", title: "remove pane",
@@ -398,6 +429,7 @@
   function render() {
     clearInterval(state.overlay.timer);
     state.overlay.timer = null;
+    for (const v of live.views) cancel(v.img);
     root.innerHTML = "";
     live.views = [];
     live.positions = [];
