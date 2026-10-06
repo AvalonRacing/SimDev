@@ -96,3 +96,13 @@ def test_columns_follow_the_benchmark_sheet_order() -> None:
                     "cl_body", "cl_wing", "cd_body", "cd_wing",
                     "cop_x", "cop_y", "cop_z", "eff", "balance",
                     "cl_other", "cd_other", "cs"]
+
+
+def test_table_column_groups_are_contiguous() -> None:
+    from simdev.ui.results import table_columns
+
+    labels = [c.group for c in table_columns(columns_for(["body", "wing", "rear"]))]
+    collapsed = [g for i, g in enumerate(labels) if i == 0 or labels[i - 1] != g]
+    assert len(collapsed) == len(set(collapsed)), collapsed
+    assert "other groups" in collapsed and next(
+        c for c in table_columns(columns_for([])) if c.key == "cs").group == "coefficients"

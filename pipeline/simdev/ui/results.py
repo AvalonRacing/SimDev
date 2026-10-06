@@ -109,10 +109,16 @@ class TableColumn:
     start: bool = False  # first of its group: gets a separator on its left
 
 
-_RESULT_GROUP = {"cl": "coefficients", "cd": "coefficients", "fx": "forces", "fz": "forces",
-                 "fy": "forces", "cs": "forces", "cop_x": "COP", "cop_y": "COP", "cop_z": "COP",
+_RESULT_GROUP = {"cl": "coefficients", "cd": "coefficients", "cs": "coefficients", "fx": "forces", "fz": "forces",
+                 "fy": "forces", "cop_x": "COP", "cop_y": "COP", "cop_z": "COP",
                  "eff": "efficiency & balance", "balance": "efficiency & balance"}
 _HIDDEN_BY_DEFAULT = {"forces", "COP"}
+
+
+def _named_or_other(key: str) -> str:
+    # body/wing group columns sit before COP, any further groups after balance.
+    named = {f"{c}_{g}" for c in ("cl", "cd") for g in ("body", "wing")}
+    return "groups" if key in named else "other groups"
 
 
 def table_columns(columns: Sequence[Column]) -> list[TableColumn]:
@@ -122,8 +128,12 @@ def table_columns(columns: Sequence[Column]) -> list[TableColumn]:
         TableColumn("compare", "compare with", "compare", "identity", 150, fixed=True),
         TableColumn("state", "state", "state", "identity", 110),
     ]
-    for c in columns:
-        group = _RESULT_GROUP.get(c.key, "groups")
+    # Cs belongs with Cl and Cd, but columns_for puts it last: move it so every group is
+    # contiguous and the page never shows a heading twice.
+    shown = [c for c in columns if c.key in ("cl", "cd", "cs")] + [
+        c for c in columns if c.key not in ("cl", "cd", "cs")]
+    for c in shown:
+        group = _RESULT_GROUP.get(c.key) or _named_or_other(c.key)
         cols.append(TableColumn(c.key, c.label, "result", group, 84, group not in _HIDDEN_BY_DEFAULT,
                                 num=True, fmt=c.fmt))
     cols += [

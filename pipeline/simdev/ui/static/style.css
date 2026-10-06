@@ -77,7 +77,8 @@ details.columns summary { cursor: pointer; }
 tr.delta td { font-size: 12px; }
 tr.delta td.better { background: #c8e6c9; }
 tr.delta td.worse { background: #ffcdd2; }
-tr.delta td.noise { background: #eceff1; }
+/* darker than the zebra grey (#f5f6f8), so "within noise" shows on both block colours */
+tr.delta td.noise { background: #d5dae0; }
 .toolbar { display: grid; gap: 0.4rem; margin-bottom: 0.6rem; }
 .toolbar input[type=range] { width: 22rem; }
 .panes { display: grid; gap: 0.6rem; }

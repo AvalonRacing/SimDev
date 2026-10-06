@@ -44,6 +44,9 @@
   } catch (e) { /* no storage: the plain table */ }
 })();
 </script>
+{# The default hiding, before results.js swaps in the saved choice: no flash of hidden columns. #}
+<style id="column-hide">{% for tc in table_cols if not tc.default %}.c-{{ tc.key }} { display: none; }
+{% endfor %}</style>
 <div class="scroll">
 <table class="results" style="width: {{ table_width }}px">
   <colgroup>{% for tc in table_cols %}<col class="c-{{ tc.key }}" data-key="{{ tc.key }}" data-width="{{ tc.width }}" style="width: {{ tc.width }}px">{% endfor %}</colgroup>

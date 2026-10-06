@@ -179,3 +179,11 @@ def test_the_page_offers_column_ticks_and_every_cell_carries_its_column_class(tm
         swapped = client.post("/runs/new/note", data={"note": "", "compare_with": "base"}).text
         # the delta row and the run row both carry the class the hiding rule targets
         assert swapped.count('class="c-cl num') == 2 and 'class="c-design' in swapped
+
+
+def test_default_hidden_columns_are_hidden_by_the_served_page(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "base")
+        page = client.get("/results").text
+        style = page.split('<style id="column-hide">')[1].split("</style>")[0]
+        assert ".c-fx { display: none; }" in style and ".c-cl " not in style

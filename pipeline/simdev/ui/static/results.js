@@ -72,8 +72,9 @@
 
   let widths = widthsFrom(load(WIDTHS_KEY), defaults);
   let hidden = hiddenFrom(load(COLUMNS_KEY), defaultHidden, optional);
-  const style = document.createElement("style");
-  document.head.append(style);
+  // The server renders the default hiding in this element; from here it follows the saved choice.
+  let style = document.getElementById("column-hide");
+  if (!style) { style = document.createElement("style"); document.head.append(style); }
   const tsvLink = document.getElementById("tsv-link");
 
   function apply() {
