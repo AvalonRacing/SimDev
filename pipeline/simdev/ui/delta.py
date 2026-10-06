@@ -30,7 +30,12 @@ TIMEOUT = 600
 # so pictures cached by an older helper are recomputed. Bump note: 2 is the
 # helper as merged with the compare viewer.
 HELPER_VERSION = 2
-FRAMING_TOL = 1e-6
+# Same picture frame if every number agrees to 0.1 mm (or 1e-4 in a unit
+# vector). Not round-off: each run measures its datum from its own Chassis
+# tessellation, so two runs of one state already differ by a few um (2e-6 m
+# between c02_combo12 and its base). An attitude change of even 0.1 deg moves
+# a normal by ~2e-3, and the 1e-4 m slice-probe tolerance is the same size.
+FRAMING_TOL = 1e-4
 _LOCK = threading.Lock()
 BUSY = "another delta is being computed - try again in a moment"
 
@@ -61,7 +66,7 @@ def _spec_hash(run_dir: Path) -> str:
 
 
 def _close(a: Any, b: Any) -> bool:
-    """Same framing up to round-off: numbers within FRAMING_TOL, the rest equal."""
+    """Same framing: numbers within FRAMING_TOL, the rest equal."""
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
@@ -73,7 +78,8 @@ def _close(a: Any, b: Any) -> bool:
     return a == b
 
 
-NOT_THE_SAME = "different driving state or attitude - the planes are not the same planes"
+NOT_THE_SAME = ("the two runs were pictured differently (driving state, attitude or camera "
+                "convention) - the planes are not the same planes; re-render or compare like with like")
 
 
 def build_request(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: float) -> dict:

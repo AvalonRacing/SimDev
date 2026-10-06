@@ -166,6 +166,30 @@ def test_a_different_attitude_is_refused(tmp_path: Path) -> None:
     assert service.build_request(pane, ref4, "x_+0.000", "cp", 0.2)["kind"] == "plane"
 
 
+def test_a_datum_a_few_micrometres_off_is_the_same_framing(tmp_path: Path) -> None:
+    # c02_combo12 and its base differ by 2.0e-6 m in every slice point: the
+    # datum is measured from each run's own Chassis tessellation.
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    _edit_plan(ref, lambda p: p["slices"][0].update(point=[2e-6, -2e-6, 0]))
+    _edit_plan(ref, lambda p: p["surfaces"][0].update(camera={"focal": [2e-6, 0, 0]}))
+    _edit_plan(pane, lambda p: p["surfaces"][0].update(camera={"focal": [0, 0, 0]}))
+    assert service.build_request(pane, ref, "x_+0.000", "cp", 0.2)["kind"] == "plane"
+    assert service.build_request(pane, ref, "surface_top", "cp", 0.2)["kind"] == "surface"
+
+
+REAL_PANE = Path.home() / "runs/meshstudy-2026-10-04/sweep_tess1mm/c02_combo12"
+REAL_REF = Path.home() / "runs/av001-tc10-cornering-lowspeed-car-001"
+
+
+@pytest.mark.skipif(not (REAL_PANE / "results/render_plan.json").is_file()
+                    or not (REAL_REF / "results/render_plan.json").is_file(),
+                    reason="the real study runs are not on this machine")
+def test_the_real_mesh_variant_pair_is_comparable_on_every_plane() -> None:
+    plan = json.loads((REAL_REF / "results/render_plan.json").read_text())
+    for entry in plan["slices"]:
+        service.build_request(REAL_PANE, REAL_REF, entry["name"], "cp", 0.2)
+
+
 def test_a_changed_reference_invalidates_the_cache(tmp_path: Path) -> None:
     pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
     helper = FakeHelper()
