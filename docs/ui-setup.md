@@ -56,6 +56,10 @@ Tailscale Funnel.
 - **Run page:** stages, live Cd/Cl with the plateau window shaded, residuals,
   images, logs. *Resume* re-queues a failed run; finished stages are skipped.
   *Strip mesh* frees the disk space and keeps results.
+- **Results:** one row per finished run (the old Excel sheet): coefficients
+  with their noise, a change note and a reference run per row, TSV export.
+- **Compare:** pictures of several runs side by side with sync, blink, swipe
+  and fade; field deltas against a reference; charts.
 
 ## Updating
 

@@ -369,6 +369,7 @@ plots, and the result record.
 | `gates/*` | The three gates | parsers, schema, roles |
 | `stages/*` | Orchestration | everything |
 | `report/*` | Result records, plots | nothing |
+| `ui/notes.py`, `ui/summary.py`, `ui/results.py`, `ui/imageindex.py`, `ui/delta.py`, `viz/delta.py` | Results table, compare page, field deltas | run records, `viz/pv_render.py` |
 | `cli.py` | Argument parsing, exit codes | stages |
 
 **The dependency rule:** `render/templates/` depends on nothing and contains no
@@ -1247,6 +1248,51 @@ question stays undecided the honest way: the flag remains `off`
 (`viz/pv_render.py` warns and no-ops if it is set to anything else). 202.1 s
 for 364 images on a mesh two orders of magnitude smaller than production is
 not evidence that a production render is comfortable.
+
+### The results table and the compare page
+
+**`/results` is the Excel sheet, kept by the runs themselves.** One row per
+run directory with a `result.json`, newest first. The change note comes from
+the New Run form ("What changed in the geometry?") and is copied into
+`<run>/ui/note.json` when the job starts; it and the "compare with" reference
+are edited inline and saved to the same file - also for runs started from the
+shell, because it is metadata and never touches results. References are run
+names, so nothing breaks when the list changes (the old sheet referenced row
+numbers, hence its `#REF!` cells). The queue database gains a `note` column
+for this, so deploying needs a restart of the UI service: an older server
+process cannot read job rows after the migration.
+
+**Every delta carries its noise.** Noise of a coefficient is half the spread
+of the rolling mean of half the window length, inside the averaging window -
+how far the reported mean moves depending on where the run stopped
+(`ui/summary.py`). The noise of a delta is sqrt(nA^2 + nB^2); a delta below it
+is greyed instead of coloured green or red. Green is "better": Cl more
+negative, Cd lower, -Cl/Cd higher.
+
+**`/compare?runs=a,b,c` shows pictures side by side.** Sync, zoom and pan
+are shared because every picture of a view has the same frame. Blink, swipe
+and fade put two panes in one viewport.
+
+**Deltas are computed from the sampled fields, never from the PNGs.** On the
+banded colour map a small change turns every shifted band edge into a
+one-band ring. `viz/delta.py` probes both runs' slice `.vtp` on a grid laid
+out exactly like the camera frame (tolerance 1e-4 m: OpenFOAM leaves cut
+points up to ~50 um off the plane), or interpolates the reference's surface
+pressure onto the pane's surface within 0.5 mm. Surface delta-cp uses each
+run's own dynamic head: p_pane/q_pane - p_ref/q_ref, so two runs at different
+speeds compare fairly. Black means "fluid or surface in one run only" -
+geometry that moved. The colour-bar label reads "delta <field>" because PIL's
+default font has no delta glyph.
+
+**What a delta costs.** Measured on the 22 M-cell car: a plane delta takes
+about 8.5 s the first time (the probe runs at the full 1600x1200 picture
+resolution), then it is cached. A surface delta takes about 40 s the first
+time for a pair (two 300 MB surfaces are read, then rendered) and about 17 s
+for each further view. Results are cached in `<run>/ui/delta/<reference>/`
+and dropped when either run's spec hash or views digest changes; one delta
+runs at a time, so it never competes with a solve for more than that. The
+browser waits about 300 ms before asking for an uncached delta, so scrubbing
+the slider with the delta switch on only computes where the slider stops.
 
 ---
 
