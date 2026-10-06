@@ -6,11 +6,27 @@
   <select name="state"><option value="">all states</option>{% for s in states %}<option {% if s == filters.state %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
   <select name="design"><option value="">all designs</option>{% for d in designs %}<option {% if d == filters.design %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
   <select name="verdict"><option value="">any verdict</option>{% for v in ['converged', 'not_converged', 'not_judged'] %}<option {% if v == filters.verdict %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
-  <input name="q" value="{{ filters.q }}" placeholder="name or note">
+  <input name="q" value="{{ filters.q }}" placeholder="run name or note">
   <button>Filter</button>
-  <a class="button" href="/results.tsv">Copy as TSV</a>
+  <a class="button" id="tsv-link" href="/results.tsv" title="the columns that are ticked below">Copy as TSV</a>
   <a class="button" href="/results?clear=1" title="forget the remembered filters">Clear filters</a>
 </form>
+<details class="columns" id="column-picker">
+  <summary>Columns</summary>
+  <div class="row">
+    <button type="button" data-pick="all">all</button>
+    <button type="button" data-pick="none">none</button>
+    <button type="button" data-pick="default">default</button>
+    <a href="#" id="reset-widths">reset widths</a>
+    <span class="muted">drag a header's right edge to resize; both are remembered in this browser</span>
+  </div>
+  <div class="picker-groups">
+  {% for tc in table_cols if not tc.fixed %}
+    {% if loop.changed(tc.group) %}{% if not loop.first %}</div>{% endif %}<div class="picker-group"><strong>{{ tc.group }}</strong>{% endif %}
+    <label class="row"><input type="checkbox" data-key="{{ tc.key }}" data-default="{{ 1 if tc.default else 0 }}" checked> {{ tc.label }}</label>
+  {% endfor %}</div>
+  </div>
+</details>
 <script>
 // The filters are remembered per browser: coming back through the nav link restores them.
 (function () {
@@ -29,13 +45,15 @@
 })();
 </script>
 <div class="scroll">
-<table class="results">
-  <thead><tr><th>compare with</th><th>run</th>
-    {% for c in columns %}<th class="num">{{ c.label }}</th>{% endfor %}
-    <th>verdict</th><th class="num">noise Cl / Cd</th><th>note</th></tr></thead>
+<table class="results" style="width: {{ table_width }}px">
+  <colgroup>{% for tc in table_cols %}<col class="c-{{ tc.key }}" data-key="{{ tc.key }}" data-width="{{ tc.width }}" style="width: {{ tc.width }}px">{% endfor %}</colgroup>
+  <thead><tr>
+    {% for tc in table_cols %}<th class="c-{{ tc.key }}{{ ' num' if tc.num }}{{ ' gs' if tc.start }}" data-key="{{ tc.key }}" title="{{ tc.label }}">{{ tc.label }}</th>{% endfor %}
+  </tr></thead>
   {% for row in rows %}{% include "_result_row.html" %}{% else %}
-  <tbody><tr><td colspan="{{ columns|length + 5 }}" class="muted">No runs yet.</td></tr></tbody>
+  <tbody><tr><td colspan="{{ table_cols|length }}" class="muted">No runs yet.</td></tr></tbody>
   {% endfor %}
 </table>
 </div>
+<script src="/static/results.js"></script>
 {% endblock %}

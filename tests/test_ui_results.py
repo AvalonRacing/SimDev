@@ -76,7 +76,7 @@ def test_tsv_has_a_delta_line_under_each_referenced_run(tmp_path: Path) -> None:
     run = load_row(run_dir)
     text = to_tsv([run, ref], columns_for([]), {"ref": ref, "new": run})
     lines = text.splitlines()
-    assert lines[0].split("\t")[:4] == ["run", "state", "note", "compare_with"]
+    assert lines[0].split("\t")[:4] == ["run", "design", "state", "note"]
     assert lines[1].startswith("new\t")
     assert lines[2].startswith("Δ new − ref\t")
     assert lines[3].startswith("ref\t")

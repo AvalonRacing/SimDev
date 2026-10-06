@@ -1261,10 +1261,20 @@ not evidence that a production render is comfortable.
 **`/results` is the Excel sheet, kept by the runs themselves.** One row per
 run directory, newest first; a run without a `result.json` yet is listed
 greyed as "no results yet". The columns follow the sheet's TC10 order -
-compare with, run, Cl, Cd, Fx, Fz, Fy, the group Cl then the group Cd, COP
+design, compare with, state, Cl, Cd, Fx, Fz, Fy, the group Cl then the group Cd, COP
 x/y/z, -Cl/Cd, balance - with the change note last, like its Geometrie
-column, and a delta row under each run against its "compare with". The table
-stands alone: it is not linked to the pictures. The change note comes from
+column, and a delta row under each run against its "compare with". The first
+column shows the run's design, not its (long) run name; the full name is the
+tooltip and the link goes to the run, and runs started from the shell, which
+have no design on record, show the run name. The driving state is its own
+column, and the filters (state, design, verdict, free text over run name and
+note) are unchanged. Cells are one line high with the full text as tooltip.
+Column widths are adjustable (drag a header's right edge; "reset widths"), and
+the "Columns" box above the table has a tick box per column, with all / none /
+default; both are remembered per browser (browser storage). Hidden columns are
+hidden in the run rows and the delta rows alike, and "Copy as TSV" exports
+only the ticked columns (`/results.tsv?cols=<keys>`; no `cols` means all; the
+run name, design and reference are always in). The table stands alone: it is not linked to the pictures. The change note comes from
 the New Run form ("What changed in the geometry?") and is copied into
 `<run>/ui/note.json` when the job starts; it and the "compare with" reference
 are edited inline and saved to the same file - also for runs started from the
@@ -1286,7 +1296,9 @@ negative, Cd lower, -Cl/Cd higher.
 own run picker at the top (four selects and a REF select, listing the runs
 that have pictures); it is not driven by the Results table. Sync, zoom and pan
 are shared because every picture of a view has the same frame. Blink, swipe
-and fade put two panes in one viewport. At most 4 runs; further runs are
+and fade put two panes in one viewport; the swipe divider follows its handle at
+any zoom and pan. The pane headers have a fixed height, so the viewports line
+up however long the run names are. At most 4 runs; further runs are
 left out with a warning naming them. REF is one REF for the whole page: the
 delta pictures use it, and "make REF" reloads the page with `ref=<run>`; with
 no (or an unknown) `ref=` the first run is REF. Below the pictures are the

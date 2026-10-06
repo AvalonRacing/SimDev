@@ -33,9 +33,11 @@ def results_page(request: Request, state: str = "", design: str = "", verdict: s
                  q: str = ""):
     rows, columns, by_name = _table(request)
     shown = [r for r in rows if _matches(r, state, design, verdict, q)]
+    table_cols = results.table_columns(columns)
     return render(
         request, "results.html", rows=shown, columns=columns, by_name=by_name,
         names=[r.name for r in rows], delta=results.delta,
+        table_cols=table_cols, table_width=sum(c.width for c in table_cols),
         states=sorted({r.state for r in rows if r.state}),
         designs=sorted({r.design for r in rows if r.design}),
         filters={"state": state, "design": design, "verdict": verdict, "q": q},
@@ -56,11 +58,14 @@ def save_note(request: Request, name: str, note: str = Form(""), compare_with: s
     write_note(run_dir, note, reference)
     rows, columns, by_name = _table(request)
     return render(request, "_result_row.html", row=by_name[name], columns=columns,
-                  by_name=by_name, names=list(by_name), delta=results.delta)
+                  table_cols=results.table_columns(columns), by_name=by_name,
+                  names=list(by_name), delta=results.delta)
 
 
 @router.get("/results.tsv")
-def results_tsv(request: Request):
+def results_tsv(request: Request, cols: str | None = None):
     rows, columns, by_name = _table(request)
-    return PlainTextResponse(results.to_tsv(rows, columns, by_name),
+    # The page passes the columns it shows; no parameter means all of them.
+    keys = None if cols is None else {k.strip() for k in cols.split(",")}
+    return PlainTextResponse(results.to_tsv(rows, columns, by_name, keys),
                              media_type="text/tab-separated-values; charset=utf-8")

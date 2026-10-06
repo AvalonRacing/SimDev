@@ -12,8 +12,8 @@ import csv
 import io
 import json
 import math
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from simdev.ui import runview
@@ -81,12 +81,57 @@ class Row:
     noise: dict[str, float | None]
     groups: tuple[str, ...]
 
+    @property
+    def shown_name(self) -> str:
+        """What the table's first column shows: the design, the run name for shell runs."""
+        return self.design or self.name
+
 
 @dataclass(frozen=True)
 class DeltaCell:
     value: float | None
     noise: float | None
     tone: str
+
+
+@dataclass(frozen=True)
+class TableColumn:
+    """One column of the results table as the page lays it out."""
+    key: str
+    label: str
+    kind: str  # design, compare, state, result, verdict, noise, note
+    group: str
+    width: int  # default width in px, the page lets the user change it
+    default: bool = True  # shown until the user picks columns
+    fixed: bool = False  # cannot be hidden
+    num: bool = False
+    fmt: str = ""
+    start: bool = False  # first of its group: gets a separator on its left
+
+
+_RESULT_GROUP = {"cl": "coefficients", "cd": "coefficients", "fx": "forces", "fz": "forces",
+                 "fy": "forces", "cs": "forces", "cop_x": "COP", "cop_y": "COP", "cop_z": "COP",
+                 "eff": "efficiency & balance", "balance": "efficiency & balance"}
+_HIDDEN_BY_DEFAULT = {"forces", "COP"}
+
+
+def table_columns(columns: Sequence[Column]) -> list[TableColumn]:
+    """Identity, the result columns, verdict and noise, the note - in display order."""
+    cols = [
+        TableColumn("design", "design", "design", "identity", 170, fixed=True),
+        TableColumn("compare", "compare with", "compare", "identity", 150, fixed=True),
+        TableColumn("state", "state", "state", "identity", 110),
+    ]
+    for c in columns:
+        group = _RESULT_GROUP.get(c.key, "groups")
+        cols.append(TableColumn(c.key, c.label, "result", group, 84, group not in _HIDDEN_BY_DEFAULT,
+                                num=True, fmt=c.fmt))
+    cols += [
+        TableColumn("verdict", "verdict", "verdict", "verdict & noise", 110),
+        TableColumn("noise", "noise Cl / Cd", "noise", "verdict & noise", 130, False, num=True),
+        TableColumn("note", "note", "note", "note", 260),
+    ]
+    return [replace(c, start=i > 0 and cols[i - 1].group != c.group) for i, c in enumerate(cols)]
 
 
 def _state_and_design(run_dir: Path) -> tuple[str, str]:
@@ -187,18 +232,31 @@ def _cell(value: float | None) -> str:
     return "" if value is None else f"{value:.6g}"
 
 
-def to_tsv(rows: Sequence[Row], columns: Sequence[Column], by_name: Mapping[str, Row]) -> str:
+def to_tsv(rows: Sequence[Row], columns: Sequence[Column], by_name: Mapping[str, Row],
+           keys: Collection[str] | None = None) -> str:
+    """`keys` limits the optional columns (state, note, verdict, result columns) to the
+    ones the page shows; the run, its design and the reference always stay."""
+    def wanted(key: str) -> bool:
+        return keys is None or key in keys
+
+    shown = [c for c in columns if wanted(c.key)]
+    head = ["run", "design", *(["state"] if wanted("state") else []),
+            *(["note"] if wanted("note") else []), "compare_with", *[c.label for c in shown],
+            *(["verdict", "n_iterations", "n_cells"] if wanted("verdict") else [])]
     out = io.StringIO()
     writer = csv.writer(out, delimiter="\t", lineterminator="\n")
-    writer.writerow(["run", "state", "note", "compare_with", *[c.label for c in columns],
-                     "verdict", "n_iterations", "n_cells"])
+    writer.writerow(head)
     for row in rows:
-        writer.writerow([row.name, row.state, row.note.note, row.note.compare_with or "",
-                         *[_cell(row.values.get(c.key)) for c in columns],
-                         row.verdict or "", row.n_iterations or "", row.n_cells or ""])
+        writer.writerow([row.name, row.shown_name, *([row.state] if wanted("state") else []),
+                         *([row.note.note] if wanted("note") else []), row.note.compare_with or "",
+                         *[_cell(row.values.get(c.key)) for c in shown],
+                         *([row.verdict or "", row.n_iterations or "", row.n_cells or ""]
+                           if wanted("verdict") else [])])
         ref = by_name.get(row.note.compare_with or "")
         if ref is not None and row.has_result and ref.has_result:
             cells = delta(row, ref, columns)
-            writer.writerow([f"Δ {row.name} − {ref.name}", "", "", "",
-                             *[_cell(cells[c.key].value) for c in columns], "", "", ""])
+            writer.writerow([f"Δ {row.name} − {ref.name}", "",
+                             *([""] if wanted("state") else []), *([""] if wanted("note") else []),
+                             "", *[_cell(cells[c.key].value) for c in shown],
+                             *(["", "", ""] if wanted("verdict") else [])])
     return out.getvalue()
