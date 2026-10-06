@@ -30,31 +30,41 @@ class Column:
     noise_key: str | None = None
 
 
-BASE_COLUMNS = (
+_COL = {c.key: c for c in (
     Column("cl", "Cl", -1, "{:+.4f}", "cl"),
     Column("cd", "Cd", -1, "{:.4f}", "cd"),
-    Column("eff", "−Cl/Cd", +1, "{:.3f}", "eff"),
-    Column("balance", "bal % F", 0, "{:.1f}"),
     Column("fx", "Fx", 0, "{:+.3f}"),
-    Column("fy", "Fy", 0, "{:+.3f}"),
     Column("fz", "Fz", 0, "{:+.3f}"),
+    Column("fy", "Fy", 0, "{:+.3f}"),
     Column("cop_x", "COP x", 0, "{:+.4f}"),
     Column("cop_y", "COP y", 0, "{:+.4f}"),
     Column("cop_z", "COP z", 0, "{:+.4f}"),
+    Column("eff", "−Cl/Cd", +1, "{:.3f}", "eff"),
+    Column("balance", "bal % F", 0, "{:.1f}"),
     Column("cs", "Cs", 0, "{:+.4f}"),
-)
+)}
 
 RESULT_KEYS = {"cl": "cl_mean", "cd": "cd_mean", "balance": "balance_front_pct",
                "fx": "fx", "fy": "fy", "fz": "fz", "cop_x": "cop_x", "cop_y": "cop_y",
                "cop_z": "cop_z", "cs": "cs_mean"}
 
 
+def _group_col(coefficient: str, group: str) -> Column:
+    label = coefficient.capitalize()
+    return Column(f"{coefficient}_{group}", f"{label} {group}", -1,
+                  "{:.4f}" if coefficient == "cd" else "{:+.4f}", f"{coefficient}_{group}")
+
+
 def columns_for(groups: Sequence[str]) -> list[Column]:
-    cols = list(BASE_COLUMNS)
-    for g in groups:
-        cols.append(Column(f"cl_{g}", f"Cl {g}", -1, "{:+.4f}", f"cl_{g}"))
-        cols.append(Column(f"cd_{g}", f"Cd {g}", -1, "{:.4f}", f"cd_{g}"))
-    return cols
+    """The benchmark sheet's order: forces, group Cl then group Cd, COP, efficiency, balance."""
+    named = [g for g in ("body", "wing") if g in groups]
+    others = [g for g in groups if g not in named]
+    cols = [_COL[k] for k in ("cl", "cd", "fx", "fz", "fy")]
+    cols += [_group_col("cl", g) for g in named] + [_group_col("cd", g) for g in named]
+    cols += [_COL[k] for k in ("cop_x", "cop_y", "cop_z", "eff", "balance")]
+    for g in others:
+        cols += [_group_col("cl", g), _group_col("cd", g)]
+    return [*cols, _COL["cs"]]
 
 
 @dataclass(frozen=True)

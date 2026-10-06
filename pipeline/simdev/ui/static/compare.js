@@ -272,9 +272,6 @@
           disabled: state.panes.length < 2, on: { change: () => { state.layout = "overlay"; render(); } } }), "overlay"]),
         el("button", { type: "button", disabled: state.panes.length >= 4,
           text: "+ add pane", title: "another pane of a run on this page", on: { click: addPane } }),
-        // A run not yet on the page: reload with it, so the numbers table includes it too.
-        state.runs.length >= 4 ? null : select([["", "+ add run…"], ...data.all_runs.filter((r) => !state.runs.includes(r)).map((r) => [r, r])], "",
-          (v) => { if (v) location.href = `/compare?${new URLSearchParams({ runs: [...state.runs, v].join(","), ref: state.ref })}`; }),
         ...limits,
       ]),
     ]);
@@ -297,7 +294,7 @@
           render(); } } }), "sync"]),
       select(state.runs.map((r) => [r, r]), pane.run, (v) => { pane.run = v; render(); }),
       isRef ? el("span", { class: "badge", text: "REF" })
-            // Reload with the new REF, so the numbers table, bars and pictures share one REF.
+            // Reload with the new REF: the picker, the pictures and the delta pictures share it.
             : el("button", { type: "button", text: "make REF", on: { click: () => {
                 location.href = `/compare?${new URLSearchParams({ runs: state.runs.join(","), ref: pane.run })}`; } } }),
       el("label", { class: "row" }, [el("input", { type: "checkbox", checked: pane.delta && deltaAllowed(pane),
@@ -437,7 +434,6 @@
     if (state.layout === "overlay" && state.panes.length >= 2) overlay(root); else sideBySide(root);
     strip();
     update();
-    document.dispatchEvent(new CustomEvent("simdev:ref", { detail: state.ref }));
   }
 
   // A new position or a Δ toggle: swap pictures and labels, keep the DOM.
@@ -571,54 +567,6 @@
     }
   }
 
-  function drawBars() {
-    const box = document.getElementById("bars");
-    box.innerHTML = "";
-    const ref = summaries[C.state.ref];
-    if (!ref) { box.textContent = "no results for REF"; return; }
-    const parts = [
-      ...Object.keys(ref.groups_map || {}).map((g) => ({ label: g, key: g, group: true })),
-      ...Object.keys(ref.patches || {}).sort().map((p) => ({ label: p, key: p, group: false })),
-    ];
-    const valueOf = (s, part, c) => part.group
-      ? (s.values || {})[`${c.toLowerCase()}_${part.key}`]
-      : ((s.patches || {})[part.key] || {})[c];
-    const noiseOf = (s, part, c) => part.group
-      ? (s.noise || {})[`${c.toLowerCase()}_${part.key}`]
-      : ((s.patches || {})[part.key] || {})[`${c}_noise`];
-    for (const run of C.state.runs.filter((r) => r !== C.state.ref && summaries[r])) {
-      const s = summaries[run];
-      const rows = [];
-      let largest = 1e-9;
-      for (const part of parts) for (const c of ["Cl", "Cd"]) {
-        const a = valueOf(s, part, c), b = valueOf(ref, part, c);
-        if (a == null || b == null) continue;
-        const na = noiseOf(s, part, c), nb = noiseOf(ref, part, c);
-        const noise = na != null && nb != null ? Math.hypot(na, nb) : null;
-        rows.push({ label: `${part.label} ${c}`, d: a - b, noise });
-        largest = Math.max(largest, Math.abs(a - b), noise || 0);
-      }
-      const table = document.createElement("table");
-      table.className = "bars";
-      table.innerHTML = `<caption style="color:${C.colourOf(run)}">${run} − ${C.state.ref}</caption>`;
-      for (const row of rows) {
-        const tr = table.insertRow();
-        tr.insertCell().textContent = row.label;
-        const cell = tr.insertCell();
-        const bar = document.createElement("div");
-        bar.className = "bar";
-        const pct = (50 * Math.abs(row.d)) / largest;
-        bar.innerHTML = `<span class="fill" style="${row.d < 0 ? "right:50%" : "left:50%"};width:${pct}%;background:${C.colourOf(run)}"></span>`
-          + (row.noise != null ? `<span class="whisker" style="left:${50 - (50 * row.noise) / largest}%;width:${(100 * row.noise) / largest}%"></span>` : "");
-        cell.append(bar);
-        const num = tr.insertCell();
-        num.className = "num";
-        num.textContent = `${row.d >= 0 ? "+" : ""}${row.d.toFixed(4)}${row.noise != null ? ` ± ${row.noise.toFixed(4)}` : ""}`;
-      }
-      box.append(table);
-    }
-  }
-
   let cpSeq = 0;
   async function drawCp() {
     const station = document.getElementById("cp-station").value;
@@ -655,7 +603,8 @@
       if (p.y > y1) y1 = p.y;
     }
     const W = canvas.width - pad.l - pad.r, H = canvas.height - pad.t - pad.b;
-    const X = (x) => pad.l + ((x - x0) / (x1 - x0 || 1)) * W;
+    // Front of the car (+x) on the left, as in a side view.
+    const X = (x) => pad.l + ((x1 - x) / (x1 - x0 || 1)) * W;
     const Y = (y) => pad.t + (invert ? (y - y0) / (y1 - y0 || 1) : 1 - (y - y0) / (y1 - y0 || 1)) * H;
     ctx.strokeStyle = "#999";
     ctx.strokeRect(pad.l, pad.t, W, H);
@@ -663,7 +612,7 @@
     ctx.fillText(label, 4, pad.t + 10);
     ctx.fillText(y0.toFixed(2), 4, invert ? pad.t + 22 : pad.t + H);
     ctx.fillText(y1.toFixed(2), 4, invert ? pad.t + H : pad.t + 22);
-    ctx.fillText(`x ${x0.toFixed(3)} … ${x1.toFixed(3)} m`, pad.l, canvas.height - 6);
+    ctx.fillText(`front ← x ${x1.toFixed(3)} … ${x0.toFixed(3)} m → rear`, pad.l, canvas.height - 6);
     for (const p of pts) {
       ctx.fillStyle = C.colourOf(p.run);
       ctx.fillRect(X(p.x) - 1, Y(p.y) - 1, 2, 2);
@@ -694,13 +643,11 @@
     }));
     fillSelectors();
     drawForces();
-    drawBars();
     drawCp();
     document.getElementById("force-part").addEventListener("change", drawForces);
     document.getElementById("force-relative").addEventListener("change", drawForces);
     document.getElementById("cp-station").addEventListener("change", drawCp);
     document.querySelectorAll(".cp-patch").forEach((b) => b.addEventListener("change", drawCp));
-    document.addEventListener("simdev:ref", drawBars);
     // The cp station follows the viewer when it is on a matching y-plane.
     document.addEventListener("simdev:moved", () => {
       const g = C.state.global;

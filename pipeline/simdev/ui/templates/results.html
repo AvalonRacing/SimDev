@@ -10,18 +10,13 @@
   <button>Filter</button>
   <a class="button" href="/results.tsv">Copy as TSV</a>
 </form>
-<form id="compare-form" method="get" action="/compare" class="row">
-  <input type="hidden" name="ref_mode" value="oldest">
-  <button class="primary">Open ticked runs in viewer</button>
-  <span class="muted">the oldest ticked run is the reference</span>
-</form>
 <div class="scroll">
 <table class="results">
-  <thead><tr><th></th><th>run</th><th>note</th><th>compare with</th>
+  <thead><tr><th>compare with</th><th>run</th>
     {% for c in columns %}<th class="num">{{ c.label }}</th>{% endfor %}
-    <th>verdict</th><th class="num">noise Cl / Cd</th></tr></thead>
+    <th>verdict</th><th class="num">noise Cl / Cd</th><th>note</th></tr></thead>
   {% for row in rows %}{% include "_result_row.html" %}{% else %}
-  <tbody><tr><td colspan="{{ columns|length + 6 }}" class="muted">No runs yet.</td></tr></tbody>
+  <tbody><tr><td colspan="{{ columns|length + 5 }}" class="muted">No runs yet.</td></tr></tbody>
   {% endfor %}
 </table>
 </div>

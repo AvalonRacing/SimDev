@@ -9,30 +9,19 @@
 <h1>Compare</h1>
 {% if missing %}<div class="warn">not found or not allowed, left out: {{ missing|join(', ') }}</div>{% endif %}
 {% if dropped %}<div class="warn">max {{ max_panes }} runs: left out {{ dropped|join(', ') }}</div>{% endif %}
-{% if not rows %}
-<p>No runs chosen. Tick runs on the <a href="/results">Results</a> page.</p>
+<form method="get" action="/compare" class="row">
+  {% for i in range(max_panes) %}
+  <select name="runs" aria-label="run {{ i + 1 }}"><option value="">–</option>{% for n in all_runs %}<option value="{{ n }}"{% if i < runs|length and runs[i] == n %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+  {% endfor %}
+  <label class="row">REF <select name="ref"><option value="">–</option>{% for n in all_runs %}<option value="{{ n }}"{% if n == ref %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+  <button class="primary">Show</button>
+</form>
+{% if not runs %}
+<p class="muted">Choose runs above to compare their pictures, forces and cp lines. Only runs with pictures are listed.</p>
 {% else %}
 <script id="compare-data" type="application/json">{{ data_json|safe }}</script>
 <div id="strip" class="row"></div>
 <div id="guards"></div>
-
-<h2>Numbers</h2>
-<div class="scroll"><table class="results">
-  <thead><tr><th>run</th><th>note</th>{% for c in columns %}<th class="num">{{ c.label }}</th>{% endfor %}<th>verdict</th></tr></thead>
-  {% for row in rows %}
-  <tbody class="result">
-  <tr><td><a href="/runs/{{ row.name }}">{{ row.name }}</a>{% if ref and row.name == ref.name %} <span class="badge">REF</span>{% endif %}<br><span class="muted">{{ row.state }}</span></td>
-      <td>{{ row.note.note }}</td>
-      {% for c in columns %}<td class="num">{{ row.values.get(c.key)|num(c.fmt) }}</td>{% endfor %}
-      <td>{{ row.verdict or '' }}</td></tr>
-  {% if ref and row.name != ref.name and row.has_result and ref.has_result %}
-  {% set cells = delta(row, ref, columns) %}
-  <tr class="delta"><td colspan="2" class="muted">Δ against {{ ref.name }}</td>
-    {% for c in columns %}{% set d = cells[c.key] %}<td class="num {{ d.tone }}" {% if d.noise is not none %}title="± {{ d.noise|num('{:.4f}') }}"{% endif %}>{{ d.value|num(c.fmt) }}</td>{% endfor %}<td></td></tr>
-  {% endif %}
-  </tbody>
-  {% endfor %}
-</table></div>
 
 <h2>Pictures</h2>
 <div id="viewer"></div>
@@ -44,9 +33,6 @@
 </div>
 <h3>Cl</h3><div id="plot-Cl" class="plot"></div>
 <h3>Cd</h3><div id="plot-Cd" class="plot"></div>
-
-<h2>Δ by component</h2>
-<div id="bars"></div>
 
 <h2>cp lines</h2>
 <div class="row">

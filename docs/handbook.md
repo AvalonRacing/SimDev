@@ -1253,7 +1253,11 @@ not evidence that a production render is comfortable.
 
 **`/results` is the Excel sheet, kept by the runs themselves.** One row per
 run directory, newest first; a run without a `result.json` yet is listed
-greyed as "no results yet" and cannot be ticked. The change note comes from
+greyed as "no results yet". The columns follow the sheet's TC10 order -
+compare with, run, Cl, Cd, Fx, Fz, Fy, the group Cl then the group Cd, COP
+x/y/z, -Cl/Cd, balance - with the change note last, like its Geometrie
+column, and a delta row under each run against its "compare with". The table
+stands alone: it is not linked to the pictures. The change note comes from
 the New Run form ("What changed in the geometry?") and is copied into
 `<run>/ui/note.json` when the job starts; it and the "compare with" reference
 are edited inline and saved to the same file - also for runs started from the
@@ -1267,17 +1271,21 @@ process cannot read job rows after the migration.
 of the rolling mean of half the window length, inside the averaging window -
 how far the reported mean moves depending on where the run stopped
 (`ui/summary.py`). The noise of a delta is sqrt(nA^2 + nB^2); a delta below it
-is greyed instead of coloured green or red. Green is "better": Cl more
+gets a grey cell instead of a green or red one (the cell background is
+coloured, the text is not). Green is "better": Cl more
 negative, Cd lower, -Cl/Cd higher.
 
-**`/compare?runs=a,b,c` shows pictures side by side.** Sync, zoom and pan
+**`/compare` shows pictures side by side, and only pictures.** It has its
+own run picker at the top (four selects and a REF select, listing the runs
+that have pictures); it is not driven by the Results table. Sync, zoom and pan
 are shared because every picture of a view has the same frame. Blink, swipe
 and fade put two panes in one viewport. At most 4 runs; further runs are
 left out with a warning naming them. REF is one REF for the whole page: the
-numbers table, the bars and the delta pictures all use it, and "make REF"
-reloads the page with `ref=<run>`. Ticking runs on `/results` makes the
-**oldest** ticked run REF, so a new run shows its change against the run it
-improves on; an explicit `ref=` in the URL always wins.
+delta pictures use it, and "make REF" reloads the page with `ref=<run>`; with
+no (or an unknown) `ref=` the first run is REF. Below the pictures are the
+force histories and the cp lines; the cp plot has the front of the car on the
+left. The old numbers table and the delta-by-component bars are gone: the
+numbers live on `/results`.
 
 **Deltas are computed from the sampled fields, never from the PNGs.** On the
 banded colour map a small change turns every shifted band edge into a

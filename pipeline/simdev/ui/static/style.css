@@ -52,9 +52,9 @@ table.results textarea { width: 16rem; }
 tbody.result { border-top: 2px solid var(--line); }
 tbody.pending { opacity: 0.6; }
 tr.delta td { font-size: 12px; }
-tr.delta td.better { color: var(--ok); font-weight: 600; }
-tr.delta td.worse { color: var(--bad); font-weight: 600; }
-tr.delta td.noise { color: var(--muted); }
+tr.delta td.better { background: #c8e6c9; }
+tr.delta td.worse { background: #ffcdd2; }
+tr.delta td.noise { background: #eceff1; }
 .toolbar { display: grid; gap: 0.4rem; margin-bottom: 0.6rem; }
 .toolbar input[type=range] { width: 22rem; }
 .panes { display: grid; gap: 0.6rem; }
@@ -70,9 +70,3 @@ tr.delta td.noise { color: var(--muted); }
 .overlay-label { font-weight: 600; margin: 0.2rem 0; }
 .chip { border: 1px solid; border-left-width: 4px; border-radius: 4px; padding: 0.2rem 0.5rem; background: #fff; }
 
-table.bars { width: auto; margin: 0.6rem 0; }
-table.bars caption { text-align: left; font-weight: 600; }
-table.bars td { padding: 0.15rem 0.5rem; }
-.bar { position: relative; width: 22rem; height: 12px; background: linear-gradient(to right, transparent calc(50% - 1px), #999 calc(50% - 1px), #999 calc(50% + 1px), transparent calc(50% + 1px)); }
-.bar .fill { position: absolute; top: 2px; height: 8px; }
-.bar .whisker { position: absolute; top: 5px; height: 2px; background: #000; opacity: 0.5; }

@@ -88,3 +88,13 @@ def test_a_garbled_report_does_not_break_the_results_page(tmp_path: Path) -> Non
         (run / "results" / "report.tsv").write_bytes(b"run\tdriving_state\nbase\t\xff\xfe\n")
         response = client.get("/results")
         assert response.status_code == 200 and "base" in response.text
+
+
+def test_results_table_is_not_linked_to_the_pictures_and_the_note_comes_last(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "base")
+        page = client.get("/results").text
+        assert 'type="checkbox"' not in page and "compare-form" not in page
+        assert "/compare" not in page
+        head = page.split("<thead>")[1].split("</thead>")[0]
+        assert head.index("compare with") < head.index("run") < head.index("Cl") < head.index("note")

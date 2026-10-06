@@ -19,16 +19,55 @@ def make_run(root: Path, name: str, cl: float = -1.0) -> Path:
     return run
 
 
+def make_pictured_run(root: Path, name: str) -> Path:
+    run = make_run(root, name)
+    (run / "results" / "render_plan.json").write_text("{}")
+    return run
+
+
 def test_compare_page_keeps_order_and_reference(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
-        make_run(tmp_path / "runs", "a")
-        make_run(tmp_path / "runs", "b", cl=-1.2)
+        make_pictured_run(tmp_path / "runs", "a")
+        make_pictured_run(tmp_path / "runs", "b")
         page = client.get("/compare?runs=b,a&ref=a").text
-        data = json.loads(page.split('<script id="compare-data" type="application/json">')[1]
-                          .split("</script>")[0])
+        data = _payload(page)
         assert data["runs"] == ["b", "a"] and data["ref"] == "a"
         assert sorted(data["all_runs"]) == ["a", "b"]
-        assert "Δ against a" in page
+
+
+def test_compare_page_is_pictures_only(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        page = client.get("/compare?runs=a").text
+        assert "Δ against" not in page and "<h2>Numbers</h2>" not in page
+        assert 'id="bars"' not in page
+
+
+def test_picker_lists_runs_with_pictures_and_preselects_the_chosen(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        make_pictured_run(tmp_path / "runs", "b")
+        make_run(tmp_path / "runs", "numbers_only")
+        page = client.get("/compare?runs=b,a&ref=a").text
+        assert page.count('<select name="runs"') == 4
+        assert '<select name="ref"' in page
+        assert '<option value="b" selected>' in page and '<option value="a" selected>' in page
+        assert "numbers_only" not in page
+
+
+def test_empty_picker_shows_a_hint_not_a_results_link(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        page = client.get("/compare").text
+        assert '<select name="runs"' in page and "Tick runs" not in page
+        assert "Choose runs" in page
+
+
+def test_run_without_pictures_is_not_offered(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        make_run(tmp_path / "runs", "b")
+        assert _payload(client.get("/compare?runs=a").text)["all_runs"] == ["a"]
 
 
 def test_ticked_checkboxes_arrive_as_repeated_parameters(tmp_path: Path) -> None:
@@ -82,8 +121,8 @@ def test_delta_endpoint_serves_the_png(tmp_path: Path, monkeypatch) -> None:
 
 def test_hostile_directory_name_cannot_break_out_of_the_data_script(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
-        make_run(tmp_path / "runs", "a")
-        make_run(tmp_path / "runs", "x</script><img src=x onerror=alert(1)>")
+        make_pictured_run(tmp_path / "runs", "a")
+        make_pictured_run(tmp_path / "runs", "x</script><img src=x onerror=alert(1)>")
         page = client.get("/compare?runs=a").text
         assert "</script><img" not in page
         data = json.loads(page.split('<script id="compare-data" type="application/json">')[1]
@@ -97,8 +136,9 @@ def test_payload_escapes_angle_brackets(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(routes_compare.runview, "list_runs",
                         lambda root: [root / "a", root / "<b>"])
     with make_client(tmp_path) as (client, app):
-        make_run(tmp_path / "runs", "a")
+        make_pictured_run(tmp_path / "runs", "a")
         (tmp_path / "runs" / "<b>" / "results").mkdir(parents=True)
+        (tmp_path / "runs" / "<b>" / "results" / "render_plan.json").write_text("{}")
         page = client.get("/compare?runs=a").text
         assert "<b>" not in page.split('id="compare-data"')[1].split("</script>")[0]
 
@@ -134,23 +174,26 @@ def _payload(page: str) -> dict:
                       .split("</script>")[0])
 
 
-def test_results_form_makes_the_oldest_ticked_run_the_reference(tmp_path: Path) -> None:
+def test_reference_defaults_to_the_first_run_and_falls_back(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
-        make_run(tmp_path / "runs", "a")
-        make_run(tmp_path / "runs", "b")
-        data = _payload(client.get("/compare?runs=b&runs=a&ref_mode=oldest").text)
-        assert data["runs"] == ["b", "a"] and data["ref"] == "a"
-        data = _payload(client.get("/compare?runs=b,a&ref_mode=oldest&ref=b").text)
-        assert data["ref"] == "b"
+        make_pictured_run(tmp_path / "runs", "a")
+        make_pictured_run(tmp_path / "runs", "b")
         assert _payload(client.get("/compare?runs=b,a").text)["ref"] == "b"
-        assert 'name="ref_mode" value="oldest"' in client.get("/results").text
-        assert "oldest ticked run is the reference" in client.get("/results").text
+        assert _payload(client.get("/compare?runs=b,a&ref=a").text)["ref"] == "a"
+        assert _payload(client.get("/compare?runs=b,a&ref=zzz").text)["ref"] == "b"
+
+
+def test_blank_picker_selects_are_ignored(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        page = client.get("/compare?runs=a&runs=&runs=&runs=&ref=")
+        assert _payload(page.text)["runs"] == ["a"] and "not found" not in page.text
 
 
 def test_runs_beyond_four_are_named_in_the_warning(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         for name in "abcdef":
-            make_run(tmp_path / "runs", name)
+            make_pictured_run(tmp_path / "runs", name)
         page = client.get("/compare?runs=a,b,c,d,e,f").text
         assert _payload(page)["runs"] == ["a", "b", "c", "d"]
         assert "max 4 runs: left out e, f" in page

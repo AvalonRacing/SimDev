@@ -30,7 +30,7 @@ def test_groups_become_columns(tmp_path: Path) -> None:
                                                     "wing": {"Cd": 0.1, "Cl": -0.2}}))
     assert group_names([row]) == ["body", "wing"]
     keys = [c.key for c in columns_for(["body", "wing"])]
-    assert keys[:3] == ["cl", "cd", "eff"]
+    assert keys[:5] == ["cl", "cd", "fx", "fz", "fy"]
     assert "cl_body" in keys and "cd_wing" in keys
     assert row.values["cl_body"] == -0.9
 
@@ -87,3 +87,12 @@ def test_an_undecodable_report_does_not_break_the_row(tmp_path: Path) -> None:
     (run / "results" / "report.tsv").write_bytes(b"run\tdriving_state\na\t\xff\xfe\x80bad\n")
     row = load_row(run)
     assert row.state == "" and row.has_result
+
+
+def test_columns_follow_the_benchmark_sheet_order() -> None:
+    # Aeroexcel TC10: cz_a cx_a Fx Fz Fy, group Cz then group Cx, COP, efficiency, balance.
+    keys = [c.key for c in columns_for(["body", "other", "wing"])]
+    assert keys == ["cl", "cd", "fx", "fz", "fy",
+                    "cl_body", "cl_wing", "cd_body", "cd_wing",
+                    "cop_x", "cop_y", "cop_z", "eff", "balance",
+                    "cl_other", "cd_other", "cs"]
