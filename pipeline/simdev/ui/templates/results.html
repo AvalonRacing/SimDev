@@ -11,8 +11,9 @@
   <a class="button" href="/results.tsv">Copy as TSV</a>
 </form>
 <form id="compare-form" method="get" action="/compare" class="row">
+  <input type="hidden" name="ref_mode" value="oldest">
   <button class="primary">Open ticked runs in viewer</button>
-  <span class="muted">the first ticked run is the reference</span>
+  <span class="muted">the oldest ticked run is the reference</span>
 </form>
 <div class="scroll">
 <table class="results">

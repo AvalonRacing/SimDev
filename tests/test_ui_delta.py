@@ -75,16 +75,95 @@ def test_default_limits() -> None:
 def test_result_is_cached_and_concurrent_requests_run_the_helper_once(tmp_path: Path) -> None:
     pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
     helper = FakeHelper()
-    paths = []
-    threads = [threading.Thread(target=lambda: paths.append(
-        service.delta_png(pane, ref, "x_+0.000", "cp", None, runner=helper))) for _ in range(4)]
+    paths, busy = [], []
+
+    def ask() -> None:
+        try:
+            paths.append(service.delta_png(pane, ref, "x_+0.000", "cp", None, runner=helper))
+        except service.DeltaError as error:
+            busy.append(error.status)
+
+    threads = [threading.Thread(target=ask) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
+    # Requests that met a running compute were told to come back (503), not queued.
+    assert set(busy) <= {503}
+    assert helper.calls == 1
+    paths.append(service.delta_png(pane, ref, "x_+0.000", "cp", None, runner=helper))
     assert helper.calls == 1
     assert len(set(paths)) == 1 and paths[0].read_bytes() == b"\x89PNG"
     assert paths[0].is_relative_to(pane / "ui" / "delta" / "a")
+
+
+def test_a_busy_helper_answers_503_without_waiting(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    with service._LOCK:
+        with pytest.raises(service.DeltaError) as e:
+            service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert e.value.status == 503 and "another delta" in str(e.value)
+    assert helper.calls == 0
+
+
+def test_a_cached_picture_is_served_while_another_delta_computes(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    first = service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    with service._LOCK:
+        again = service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert again == first and helper.calls == 1
+
+
+def test_a_changed_plan_stamp_invalidates_the_cache(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    plan_file = ref / "results/render_plan.json"
+    plan = json.loads(plan_file.read_text())
+    plan["stamp"] = {"window": "100-400"}
+    plan_file.write_text(json.dumps(plan))
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert helper.calls == 2
+
+
+def test_the_helper_version_is_part_of_the_cache_key(tmp_path: Path, monkeypatch) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    monkeypatch.setattr(service, "HELPER_VERSION", service.HELPER_VERSION + 1)
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert helper.calls == 2
+
+
+def _edit_plan(run: Path, change) -> None:
+    plan_file = run / "results/render_plan.json"
+    plan = json.loads(plan_file.read_text())
+    change(plan)
+    plan_file.write_text(json.dumps(plan))
+
+
+def test_a_different_attitude_is_refused(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    _edit_plan(ref, lambda p: p["slices"][0].update(point=[0, 0, 0.01]))
+    with pytest.raises(service.DeltaError) as e:
+        service.build_request(pane, ref, "x_+0.000", "cp", 0.2)
+    assert e.value.status == 409 and "not the same planes" in str(e.value)
+    ref2 = make_run(tmp_path, "c")
+    _edit_plan(ref2, lambda p: p["slices"][0].update(normal=[1, 0, 0.02]))
+    with pytest.raises(service.DeltaError) as e:
+        service.build_request(pane, ref2, "x_+0.000", "cp", 0.2)
+    assert e.value.status == 409
+    ref3 = make_run(tmp_path, "d")
+    _edit_plan(ref3, lambda p: p["surfaces"][0].update(camera={"position": [1, 2, 3]}))
+    with pytest.raises(service.DeltaError) as e:
+        service.build_request(pane, ref3, "surface_top", "cp", 0.2)
+    assert e.value.status == 409
+    # identical framing up to round-off is fine
+    ref4 = make_run(tmp_path, "e")
+    _edit_plan(ref4, lambda p: p["slices"][0].update(point=[0, 0, 1e-9]))
+    assert service.build_request(pane, ref4, "x_+0.000", "cp", 0.2)["kind"] == "plane"
 
 
 def test_a_changed_reference_invalidates_the_cache(tmp_path: Path) -> None:

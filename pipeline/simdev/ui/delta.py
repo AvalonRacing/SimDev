@@ -26,7 +26,13 @@ SURFACE_FIELDS = ("cp",)
 HELPER = Path(__file__).resolve().parent.parent / "viz" / "delta.py"
 DEFAULT_INTERPRETER = "/usr/bin/python3"
 TIMEOUT = 600
+# Part of the cache key: bump it whenever viz/delta.py changes what it draws,
+# so pictures cached by an older helper are recomputed. Bump note: 2 is the
+# helper as merged with the compare viewer.
+HELPER_VERSION = 2
+FRAMING_TOL = 1e-6
 _LOCK = threading.Lock()
+BUSY = "another delta is being computed - try again in a moment"
 
 
 class DeltaError(Exception):
@@ -54,6 +60,22 @@ def _spec_hash(run_dir: Path) -> str:
         return ""
 
 
+def _close(a: Any, b: Any) -> bool:
+    """Same framing up to round-off: numbers within FRAMING_TOL, the rest equal."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) <= FRAMING_TOL
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_close(a[k], b[k]) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_close(x, y) for x, y in zip(a, b))
+    return a == b
+
+
+NOT_THE_SAME = "different driving state or attitude - the planes are not the same planes"
+
+
 def build_request(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: float) -> dict:
     pane_plan, ref_plan = _plan(pane_dir), _plan(ref_dir)
     if pane_plan.get("views_digest") != ref_plan.get("views_digest"):
@@ -69,6 +91,8 @@ def build_request(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: f
         ref_entries = {s["name"]: s for s in ref_plan.get("surfaces", [])}
         if name not in entries or name not in ref_entries:
             raise DeltaError(f"no surface view {name}", 404)
+        if not _close(entries[name].get("camera"), ref_entries[name].get("camera")):
+            raise DeltaError(NOT_THE_SAME, 409)
         return {
             "kind": "surface", "field": field, "limit": limit,
             "resolution": pane_plan["resolution"], "camera": entries[name]["camera"],
@@ -84,6 +108,8 @@ def build_request(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: f
     if view not in slices or view not in pane_slices:
         raise DeltaError(f"no plane {view}", 404)
     entry = slices[view]
+    if not all(_close(entry.get(k), pane_slices[view].get(k)) for k in ("point", "normal")):
+        raise DeltaError(NOT_THE_SAME, 409)
     return {
         "kind": "plane", "field": field, "limit": limit,
         "resolution": ref_plan["resolution"],
@@ -101,7 +127,7 @@ def _interpreter(run_dir: Path) -> str:
         return DEFAULT_INTERPRETER
 
 
-def _fresh_cache(pane_dir: Path, ref_dir: Path) -> Path:
+def _cache_folder(pane_dir: Path, ref_dir: Path) -> Path:
     ref_name = ref_dir.name
     if not ref_name or ref_name in (".", ".."):
         raise DeltaError(f"invalid reference run name: {ref_name}", 404)
@@ -110,16 +136,31 @@ def _fresh_cache(pane_dir: Path, ref_dir: Path) -> Path:
     try:
         folder.resolve().relative_to((pane_dir / "ui" / "delta").resolve())
     except ValueError:
-        raise DeltaError(f"cache folder would be outside ui/delta", 404)
-    key = hashlib.sha1(json.dumps([
-        _spec_hash(pane_dir), _spec_hash(ref_dir),
-        _plan(pane_dir).get("views_digest"), _plan(ref_dir).get("views_digest"),
-    ]).encode()).hexdigest()
-    stamp = folder / "key.txt"
-    if not stamp.is_file() or stamp.read_text() != key:
+        raise DeltaError("cache folder would be outside ui/delta", 404) from None
+    return folder
+
+
+def _cache_key(pane_dir: Path, ref_dir: Path) -> str:
+    pane_plan, ref_plan = _plan(pane_dir), _plan(ref_dir)
+    return hashlib.sha1(json.dumps([
+        HELPER_VERSION, _spec_hash(pane_dir), _spec_hash(ref_dir),
+        pane_plan.get("views_digest"), ref_plan.get("views_digest"),
+        pane_plan.get("stamp"), ref_plan.get("stamp"),
+    ], sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _key_matches(folder: Path, key: str) -> bool:
+    try:
+        return (folder / "key.txt").read_text() == key
+    except OSError:
+        return False
+
+
+def _fresh_cache(folder: Path, key: str) -> Path:
+    if not _key_matches(folder, key):
         shutil.rmtree(folder, ignore_errors=True)
         folder.mkdir(parents=True, exist_ok=True)
-        stamp.write_text(key)
+        (folder / "key.txt").write_text(key)
     return folder
 
 
@@ -130,9 +171,17 @@ def delta_png(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: float
         limit = default_limit(field, float(_plan(pane_dir)["frame"]["u_inf"]))
     limit = round(float(limit), 6)
     request = build_request(pane_dir, ref_dir, view, field, limit)
-    with _LOCK:
-        folder = _fresh_cache(pane_dir, ref_dir)
-        out = folder / f"{view}_{field}_{limit:g}.png"
+    folder, key = _cache_folder(pane_dir, ref_dir), _cache_key(pane_dir, ref_dir)
+    out = folder / f"{view}_{field}_{limit:g}.png"
+    # A cached picture never waits behind a running compute.
+    if _key_matches(folder, key) and out.is_file():
+        return out
+    # Never queue: a request that waited would hold a server thread (and a
+    # browser connection) for a picture the user has likely scrolled past.
+    if not _LOCK.acquire(blocking=False):
+        raise DeltaError(BUSY, 503)
+    try:
+        _fresh_cache(folder, key)
         if out.is_file():
             return out
         request["out"] = str(out)
@@ -158,3 +207,5 @@ def delta_png(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: float
                 f"{summary.get('error') or 'the delta helper failed'} - "
                 "run 'simdev doctor' to check the ParaView interpreter", 500)
         return out
+    finally:
+        _LOCK.release()

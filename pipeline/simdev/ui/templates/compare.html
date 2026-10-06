@@ -8,6 +8,7 @@
 {% block main %}
 <h1>Compare</h1>
 {% if missing %}<div class="warn">not found or not allowed, left out: {{ missing|join(', ') }}</div>{% endif %}
+{% if dropped %}<div class="warn">max {{ max_panes }} runs: left out {{ dropped|join(', ') }}</div>{% endif %}
 {% if not rows %}
 <p>No runs chosen. Tick runs on the <a href="/results">Results</a> page.</p>
 {% else %}

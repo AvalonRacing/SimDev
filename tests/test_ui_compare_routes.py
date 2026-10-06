@@ -127,3 +127,46 @@ def test_the_compare_script_is_served(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         script = client.get("/static/compare.js")
         assert script.status_code == 200 and "SimdevCompare" in script.text
+
+
+def _payload(page: str) -> dict:
+    return json.loads(page.split('<script id="compare-data" type="application/json">')[1]
+                      .split("</script>")[0])
+
+
+def test_results_form_makes_the_oldest_ticked_run_the_reference(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "a")
+        make_run(tmp_path / "runs", "b")
+        data = _payload(client.get("/compare?runs=b&runs=a&ref_mode=oldest").text)
+        assert data["runs"] == ["b", "a"] and data["ref"] == "a"
+        data = _payload(client.get("/compare?runs=b,a&ref_mode=oldest&ref=b").text)
+        assert data["ref"] == "b"
+        assert _payload(client.get("/compare?runs=b,a").text)["ref"] == "b"
+        assert 'name="ref_mode" value="oldest"' in client.get("/results").text
+        assert "oldest ticked run is the reference" in client.get("/results").text
+
+
+def test_runs_beyond_four_are_named_in_the_warning(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        for name in "abcdef":
+            make_run(tmp_path / "runs", name)
+        page = client.get("/compare?runs=a,b,c,d,e,f").text
+        assert _payload(page)["runs"] == ["a", "b", "c", "d"]
+        assert "max 4 runs: left out e, f" in page
+
+
+def test_a_busy_delta_answers_503_with_retry_after(tmp_path: Path, monkeypatch) -> None:
+    from simdev.ui import routes_compare
+    from simdev.ui.delta import DeltaError
+
+    def busy(*a, **k):
+        raise DeltaError("another delta is being computed", 503)
+
+    monkeypatch.setattr(routes_compare, "delta_png", busy)
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "a")
+        make_run(tmp_path / "runs", "b")
+        response = client.get("/api/delta/b.png?ref=a&view=x_+0.000&field=cp")
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "2"

@@ -80,3 +80,11 @@ def test_the_run_page_links_to_its_comparison(tmp_path: Path) -> None:
         make_run(tmp_path / "runs", "newer")
         client.post("/runs/newer/note", data={"note": "", "compare_with": "base"})
         assert "/compare?runs=base,newer" in client.get("/runs/newer").text
+
+
+def test_a_garbled_report_does_not_break_the_results_page(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        run = make_run(tmp_path / "runs", "base")
+        (run / "results" / "report.tsv").write_bytes(b"run\tdriving_state\nbase\t\xff\xfe\n")
+        response = client.get("/results")
+        assert response.status_code == 200 and "base" in response.text

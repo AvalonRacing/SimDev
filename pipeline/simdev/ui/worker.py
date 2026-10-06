@@ -192,7 +192,11 @@ class Worker:
         try:
             (run_dir / "logs").mkdir(parents=True, exist_ok=True)
             write_job_file(job, str(self._cad_root) if self._cad_root else None)
-            write_initial_note(run_dir, job.note)
+            try:
+                write_initial_note(run_dir, job.note)
+            except OSError as error:
+                # The note is a label; losing it must not cost the run.
+                log.warning("could not write the note of job %s: %s", job.id, error)
             (run_dir / OUTCOME_FILE).unlink(missing_ok=True)
             with open(run_dir / UI_LOG, "a", encoding="utf-8") as output:
                 proc = subprocess.Popen(

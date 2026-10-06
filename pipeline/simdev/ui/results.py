@@ -89,9 +89,12 @@ def _state_and_design(run_dir: Path) -> tuple[str, str]:
     report = run_dir / "results" / "report.tsv"
     if not state and report.is_file():
         try:
-            rows = list(csv.DictReader(report.open(encoding="utf-8"), delimiter="\t"))
+            with report.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
             state = rows[-1].get("driving_state") or "" if rows else ""
-        except (OSError, csv.Error):
+        except (OSError, ValueError, csv.Error):
+            # ValueError covers UnicodeDecodeError: a garbled report must not
+            # take the whole Results page down.
             pass
     return state, design
 

@@ -394,3 +394,14 @@ def test_the_worker_writes_the_job_note_into_the_run(tmp_path: Path) -> None:
     worker._spawn(job)
     worker._procs[job.id].wait(timeout=60)
     assert json.loads((run_dir / "ui" / "note.json").read_text())["note"] == "new rear deck"
+
+
+def test_a_note_that_cannot_be_written_does_not_stop_the_job(tmp_path, queue, monkeypatch) -> None:
+    import simdev.ui.worker as worker_module
+
+    def broken(run_dir, note):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(worker_module, "write_initial_note", broken)
+    job = queue.enqueue(spec(tmp_path, "a", "ok"))
+    assert run_to_end(worker_for(queue), queue, job.id) == "done"

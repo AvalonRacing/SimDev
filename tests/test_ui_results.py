@@ -80,3 +80,10 @@ def test_tsv_has_a_delta_line_under_each_referenced_run(tmp_path: Path) -> None:
     assert lines[1].startswith("new\t")
     assert lines[2].startswith("Δ new − ref\t")
     assert lines[3].startswith("ref\t")
+
+
+def test_an_undecodable_report_does_not_break_the_row(tmp_path: Path) -> None:
+    run = make_run(tmp_path, "a")
+    (run / "results" / "report.tsv").write_bytes(b"run\tdriving_state\na\t\xff\xfe\x80bad\n")
+    row = load_row(run)
+    assert row.state == "" and row.has_result

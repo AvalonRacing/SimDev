@@ -29,7 +29,8 @@ def _run_dir(request: Request, name: str) -> Path:
 
 
 @router.get("/compare")
-def compare_page(request: Request, runs: list[str] = Query([]), ref: str = ""):
+def compare_page(request: Request, runs: list[str] = Query([]), ref: str = "",
+                 ref_mode: str = ""):
     root = ctx(request).config.runs_root
     wanted = [n.strip() for item in runs for n in item.split(",") if n.strip()]
     names, missing = [], []
@@ -38,16 +39,19 @@ def compare_page(request: Request, runs: list[str] = Query([]), ref: str = ""):
             names.append(name)
         else:
             missing.append(name)
-    names = names[:MAX_PANES]
+    names, dropped = names[:MAX_PANES], names[MAX_PANES:]
     rows = [results.load_row(root / n) for n in names]
     columns = results.columns_for(results.group_names(rows))
-    ref = ref if ref in names else (names[0] if names else "")
+    # The Results form lists ticked runs newest first; its REF is the oldest,
+    # so a new run shows its change against the run it improves on.
+    default = (names[-1] if ref_mode == "oldest" else names[0]) if names else ""
+    ref = ref if ref in names else default
     by_name = {r.name: r for r in rows}
     all_runs = [p.name for p in runview.list_runs(root) if valid_run_name(p.name) and (p / "results" / "result.json").is_file()]
     payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2}, "all_runs": all_runs}
     return render(
         request, "compare.html", rows=rows, columns=columns, ref=by_name.get(ref),
-        missing=missing, delta=results.delta, data_json=json.dumps(payload).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"),
+        missing=missing, dropped=dropped, max_panes=MAX_PANES, delta=results.delta, data_json=json.dumps(payload).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"),
     )
 
 
@@ -93,4 +97,5 @@ def delta_picture(request: Request, name: str, ref: str, view: str, field: str,
         return FileResponse(delta_png(pane_dir, ref_dir, view, field, limit),
                             media_type="image/png")
     except DeltaError as error:
-        return JSONResponse({"error": str(error)}, status_code=error.status)
+        headers = {"Retry-After": "2"} if error.status == 503 else None
+        return JSONResponse({"error": str(error)}, status_code=error.status, headers=headers)
