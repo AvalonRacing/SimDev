@@ -3,6 +3,7 @@
 {% block head %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="/static/compare-state.js" defer></script>
 <script src="/static/compare.js" defer></script>
 {% endblock %}
 {% block main %}
@@ -17,6 +18,7 @@
   <button class="primary">Show</button>
 </form>
 {% if not runs %}
+<script src="/static/compare-restore.js"></script>
 <p class="muted">Choose runs above to compare their pictures, forces and cp lines. Only runs with pictures are listed.</p>
 {% else %}
 <script id="compare-data" type="application/json">{{ data_json|safe }}</script>

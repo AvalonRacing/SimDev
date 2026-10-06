@@ -227,3 +227,22 @@ def test_a_busy_delta_answers_503_with_retry_after(tmp_path: Path, monkeypatch) 
 def test_nav_links_to_compare(tmp_path: Path) -> None:
     with make_client(tmp_path) as (client, app):
         assert 'href="/compare"' in client.get("/").text
+
+
+def test_empty_compare_page_includes_the_restore_script(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        empty = client.get("/compare").text
+        assert "/static/compare-restore.js" in empty
+        assert "/static/compare-restore.js" not in client.get("/compare?runs=a").text
+        assert "/static/compare-state.js" in client.get("/compare?runs=a").text
+        script = client.get("/static/compare-restore.js")
+        assert script.status_code == 200 and "location.replace" in script.text
+        assert client.get("/static/compare-state.js").status_code == 200
+
+
+def test_results_page_remembers_its_filters(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        page = client.get("/results").text
+        assert "simdev.results.v1" in page and "location.replace" in page
+        assert "/results?clear=1" in page

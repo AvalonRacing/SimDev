@@ -1284,7 +1284,13 @@ left out with a warning naming them. REF is one REF for the whole page: the
 delta pictures use it, and "make REF" reloads the page with `ref=<run>`; with
 no (or an unknown) `ref=` the first run is REF. Below the pictures are the
 force histories and the cp lines; the cp plot has the front of the car on the
-left. The old numbers table and the delta-by-component bars are gone: the
+left and a dashed cp = 0 line. The plane slider runs from the most positive
+offset to the most negative (for x-planes front to rear; the arrow keys follow
+the slider). The page remembers the last selection per browser (browser
+storage): opening `/compare` without runs returns to the last runs and REF and
+restores the viewer state (positions, panes, Δ toggles, layout, limits, force
+and cp choices) when the runs are unchanged; `/results` likewise remembers its
+filters ("Clear filters" resets them). The old numbers table and the delta-by-component bars are gone: the
 numbers live on `/results`.
 
 **Deltas are computed from the sampled fields, never from the PNGs.** On the

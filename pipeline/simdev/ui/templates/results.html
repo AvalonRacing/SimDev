@@ -9,7 +9,25 @@
   <input name="q" value="{{ filters.q }}" placeholder="name or note">
   <button>Filter</button>
   <a class="button" href="/results.tsv">Copy as TSV</a>
+  <a class="button" href="/results?clear=1" title="forget the remembered filters">Clear filters</a>
 </form>
+<script>
+// The filters are remembered per browser: coming back through the nav link restores them.
+(function () {
+  const KEY = "simdev.results.v1";
+  try {
+    if (new URLSearchParams(location.search).has("clear")) {
+      localStorage.removeItem(KEY);
+      history.replaceState(null, "", "/results");
+    } else if (location.search.length > 1) {
+      localStorage.setItem(KEY, location.search.slice(1));
+    } else {
+      const saved = localStorage.getItem(KEY);
+      if (saved) location.replace("/results?" + saved);
+    }
+  } catch (e) { /* no storage: the plain table */ }
+})();
+</script>
 <div class="scroll">
 <table class="results">
   <thead><tr><th>compare with</th><th>run</th>

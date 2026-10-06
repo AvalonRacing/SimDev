@@ -19,6 +19,7 @@
     limits: Object.assign({ U: null }, data.limits),
     global: { kind: "x", field: "cp", pos: 0 },
     zoom: { s: 1, x: 0, y: 0 },
+    chart: { force: { part: "", relative: false }, cp: { station: "", patches: null } },
     layout: "side",
     overlay: { a: 0, b: 1, mode: "blink", showB: false, pos: 0.5, alpha: 0.5, timer: null, ms: 500 },
     panes: data.runs.slice(0, 3).map((run) => ({
@@ -30,7 +31,8 @@
   // on every slider step would end the drag and drop keyboard focus.
   const live = { views: [], positions: [] };
   const colourOf = (run) => PALETTE[state.runs.indexOf(run) % PALETTE.length];
-  window.SimdevCompare = { state, indexes, colourOf };
+  const S = window.SimdevState;
+  window.SimdevCompare = { state, indexes, colourOf, choices, persist };
 
   // --- what a pane shows -----------------------------------------------------
 
@@ -44,7 +46,9 @@
     if (kind === "surface") return Object.keys((index.surfaces || {})[field] || {})
       .sort((a, b) => SURFACE_VIEWS.indexOf(a) - SURFACE_VIEWS.indexOf(b))
       .map((name) => ({ name, label: name }));
-    return (((index.planes || {})[kind] || {})[field] || [])
+    // Most positive offset first (front of the car for x); every position
+    // below is an index into this list.
+    return S.descending((((index.planes || {})[kind] || {})[field] || []))
       .map((p) => ({ name: p.name, label: `${kind} = ${p.offset >= 0 ? "+" : ""}${p.offset.toFixed(3)}` }));
   }
 
@@ -57,7 +61,7 @@
   function pictureOf(run, kind, field, name) {
     const index = indexes[run] || {};
     if (kind === "surface") return ((index.surfaces || {})[field] || {})[name] || null;
-    const list = ((index.planes || {})[kind] || {})[field] || [];
+    const list = ((index.planes || {})[kind] || {})[field] || [];  // ascending, looked up by name
     const hit = list.find((p) => p.name === name);
     return hit ? hit.rel : null;
   }
@@ -339,6 +343,7 @@
       label.textContent = o.mode === "blink" ? `showing ${top.run}` : `${state.panes[o.a].run} | ${state.panes[o.b].run}`;
       label.style.color = colourOf(top.run);
       imgB.style.visibility = o.mode === "blink" && !o.showB ? "hidden" : "visible";
+      persist();
       imgB.style.opacity = o.mode === "fade" ? o.alpha : 1;
       imgB.style.clipPath = o.mode === "swipe" ? `inset(0 0 0 ${o.pos * 100}%)` : "none";
       handle.style.display = o.mode === "swipe" ? "block" : "none";
@@ -366,7 +371,7 @@
         if (e.target.checked) o.timer = setInterval(state.overlay.flip, o.ms);
       } } }), "auto",
       el("input", { type: "number", min: 100, step: 100, value: o.ms, size: 4,
-        on: { change: (e) => { o.ms = Number(e.target.value) || 500;
+        on: { change: (e) => { o.ms = Number(e.target.value) || 500; persist();
           if (o.timer) { clearInterval(o.timer); o.timer = setInterval(state.overlay.flip, o.ms); } } } }), "ms"]);
 
     root.append(el("div", { class: "row" }, [
@@ -444,7 +449,31 @@
     }
     for (const v of live.views) load(v.img, v.note, urlOf(v.pane));
     preload();
+    persist();
     document.dispatchEvent(new Event("simdev:moved"));
+  }
+
+  // --- what the browser keeps between visits ---------------------------------
+
+  const env = {
+    kinds: ["x", "y", "z", "surface"],
+    fields: fieldsFor,
+    choices,
+  };
+
+  function persist() {
+    try { S.save(S.serialize(state, env)); } catch (e) { /* storage is a convenience */ }
+  }
+
+  function restoreSaved() {
+    const r = S.restore(S.load(), state.runs, env);
+    Object.assign(state.limits, r.limits);
+    Object.assign(state.chart, r.chart);
+    if (!r.viewer) return;
+    Object.assign(state.global, r.viewer.global);
+    state.layout = r.viewer.layout;
+    state.panes = r.viewer.panes;
+    Object.assign(state.overlay, r.viewer.overlay);
   }
 
   document.addEventListener("keydown", (event) => {
@@ -465,7 +494,7 @@
     .then((r) => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
     .then((index) => { indexes[run] = index; })
     .catch(() => { indexes[run] = {}; failed.push(run); })))
-    .then(() => { guards(); render(); document.dispatchEvent(new Event("simdev:ready")); });
+    .then(() => { restoreSaved(); guards(); render(); document.dispatchEvent(new Event("simdev:ready")); });
 })();
 
 // --- part 2: charts ----------------------------------------------------------
@@ -515,6 +544,8 @@
   function drawForces() {
     const part = document.getElementById("force-part").value;
     const relative = document.getElementById("force-relative").checked;
+    C.state.chart.force = { part, relative };
+    C.persist();
     for (const coefficient of ["Cl", "Cd"]) {
       const box = document.getElementById(`plot-${coefficient}`);
       if (plots[coefficient]) { plots[coefficient].destroy(); plots[coefficient] = null; }
@@ -571,6 +602,8 @@
   async function drawCp() {
     const station = document.getElementById("cp-station").value;
     const patches = [...document.querySelectorAll(".cp-patch:checked")].map((b) => b.value);
+    C.state.chart.cp = { station, patches };
+    C.persist();
     const data = {};
     const mine = ++cpSeq;
     await Promise.all(C.state.runs.map(async (run) => {
@@ -584,11 +617,11 @@
       const s = (d.patches || {})[p];
       return s ? s.x.map((x, i) => ({ x, y: s[key][i], run })).filter((q) => q.x != null && q.y != null) : [];
     }));
-    scatter(document.getElementById("cp-plot"), points("cp"), true, "cp");
+    scatter(document.getElementById("cp-plot"), points("cp"), true, "cp", true);
     scatter(document.getElementById("cp-outline"), points("z"), false, "z [m]");
   }
 
-  function scatter(canvas, pts, invert, label) {
+  function scatter(canvas, pts, invert, label, zeroLine) {
     // cp axis inverted (suction up), as viz/cplines.py draws it.
     const ctx = canvas.getContext("2d");
     canvas.width = width();
@@ -602,6 +635,7 @@
       if (p.y < y0) y0 = p.y;
       if (p.y > y1) y1 = p.y;
     }
+    if (zeroLine) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }  // the cp = 0 line is always in view
     const W = canvas.width - pad.l - pad.r, H = canvas.height - pad.t - pad.b;
     // Front of the car (+x) on the left, as in a side view.
     const X = (x) => pad.l + ((x1 - x) / (x1 - x0 || 1)) * W;
@@ -613,6 +647,19 @@
     ctx.fillText(y0.toFixed(2), 4, invert ? pad.t + 22 : pad.t + H);
     ctx.fillText(y1.toFixed(2), 4, invert ? pad.t + H : pad.t + 22);
     ctx.fillText(`front ← x ${x1.toFixed(3)} … ${x0.toFixed(3)} m → rear`, pad.l, canvas.height - 6);
+    if (zeroLine) {
+      ctx.save();
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(pad.l, Y(0));
+      ctx.lineTo(pad.l + W, Y(0));
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = "#333";
+      ctx.fillText("0", pad.l - 12, Y(0) + 3);
+    }
     for (const p of pts) {
       ctx.fillStyle = C.colourOf(p.run);
       ctx.fillRect(X(p.x) - 1, Y(p.y) - 1, 2, 2);
@@ -630,6 +677,12 @@
     const stations = (C.indexes[C.state.ref] || {}).stations || [];
     const station = document.getElementById("cp-station");
     for (const s of stations) station.append(new Option(s.name, s.name));
+    // Chart choices kept from the last visit, where they still exist.
+    const { force, cp } = C.state.chart;
+    if ([...select.options].some((o) => o.value === force.part)) select.value = force.part;
+    document.getElementById("force-relative").checked = force.relative === true;
+    if ([...station.options].some((o) => o.value === cp.station)) station.value = cp.station;
+    if (Array.isArray(cp.patches)) document.querySelectorAll(".cp-patch").forEach((b) => { b.checked = cp.patches.includes(b.value); });
   }
 
   document.addEventListener("simdev:ready", async () => {
@@ -652,8 +705,7 @@
     document.addEventListener("simdev:moved", () => {
       const g = C.state.global;
       if (g.kind !== "y") return;
-      const planes = (((C.indexes[C.state.ref] || {}).planes || {}).y || {})[g.field] || [];
-      const plane = planes[g.pos];
+      const plane = C.choices(g.kind, g.field)[g.pos];  // by name: the list runs front to rear
       const select = document.getElementById("cp-station");
       if (plane && [...select.options].some((o) => o.value === plane.name) && select.value !== plane.name) {
         select.value = plane.name;
