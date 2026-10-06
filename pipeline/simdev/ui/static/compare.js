@@ -89,27 +89,41 @@
 
   const deltaCache = new Map();  // url -> object URL, so blink is instant
 
-  async function load(img, note, target) {
+  const timers = new WeakMap();  // img -> pending delta fetch
+
+  function load(img, note, target) {
+    clearTimeout(timers.get(img));
+    img.dataset.want = target.url || "";
+    img.onerror = null;
     note.textContent = "";
     if (!target.url) { img.removeAttribute("src"); note.textContent = target.label; return; }
-    if (!target.delta) { img.src = target.url; return; }
+    if (!target.delta) {
+      img.onerror = () => { if (img.dataset.want === target.url) note.textContent = "picture failed to load"; };
+      img.src = target.url;
+      return;
+    }
     if (deltaCache.has(target.url)) { img.src = deltaCache.get(target.url); return; }
     note.textContent = "computing delta…";
     img.removeAttribute("src");
-    try {
-      const response = await fetch(target.url);
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: response.statusText }));
-        note.textContent = body.error || "delta failed";
-        return;
+    const wanted = () => img.dataset.want === target.url;
+    // Debounced: stepping through planes must not queue a server delta per step.
+    timers.set(img, setTimeout(async () => {
+      try {
+        const response = await fetch(target.url);
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({ error: response.statusText }));
+          if (wanted()) note.textContent = body.error || "delta failed";
+          return;
+        }
+        const objectUrl = URL.createObjectURL(await response.blob());
+        deltaCache.set(target.url, objectUrl);
+        if (!wanted()) return;
+        img.src = objectUrl;
+        note.textContent = "";
+      } catch (error) {
+        if (wanted()) note.textContent = String(error);
       }
-      const objectUrl = URL.createObjectURL(await response.blob());
-      deltaCache.set(target.url, objectUrl);
-      img.src = objectUrl;
-      note.textContent = "";
-    } catch (error) {
-      note.textContent = String(error);
-    }
+    }, 300));
   }
 
   function preload() {
@@ -230,7 +244,7 @@
         el("button", { type: "button", disabled: state.panes.length >= 4,
           text: "+ add pane", title: "another pane of a run on this page", on: { click: addPane } }),
         // A run not yet on the page: reload with it, so the numbers table includes it too.
-        select([["", "+ add run…"], ...data.all_runs.filter((r) => !state.runs.includes(r)).map((r) => [r, r])], "",
+        state.runs.length >= 4 ? null : select([["", "+ add run…"], ...data.all_runs.filter((r) => !state.runs.includes(r)).map((r) => [r, r])], "",
           (v) => { if (v) location.href = `/compare?${new URLSearchParams({ runs: [...state.runs, v].join(","), ref: state.ref })}`; }),
         ...limits,
       ]),
@@ -287,8 +301,9 @@
     const imgA = el("img", { "data-pane": o.a, "data-overlay": "1", draggable: "false", alt: "" });
     const imgB = el("img", { "data-pane": o.b, "data-overlay": "1", draggable: "false", alt: "", class: "top" });
     const noteA = el("div", { class: "pane-note" });
+    const noteB = el("div", { class: "pane-note", style: "top:1.8rem" });
     const handle = el("div", { class: "handle" });
-    const viewport = el("div", { class: "viewport overlay" }, [imgA, imgB, handle, noteA]);
+    const viewport = el("div", { class: "viewport overlay" }, [imgA, imgB, handle, noteA, noteB]);
     const label = el("div", { class: "overlay-label" });
 
     function show() {
@@ -339,7 +354,7 @@
     applyZoom(imgA, state.zoom);
     applyZoom(imgB, state.zoom);
     live.views.push({ img: imgA, note: noteA, pane: state.panes[o.a] },
-                    { img: imgB, note: noteA, pane: state.panes[o.b] });
+                    { img: imgB, note: noteB, pane: state.panes[o.b] });
     show();
   }
 
@@ -347,15 +362,25 @@
 
   const root = document.getElementById("viewer");
 
+  const failed = [];
+
   function guards() {
     const box = document.getElementById("guards");
     box.innerHTML = "";
-    const digests = new Set(state.runs.map((r) => (indexes[r] || {}).views_digest));
-    const states = new Set(state.runs.map((r) => (indexes[r] || {}).state).filter(Boolean));
+    for (const run of failed) box.append(el("div", { class: "warn", text: `index of ${run} could not be loaded` }));
+    const known = state.runs.filter((r) => !failed.includes(r));
+    const digests = new Set(known.map((r) => indexes[r].views_digest));
+    const states = new Set(known.map((r) => indexes[r].state).filter(Boolean));
+    const speeds = new Set(known.map((r) => indexes[r].u_inf).filter((u) => u != null));
     if (digests.size > 1) box.append(el("div", { class: "warn",
       text: "these runs were pictured with different post_views.yaml - their pictures are not comparable and deltas are refused" }));
-    if (states.size > 1) box.append(el("div", { class: "warn",
-      text: `different driving states (${[...states].join(", ")}): different u∞, compare coefficients with care` }));
+    if (speeds.size > 1 || states.size > 1) {
+      const parts = [];
+      if (states.size > 1) parts.push([...states].join(", "));
+      if (speeds.size > 1) parts.push(`u∞ ${[...speeds].join(", ")} m/s`);
+      box.append(el("div", { class: "warn",
+        text: `different driving states (${parts.join("; ")}): compare coefficients with care` }));
+    }
   }
 
   function strip() {
@@ -409,6 +434,8 @@
   });
 
   Promise.all(state.runs.map((run) => fetch(`/api/runs/${encodeURIComponent(run)}/index`)
-    .then((r) => r.json()).then((index) => { indexes[run] = index; })))
+    .then((r) => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+    .then((index) => { indexes[run] = index; })
+    .catch(() => { indexes[run] = {}; failed.push(run); })))
     .then(() => { guards(); render(); document.dispatchEvent(new Event("simdev:ready")); });
 })();
