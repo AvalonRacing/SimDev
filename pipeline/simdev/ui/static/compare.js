@@ -289,9 +289,11 @@
     render();
   }
 
+  // Every pane has the same two fixed-height rows (the second is empty while synced), so all
+  // viewports start at the same y however long a run name is.
   function paneHeader(pane, i) {
     const isRef = pane.run === state.ref;
-    return el("div", { class: "pane-head", style: `border-color:${colourOf(pane.run)}` }, [
+    const head = el("div", { class: "pane-head", style: `border-color:${colourOf(pane.run)}` }, [
       el("label", { class: "row" }, [el("input", { type: "checkbox", checked: pane.sync,
         on: { change: (e) => { pane.sync = e.target.checked;
           if (!pane.sync) Object.assign(pane, { kind: state.global.kind, field: state.global.field, pos: state.global.pos });
@@ -301,12 +303,15 @@
             // Reload with the new REF: the picker, the pictures and the delta pictures share it.
             : el("button", { type: "button", text: "make REF", on: { click: () => {
                 location.href = `/compare?${new URLSearchParams({ runs: state.runs.join(","), ref: pane.run })}`; } } }),
-      el("label", { class: "row" }, [el("input", { type: "checkbox", checked: pane.delta && deltaAllowed(pane),
-        disabled: !deltaAllowed(pane), on: { change: (e) => { pane.delta = e.target.checked; update(); } } }), "Δ vs REF"]),
-      state.panes.length > 1 ? el("button", { type: "button", text: "×", title: "remove pane",
+      el("label", { class: "row", title: "difference to the REF run" }, [el("input", { type: "checkbox", checked: pane.delta && deltaAllowed(pane),
+        disabled: !deltaAllowed(pane), on: { change: (e) => { pane.delta = e.target.checked; update(); } } }), "Δ"]),
+      // Out of the flow, in the corner: it must not push the row (and the viewport) around.
+      state.panes.length > 1 ? el("button", { type: "button", class: "pane-close", text: "×", title: "remove pane",
         on: { click: () => { state.panes.splice(i, 1); render(); } } }) : null,
-      pane.sync ? null : positionControls(pane, (structural) => (structural ? render() : update())),
     ]);
+    const position = el("div", { class: "pane-pos" },
+      pane.sync ? [] : [positionControls(pane, (structural) => (structural ? render() : update()))]);
+    return el("div", { class: "pane-top" }, [head, position]);
   }
 
   // --- layouts ---------------------------------------------------------------
@@ -335,17 +340,20 @@
     const noteA = el("div", { class: "pane-note" });
     const noteB = el("div", { class: "pane-note", style: "top:1.8rem" });
     const handle = el("div", { class: "handle" });
-    const viewport = el("div", { class: "viewport overlay" }, [imgA, imgB, handle, noteA, noteB]);
+    // The cut lives on an untransformed wrapper: clipping the zoomed img itself would cut in
+    // the picture's coordinates, which stop matching the handle's as soon as you zoom or pan.
+    const cut = el("div", { class: "cut" }, [imgB]);
+    const viewport = el("div", { class: "viewport overlay" }, [imgA, cut, handle, noteA, noteB]);
     const label = el("div", { class: "overlay-label" });
 
     function show() {
       const top = o.mode === "blink" ? (o.showB ? state.panes[o.b] : state.panes[o.a]) : state.panes[o.b];
       label.textContent = o.mode === "blink" ? `showing ${top.run}` : `${state.panes[o.a].run} | ${state.panes[o.b].run}`;
       label.style.color = colourOf(top.run);
-      imgB.style.visibility = o.mode === "blink" && !o.showB ? "hidden" : "visible";
+      cut.style.visibility = o.mode === "blink" && !o.showB ? "hidden" : "visible";
       persist();
-      imgB.style.opacity = o.mode === "fade" ? o.alpha : 1;
-      imgB.style.clipPath = o.mode === "swipe" ? `inset(0 0 0 ${o.pos * 100}%)` : "none";
+      cut.style.opacity = o.mode === "fade" ? o.alpha : 1;
+      cut.style.clipPath = o.mode === "swipe" ? `inset(0 0 0 ${o.pos * 100}%)` : "none";
       handle.style.display = o.mode === "swipe" ? "block" : "none";
       handle.style.left = `${o.pos * 100}%`;
     }
