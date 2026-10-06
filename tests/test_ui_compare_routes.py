@@ -78,3 +78,46 @@ def test_delta_endpoint_serves_the_png(tmp_path: Path, monkeypatch) -> None:
         make_run(tmp_path / "runs", "b")
         response = client.get("/api/delta/b.png?ref=a&view=x_+0.000&field=cp&limit=0.1")
         assert response.status_code == 200 and response.content == b"\x89PNG"
+
+
+def test_hostile_directory_name_cannot_break_out_of_the_data_script(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "a")
+        make_run(tmp_path / "runs", "x</script><img src=x onerror=alert(1)>")
+        page = client.get("/compare?runs=a").text
+        assert "</script><img" not in page
+        data = json.loads(page.split('<script id="compare-data" type="application/json">')[1]
+                          .split("</script>")[0])
+        assert data["all_runs"] == ["a"]
+
+
+def test_payload_escapes_angle_brackets(tmp_path: Path, monkeypatch) -> None:
+    from simdev.ui import routes_compare
+
+    monkeypatch.setattr(routes_compare.runview, "list_runs",
+                        lambda root: [root / "a", root / "<b>"])
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "a")
+        (tmp_path / "runs" / "<b>" / "results").mkdir(parents=True)
+        page = client.get("/compare?runs=a").text
+        assert "<b>" not in page.split('id="compare-data"')[1].split("</script>")[0]
+
+
+def test_cplines_nan_becomes_null_and_corrupt_csv_is_404(tmp_path: Path, monkeypatch) -> None:
+    from simdev.ui import routes_compare
+
+    nan = float("nan")
+    with make_client(tmp_path) as (client, app):
+        make_run(tmp_path / "runs", "a")
+        monkeypatch.setattr(routes_compare, "cp_station", lambda *a: {
+            "u_inf": 10.0, "patches": {"Body": {"x": [0.0, nan], "z": [float("inf"), 1.0],
+                                                  "cp": [nan, 0.5]}}})
+        body = client.get("/api/runs/a/cplines/s").text
+        assert "NaN" not in body and "Infinity" not in body
+        assert json.loads(body)["patches"]["Body"]["cp"] == [None, 0.5]
+
+        def corrupt(*a):
+            raise ValueError("bad row")
+        monkeypatch.setattr(routes_compare, "cp_station", corrupt)
+        response = client.get("/api/runs/a/cplines/s")
+        assert response.status_code == 404 and "bad row" in response.json()["detail"]

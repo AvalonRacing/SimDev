@@ -43,11 +43,11 @@ def compare_page(request: Request, runs: list[str] = Query([]), ref: str = ""):
     columns = results.columns_for(results.group_names(rows))
     ref = ref if ref in names else (names[0] if names else "")
     by_name = {r.name: r for r in rows}
-    all_runs = [p.name for p in runview.list_runs(root) if (p / "results" / "result.json").is_file()]
+    all_runs = [p.name for p in runview.list_runs(root) if valid_run_name(p.name) and (p / "results" / "result.json").is_file()]
     payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2}, "all_runs": all_runs}
     return render(
         request, "compare.html", rows=rows, columns=columns, ref=by_name.get(ref),
-        missing=missing, delta=results.delta, data_json=json.dumps(payload),
+        missing=missing, delta=results.delta, data_json=json.dumps(payload).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"),
     )
 
 
@@ -71,9 +71,18 @@ def run_summary(request: Request, name: str):
 @router.get("/api/runs/{name}/cplines/{station}")
 def run_cplines(request: Request, name: str, station: str):
     try:
-        return cp_station(_run_dir(request, name), station)
+        data = cp_station(_run_dir(request, name), station)
     except KeyError:
         raise HTTPException(status_code=404) from None
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=f"unreadable cp data: {error}") from None
+    # NaN/inf are not JSON; they would turn the response into a 500.
+    data["u_inf"] = finite(data.get("u_inf"))
+    data["patches"] = {
+        patch: {k: [finite(v) for v in values] for k, values in series.items()}
+        for patch, series in data["patches"].items()
+    }
+    return data
 
 
 @router.get("/api/delta/{name}.png")
