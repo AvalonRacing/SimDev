@@ -122,9 +122,11 @@ def _named_or_other(key: str) -> str:
 
 
 def table_columns(columns: Sequence[Column]) -> list[TableColumn]:
-    """Identity, the result columns, verdict and noise, the note - in display order."""
+    """Design and its note, the rest of the identity, the results, verdict and noise - in display order."""
     cols = [
         TableColumn("design", "design", "design", "identity", 170, fixed=True),
+        # Right next to the design: what changed is read together with which design it is.
+        TableColumn("note", "note", "note", "identity", 260),
         TableColumn("compare", "compare with", "compare", "identity", 150, fixed=True),
         TableColumn("state", "state", "state", "identity", 110),
     ]
@@ -139,7 +141,6 @@ def table_columns(columns: Sequence[Column]) -> list[TableColumn]:
     cols += [
         TableColumn("verdict", "verdict", "verdict", "verdict & noise", 110),
         TableColumn("noise", "noise Cl / Cd", "noise", "verdict & noise", 130, False, num=True),
-        TableColumn("note", "note", "note", "note", 260),
     ]
     return [replace(c, start=i > 0 and cols[i - 1].group != c.group) for i, c in enumerate(cols)]
 

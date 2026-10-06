@@ -58,7 +58,7 @@ Tailscale Funnel.
   *Strip mesh* frees the disk space and keeps results.
 - **Results:** one row per run in the old Excel sheet's column order:
   coefficients with their noise, a reference run per row (delta row with
-  coloured cells), the change note last, TSV export. Not linked to Compare.
+  coloured cells), the change note next to the design, TSV export. Not linked to Compare.
 - **Compare:** pick up to four runs at the top; pictures side by side with
   sync, blink, swipe and fade; field deltas against a reference; force and
   cp-line charts (cp plot: front of the car on the left).

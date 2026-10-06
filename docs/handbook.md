@@ -1261,9 +1261,10 @@ not evidence that a production render is comfortable.
 **`/results` is the Excel sheet, kept by the runs themselves.** One row per
 run directory, newest first; a run without a `result.json` yet is listed
 greyed as "no results yet". The columns follow the sheet's TC10 order -
-design, compare with, state, Cl, Cd, Fx, Fz, Fy, the group Cl then the group Cd, COP
-x/y/z, -Cl/Cd, balance - with the change note last, like its Geometrie
-column, and a delta row under each run against its "compare with". The first
+compare with, state, Cl, Cd, Fx, Fz, Fy, the group Cl then the group Cd, COP
+x/y/z, -Cl/Cd, balance - except that the change note (the sheet's Geometrie
+column) sits right after the design, so what changed is read together with
+which design it is; and a delta row under each run against its "compare with". The first
 column shows the run's design, not its (long) run name; the full name is the
 tooltip and the link goes to the run, and runs started from the shell, which
 have no design on record, show the run name. The driving state is its own

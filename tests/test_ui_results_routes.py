@@ -99,7 +99,7 @@ def test_results_table_is_not_linked_to_the_pictures_and_the_note_comes_last(tmp
         assert 'type="checkbox"' not in table and "compare-form" not in page
         assert "/compare" not in table
         head = page.split("<thead>")[1].split("</thead>")[0]
-        assert head.index("design") < head.index("compare with") < head.index("Cl") < head.index("note")
+        assert head.index("design") < head.index("note") < head.index("compare with") < head.index("Cl")
 
 
 def make_job(run: Path, state: str, design: str) -> None:
