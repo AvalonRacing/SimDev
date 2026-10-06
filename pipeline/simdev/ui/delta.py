@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -58,8 +59,8 @@ def build_request(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: f
     if pane_plan.get("views_digest") != ref_plan.get("views_digest"):
         raise DeltaError("the two runs were pictured with different post_views.yaml; "
                          "their planes are not the same planes", 409)
-    if not limit or limit <= 0:
-        raise DeltaError("the colour limit must be positive", 422)
+    if not (math.isfinite(limit) and limit > 0):
+        raise DeltaError("the colour limit must be positive and finite", 422)
     if view.startswith("surface_"):
         if field not in SURFACE_FIELDS:
             raise DeltaError(f"no surface delta for {field}", 422)
@@ -101,7 +102,15 @@ def _interpreter(run_dir: Path) -> str:
 
 
 def _fresh_cache(pane_dir: Path, ref_dir: Path) -> Path:
-    folder = pane_dir / "ui" / "delta" / ref_dir.name
+    ref_name = ref_dir.name
+    if not ref_name or ref_name in (".", ".."):
+        raise DeltaError(f"invalid reference run name: {ref_name}", 404)
+    folder = pane_dir / "ui" / "delta" / ref_name
+    # Verify folder is a direct child of <pane>/ui/delta before rmtree
+    try:
+        folder.resolve().relative_to((pane_dir / "ui" / "delta").resolve())
+    except ValueError:
+        raise DeltaError(f"cache folder would be outside ui/delta", 404)
     key = hashlib.sha1(json.dumps([
         _spec_hash(pane_dir), _spec_hash(ref_dir),
         _plan(pane_dir).get("views_digest"), _plan(ref_dir).get("views_digest"),
@@ -109,7 +118,7 @@ def _fresh_cache(pane_dir: Path, ref_dir: Path) -> Path:
     stamp = folder / "key.txt"
     if not stamp.is_file() or stamp.read_text() != key:
         shutil.rmtree(folder, ignore_errors=True)
-        folder.mkdir(parents=True)
+        folder.mkdir(parents=True, exist_ok=True)
         stamp.write_text(key)
     return folder
 
@@ -119,6 +128,7 @@ def delta_png(pane_dir: Path, ref_dir: Path, view: str, field: str, limit: float
     pane_dir, ref_dir = Path(pane_dir), Path(ref_dir)
     if limit is None:
         limit = default_limit(field, float(_plan(pane_dir)["frame"]["u_inf"]))
+    limit = round(float(limit), 6)
     request = build_request(pane_dir, ref_dir, view, field, limit)
     with _LOCK:
         folder = _fresh_cache(pane_dir, ref_dir)

@@ -109,3 +109,58 @@ def test_helper_failure_is_reported(tmp_path: Path) -> None:
     with pytest.raises(service.DeltaError) as e:
         service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=failing)
     assert e.value.status == 500 and "pMean" in str(e.value)
+
+
+def test_invalid_limits(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    import math
+    for bad_limit, desc in ((float('nan'), "nan"), (float('inf'), "inf"),
+                            (0, "zero"), (-0.5, "negative")):
+        with pytest.raises(service.DeltaError) as e:
+            service.build_request(pane, ref, "x_+0.000", "cp", bad_limit)
+        assert e.value.status == 422, f"failed for {desc}: {e.value}"
+
+
+def test_limit_rounding_matches_filenames(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    # Two limits differing only beyond 6 decimals should use same file
+    path1 = service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    path2 = service.delta_png(pane, ref, "x_+0.000", "cp", 0.2000001, runner=helper)
+    assert path1 == path2
+    assert helper.calls == 1
+
+
+def test_different_limits_use_different_files(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    # Two clearly different limits should produce different files
+    path1 = service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    path2 = service.delta_png(pane, ref, "x_+0.000", "cp", 0.3, runner=helper)
+    assert path1 != path2
+    assert helper.calls == 2
+
+
+def test_invalid_ref_name_is_refused(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    # Test with a ref_dir that has name ".."
+    escaped_ref = tmp_path / ".."
+    escaped_ref.mkdir(exist_ok=True)
+    (escaped_ref / "results").mkdir(parents=True, exist_ok=True)
+    (escaped_ref / "postProcessing/surfaces/400").mkdir(parents=True, exist_ok=True)
+    (escaped_ref / "postProcessing/surfaces/400/x_+0.000.vtp").write_text("vtp")
+    plan = {"views_digest": "v1", "resolution": [16, 12], "frame": FRAME,
+            "slices": [{"name": "x_+0.000", "axis": "x", "offset": 0.0,
+                        "point": [0, 0, 0], "normal": [1, 0, 0], "camera": {"parallel_scale": 0.1},
+                        "sample": "/old/x/postProcessing/surfaces/400/x_+0.000.vtp",
+                        "images": []}],
+            "surfaces": []}
+    (escaped_ref / "results/render_plan.json").write_text(json.dumps(plan))
+    (escaped_ref / "results/result.json").write_text(json.dumps({"spec_hash": "s"}))
+
+    with pytest.raises(service.DeltaError) as e:
+        service.delta_png(pane, escaped_ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert e.value.status == 404
+    # Verify nothing outside ui/delta was touched
+    assert not (pane / "ui" / "delta" / ".." / "results").exists()
