@@ -264,7 +264,7 @@
       `Δ ${f} ±`,
       el("input", { type: "number", step: "any", min: 0, size: 5, value: state.limits[f] ?? "",
         placeholder: f === "U" ? "10% u∞" : "", on: { change: (e) => {
-          state.limits[f] = e.target.value ? Number(e.target.value) : null; render(); } } }),
+          state.limits[f] = e.target.value.trim() !== "" ? Number(e.target.value) : null; persist(); render(); } } }),
     ]));
     return el("div", { class: "toolbar" }, [
       el("div", { class: "row" }, [positionControls(g, (structural) => (structural ? render() : update())),
@@ -466,6 +466,10 @@
   }
 
   function restoreSaved() {
+    // Runs the server left out are forgotten before the saved selection is compared.
+    if (Array.isArray(data.missing) && data.missing.length) {
+      try { const old = S.load(); if (old) S.save(S.dropRuns(old, data.missing)); } catch (e) { /* storage */ }
+    }
     const r = S.restore(S.load(), state.runs, env);
     Object.assign(state.limits, r.limits);
     Object.assign(state.chart, r.chart);

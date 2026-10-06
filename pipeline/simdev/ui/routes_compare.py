@@ -45,7 +45,8 @@ def compare_page(request: Request, runs: list[str] = Query([]), ref: str = ""):
                if valid_run_name(p.name) and (p / "results" / "render_plan.json").is_file()]
     # The current selection always round-trips through Show, pictures or not.
     offered += [n for n in names if n not in offered]
-    payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2}}
+    payload = {"runs": names, "ref": ref, "limits": {"cp": 0.2, "cpt": 0.2},
+               "missing": missing}
     return render(
         request, "compare.html", ref=ref, runs=names, offered=offered,
         missing=missing, dropped=dropped, max_panes=MAX_PANES,

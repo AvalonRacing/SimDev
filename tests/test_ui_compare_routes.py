@@ -246,3 +246,13 @@ def test_results_page_remembers_its_filters(tmp_path: Path) -> None:
         page = client.get("/results").text
         assert "simdev.results.v1" in page and "location.replace" in page
         assert "/results?clear=1" in page
+
+
+def test_missing_runs_are_exposed_escaped_and_reach_the_restore_script(tmp_path: Path) -> None:
+    with make_client(tmp_path) as (client, app):
+        make_pictured_run(tmp_path / "runs", "a")
+        page = client.get("/compare?runs=a,gone,%3Cb%3E").text
+        raw = page.split('id="compare-data" type="application/json">')[1].split("</script>")[0]
+        assert "<" not in raw and json.loads(raw)["missing"] == ["gone", "<b>"]
+        none = client.get("/compare?runs=gone,%3Cb%3E").text
+        assert 'src="/static/compare-restore.js" data-missing="gone,&lt;b&gt;"' in none

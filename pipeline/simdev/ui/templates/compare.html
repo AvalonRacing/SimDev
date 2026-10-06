@@ -18,7 +18,7 @@
   <button class="primary">Show</button>
 </form>
 {% if not runs %}
-<script src="/static/compare-restore.js"></script>
+<script src="/static/compare-restore.js" data-missing="{{ missing|join(',') }}" defer></script>
 <p class="muted">Choose runs above to compare their pictures, forces and cp lines. Only runs with pictures are listed.</p>
 {% else %}
 <script id="compare-data" type="application/json">{{ data_json|safe }}</script>

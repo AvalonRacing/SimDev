@@ -35,6 +35,20 @@
     try { const s = store(); if (s) s.setItem(KEY, JSON.stringify(obj)); } catch (e) { /* storage unavailable */ }
   }
 
+  // The saved selection without runs the server reported missing. When no run
+  // is left, runs and ref go; chart choices and limits stay. Returns a copy.
+  function dropRuns(saved, gone) {
+    if (!saved || typeof saved !== "object") return saved;
+    const out = Object.assign({}, saved);
+    if (!Array.isArray(saved.runs) || !Array.isArray(gone) || !gone.length) return out;
+    const left = saved.runs.filter((r) => !gone.includes(r));
+    if (left.length === saved.runs.length) return out;
+    if (!left.length) { delete out.runs; delete out.ref; return out; }
+    out.runs = left;
+    if (!left.includes(out.ref)) delete out.ref;
+    return out;
+  }
+
   // env: { choices(kind, field) -> [{name}], fields(kind) -> [field], kinds: [...] }
   function serialize(state, env) {
     const view = (t) => ({ kind: t.kind, field: t.field, pos: posName(env.choices(t.kind, t.field), t.pos) });
@@ -64,7 +78,10 @@
     if (!saved || typeof saved !== "object") return out;
     try {
       const lim = saved.limits || {};
-      for (const f of LIMIT_FIELDS) if (typeof lim[f] === "number" && isFinite(lim[f]) && lim[f] >= 0) out.limits[f] = lim[f];
+      for (const f of LIMIT_FIELDS) {
+        // null = the user cleared the field: no limit given, the server decides.
+        if (lim[f] === null || (typeof lim[f] === "number" && isFinite(lim[f]) && lim[f] >= 0)) out.limits[f] = lim[f];
+      }
       const fo = saved.force || {};
       if (typeof fo.part === "string") out.chart.force = { part: fo.part, relative: fo.relative === true };
       const cp = saved.cp || {};
@@ -96,7 +113,7 @@
     return out;
   }
 
-  const api = { KEY, descending, posName, posIndex, sameRuns, load, save, serialize, restore };
+  const api = { KEY, descending, posName, posIndex, sameRuns, dropRuns, load, save, serialize, restore };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SimdevState = api;
 })(typeof window !== "undefined" ? window : globalThis);
