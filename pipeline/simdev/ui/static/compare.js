@@ -439,3 +439,219 @@
     .catch(() => { indexes[run] = {}; failed.push(run); })))
     .then(() => { guards(); render(); document.dispatchEvent(new Event("simdev:ready")); });
 })();
+
+// --- part 2: charts ----------------------------------------------------------
+(function () {
+  if (!document.getElementById("compare-data")) return;
+  const forces = {}, summaries = {};
+  let C = null;
+
+  const width = () => Math.max(320, Math.min(document.querySelector("main").clientWidth - 40, 1100));
+
+  function partSeries(run, part, coefficient) {
+    const f = forces[run];
+    if (!f) return null;
+    if (!f.total || !f.total.iteration) return null;
+    if (!part) return { it: f.total.iteration, v: f.total[coefficient] };
+    const groups = (summaries[run] || {}).groups_map || {};
+    const members = groups[part] || [part];
+    const tables = members.map((m) => (f.components || {})[m]).filter(Boolean);
+    if (tables.length !== members.length) return null;
+    const sums = new Map();
+    for (const t of tables) t.iteration.forEach((it, i) => { const v = t[coefficient][i]; if (v != null) sums.set(it, (sums.get(it) || 0) + v); });
+    const it = [...sums.keys()].sort((a, b) => a - b);
+    return { it, v: it.map((x) => sums.get(x)) };
+  }
+
+  function windowMean(run, s) {
+    const [a, b] = (summaries[run] || {}).window || [0, 0];
+    const values = s.v.filter((x, i) => x != null && s.it[i] >= a && s.it[i] <= b);
+    return values.length ? values.reduce((x, y) => x + y, 0) / values.length : null;
+  }
+
+  function drawForces() {
+    const part = document.getElementById("force-part").value;
+    const relative = document.getElementById("force-relative").checked;
+    for (const coefficient of ["Cl", "Cd"]) {
+      const box = document.getElementById(`plot-${coefficient}`);
+      box.innerHTML = "";
+      const runs = C.state.runs.filter((r) => partSeries(r, part, coefficient));
+      if (!runs.length) { box.textContent = "no history"; continue; }
+      const tables = runs.map((r) => {
+        const s = partSeries(r, part, coefficient);
+        const mean = windowMean(r, s);
+        const v = relative && mean ? s.v.map((x) => (x == null ? null : (100 * (x - mean)) / Math.abs(mean))) : s.v;
+        return [s.it, v];
+      });
+      const joined = uPlot.join(tables);
+      const bands = {
+        hooks: { drawClear: [(u) => {
+          const ctx = u.ctx;
+          ctx.save();
+          runs.forEach((r) => {
+            const [a, b] = (summaries[r] || {}).window || [0, 0];
+            ctx.fillStyle = C.colourOf(r) + "18";
+            const x0 = u.valToPos(a, "x", true), x1 = u.valToPos(b, "x", true);
+            ctx.fillRect(x0, u.bbox.top, x1 - x0, u.bbox.height);
+          });
+          if (relative) for (const [lim, alpha] of [[1, "22"], [0.5, "33"]]) {
+            const y0 = u.valToPos(lim, "y", true), y1 = u.valToPos(-lim, "y", true);
+            ctx.fillStyle = "#1f8a4c" + alpha;
+            ctx.fillRect(u.bbox.left, y0, u.bbox.width, y1 - y0);
+          }
+          ctx.restore();
+        }] },
+      };
+      new uPlot({
+        width: width(), height: 260, plugins: [bands],
+        scales: { x: { time: false } },
+        axes: [{}, { label: relative ? `${coefficient} − mean [%]` : coefficient }],
+        series: [{ label: "iteration" }, ...runs.map((r) => ({ label: r, stroke: C.colourOf(r), width: 1.2 }))],
+      }, joined, box);
+    }
+  }
+
+  function drawBars() {
+    const box = document.getElementById("bars");
+    box.innerHTML = "";
+    const ref = summaries[C.state.ref];
+    if (!ref) { box.textContent = "no results for REF"; return; }
+    const parts = [
+      ...Object.keys(ref.groups_map || {}).map((g) => ({ label: g, key: g, group: true })),
+      ...Object.keys(ref.patches || {}).sort().map((p) => ({ label: p, key: p, group: false })),
+    ];
+    const valueOf = (s, part, c) => part.group
+      ? (s.values || {})[`${c.toLowerCase()}_${part.key}`]
+      : ((s.patches || {})[part.key] || {})[c];
+    const noiseOf = (s, part, c) => part.group
+      ? (s.noise || {})[`${c.toLowerCase()}_${part.key}`]
+      : ((s.patches || {})[part.key] || {})[`${c}_noise`];
+    for (const run of C.state.runs.filter((r) => r !== C.state.ref && summaries[r])) {
+      const s = summaries[run];
+      const rows = [];
+      let largest = 1e-9;
+      for (const part of parts) for (const c of ["Cl", "Cd"]) {
+        const a = valueOf(s, part, c), b = valueOf(ref, part, c);
+        if (a == null || b == null) continue;
+        const na = noiseOf(s, part, c), nb = noiseOf(ref, part, c);
+        const noise = na != null && nb != null ? Math.hypot(na, nb) : null;
+        rows.push({ label: `${part.label} ${c}`, d: a - b, noise });
+        largest = Math.max(largest, Math.abs(a - b), noise || 0);
+      }
+      const table = document.createElement("table");
+      table.className = "bars";
+      table.innerHTML = `<caption style="color:${C.colourOf(run)}">${run} − ${C.state.ref}</caption>`;
+      for (const row of rows) {
+        const tr = table.insertRow();
+        tr.insertCell().textContent = row.label;
+        const cell = tr.insertCell();
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const pct = (50 * Math.abs(row.d)) / largest;
+        bar.innerHTML = `<span class="fill" style="${row.d < 0 ? "right:50%" : "left:50%"};width:${pct}%;background:${C.colourOf(run)}"></span>`
+          + (row.noise != null ? `<span class="whisker" style="left:${50 - (50 * row.noise) / largest}%;width:${(100 * row.noise) / largest}%"></span>` : "");
+        cell.append(bar);
+        const num = tr.insertCell();
+        num.className = "num";
+        num.textContent = `${row.d >= 0 ? "+" : ""}${row.d.toFixed(4)}${row.noise != null ? ` ± ${row.noise.toFixed(4)}` : ""}`;
+      }
+      box.append(table);
+    }
+  }
+
+  let cpSeq = 0;
+  async function drawCp() {
+    const station = document.getElementById("cp-station").value;
+    const patches = [...document.querySelectorAll(".cp-patch:checked")].map((b) => b.value);
+    const data = {};
+    const mine = ++cpSeq;
+    await Promise.all(C.state.runs.map(async (run) => {
+      try {
+        const r = await fetch(`/api/runs/${encodeURIComponent(run)}/cplines/${encodeURIComponent(station)}`);
+        if (r.ok) data[run] = await r.json();
+      } catch (e) { /* this run just has no points */ }
+    }));
+    if (mine !== cpSeq) return;  // a newer station was chosen meanwhile
+    const points = (key) => Object.entries(data).flatMap(([run, d]) => patches.flatMap((p) => {
+      const s = (d.patches || {})[p];
+      return s ? s.x.map((x, i) => ({ x, y: s[key][i], run })).filter((q) => q.x != null && q.y != null) : [];
+    }));
+    scatter(document.getElementById("cp-plot"), points("cp"), true, "cp");
+    scatter(document.getElementById("cp-outline"), points("z"), false, "z [m]");
+  }
+
+  function scatter(canvas, pts, invert, label) {
+    // cp axis inverted (suction up), as viz/cplines.py draws it.
+    const ctx = canvas.getContext("2d");
+    canvas.width = width();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!pts.length) { ctx.fillText("no cp lines for this station", 20, 20); return; }
+    const pad = { l: 50, r: 10, t: 10, b: 24 };
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of pts) {
+      if (p.x < x0) x0 = p.x;
+      if (p.x > x1) x1 = p.x;
+      if (p.y < y0) y0 = p.y;
+      if (p.y > y1) y1 = p.y;
+    }
+    const W = canvas.width - pad.l - pad.r, H = canvas.height - pad.t - pad.b;
+    const X = (x) => pad.l + ((x - x0) / (x1 - x0 || 1)) * W;
+    const Y = (y) => pad.t + (invert ? (y - y0) / (y1 - y0 || 1) : 1 - (y - y0) / (y1 - y0 || 1)) * H;
+    ctx.strokeStyle = "#999";
+    ctx.strokeRect(pad.l, pad.t, W, H);
+    ctx.fillStyle = "#333";
+    ctx.fillText(label, 4, pad.t + 10);
+    ctx.fillText(y0.toFixed(2), 4, invert ? pad.t + 22 : pad.t + H);
+    ctx.fillText(y1.toFixed(2), 4, invert ? pad.t + H : pad.t + 22);
+    ctx.fillText(`x ${x0.toFixed(3)} … ${x1.toFixed(3)} m`, pad.l, canvas.height - 6);
+    for (const p of pts) {
+      ctx.fillStyle = C.colourOf(p.run);
+      ctx.fillRect(X(p.x) - 1, Y(p.y) - 1, 2, 2);
+    }
+  }
+
+  function fillSelectors() {
+    const parts = new Set();
+    for (const run of C.state.runs) {
+      Object.keys((summaries[run] || {}).groups_map || {}).forEach((g) => parts.add(g));
+      Object.keys((forces[run] || {}).components || {}).forEach((p) => parts.add(p));
+    }
+    const select = document.getElementById("force-part");
+    for (const p of [...parts].sort()) select.append(new Option(p, p));
+    const stations = (C.indexes[C.state.ref] || {}).stations || [];
+    const station = document.getElementById("cp-station");
+    for (const s of stations) station.append(new Option(s.name, s.name));
+  }
+
+  document.addEventListener("simdev:ready", async () => {
+    C = window.SimdevCompare;
+    await Promise.all(C.state.runs.map(async (run) => {
+      const get = (path) => fetch(`/api/runs/${encodeURIComponent(run)}/${path}`)
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const [f, s] = await Promise.all([get("forces"), get("summary")]);
+      if (f) forces[run] = f;
+      if (s) summaries[run] = s;
+    }));
+    fillSelectors();
+    drawForces();
+    drawBars();
+    drawCp();
+    document.getElementById("force-part").addEventListener("change", drawForces);
+    document.getElementById("force-relative").addEventListener("change", drawForces);
+    document.getElementById("cp-station").addEventListener("change", drawCp);
+    document.querySelectorAll(".cp-patch").forEach((b) => b.addEventListener("change", drawCp));
+    document.addEventListener("simdev:ref", drawBars);
+    // The cp station follows the viewer when it is on a matching y-plane.
+    document.addEventListener("simdev:moved", () => {
+      const g = C.state.global;
+      if (g.kind !== "y") return;
+      const planes = (((C.indexes[C.state.ref] || {}).planes || {}).y || {})[g.field] || [];
+      const plane = planes[g.pos];
+      const select = document.getElementById("cp-station");
+      if (plane && [...select.options].some((o) => o.value === plane.name) && select.value !== plane.name) {
+        select.value = plane.name;
+        drawCp();
+      }
+    });
+  });
+})();
