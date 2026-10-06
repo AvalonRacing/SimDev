@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+
+import pytest
+
+from simdev.ui import delta as service
+
+FRAME = {"mode": "straight", "u_inf": 10.0, "omega": 0.0, "origin": [0, 0, 0]}
+
+
+def make_run(root: Path, name: str, digest: str = "v1", spec_hash: str = "s") -> Path:
+    run = root / name
+    (run / "results").mkdir(parents=True)
+    (run / "postProcessing/surfaces/400").mkdir(parents=True)
+    (run / "postProcessing/surfaces/400/x_+0.000.vtp").write_text("vtp")
+    plan = {"views_digest": digest, "resolution": [16, 12], "frame": FRAME,
+            "slices": [{"name": "x_+0.000", "axis": "x", "offset": 0.0,
+                        "point": [0, 0, 0], "normal": [1, 0, 0], "camera": {"parallel_scale": 0.1},
+                        "sample": f"/old/{name}/postProcessing/surfaces/400/x_+0.000.vtp",
+                        "images": []}],
+            "surfaces": [{"name": "top", "camera": {}, "sample": f"/old/{name}/postProcessing/patchSurfaces/400/vehicle.vtp", "images": []}]}
+    (run / "results/render_plan.json").write_text(json.dumps(plan))
+    (run / "results/result.json").write_text(json.dumps({"spec_hash": spec_hash}))
+    return run
+
+
+class FakeHelper:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.lock = threading.Lock()
+
+    def __call__(self, argv, **kwargs):
+        with self.lock:
+            self.calls += 1
+        request = json.loads(Path(argv[-1]).read_text())
+        assert kwargs["env"]["PATH"] == "/usr/bin:/bin"
+        Path(request["out"]).write_bytes(b"\x89PNG")
+        class Done:
+            returncode = 0
+            stdout = json.dumps({"ok": True, "out": request["out"]}) + "\n"
+            stderr = ""
+        return Done()
+
+
+def test_request_uses_the_reference_frame_and_rerooted_samples(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    request = service.build_request(pane, ref, "x_+0.000", "cp", 0.2)
+    assert request["kind"] == "plane"
+    assert request["pane"]["sample"] == str(pane / "postProcessing/surfaces/400/x_+0.000.vtp")
+    assert request["ref"]["sample"] == str(ref / "postProcessing/surfaces/400/x_+0.000.vtp")
+    assert request["resolution"] == [16, 12]
+
+
+def test_refusals(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a", digest="v2")
+    with pytest.raises(service.DeltaError) as e:
+        service.build_request(pane, ref, "x_+0.000", "cp", 0.2)
+    assert e.value.status == 409
+    ref = make_run(tmp_path, "c")
+    for view, field, status in (("x_+9.000", "cp", 404), ("x_+0.000", "lambda2", 422),
+                                ("surface_top", "cpt", 422)):
+        with pytest.raises(service.DeltaError) as e:
+            service.build_request(pane, ref, view, field, 0.2)
+        assert e.value.status == status
+
+
+def test_default_limits() -> None:
+    assert service.default_limit("cp", 15.0) == 0.2
+    assert service.default_limit("U", 15.0) == 1.5
+
+
+def test_result_is_cached_and_concurrent_requests_run_the_helper_once(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    paths = []
+    threads = [threading.Thread(target=lambda: paths.append(
+        service.delta_png(pane, ref, "x_+0.000", "cp", None, runner=helper))) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert helper.calls == 1
+    assert len(set(paths)) == 1 and paths[0].read_bytes() == b"\x89PNG"
+    assert paths[0].is_relative_to(pane / "ui" / "delta" / "a")
+
+
+def test_a_changed_reference_invalidates_the_cache(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+    helper = FakeHelper()
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    (ref / "results/result.json").write_text(json.dumps({"spec_hash": "changed"}))
+    service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=helper)
+    assert helper.calls == 2
+
+
+def test_helper_failure_is_reported(tmp_path: Path) -> None:
+    pane, ref = make_run(tmp_path, "b"), make_run(tmp_path, "a")
+
+    def failing(argv, **kwargs):
+        class Done:
+            returncode = 1
+            stdout = json.dumps({"ok": False, "error": "KeyError: 'pMean'"}) + "\n"
+            stderr = "trace"
+        return Done()
+
+    with pytest.raises(service.DeltaError) as e:
+        service.delta_png(pane, ref, "x_+0.000", "cp", 0.2, runner=failing)
+    assert e.value.status == 500 and "pMean" in str(e.value)
