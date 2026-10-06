@@ -590,10 +590,21 @@ geometry:
   # Surface mesh sizing for the STEP import, in metres. curvature_segments is
   # elements per full circle and is what decides whether a 6 mm suspension
   # link is a hexagon or a cylinder.
+  #
+  # 4 mm / 0.4 mm / 24 -> 1 mm / 0.2 mm / 48, 2026-10-04. At the old sizes the
+  # chassis floor's triangles crossed the true surface: a 0.1 mm sheet over a
+  # slot of up to 1.7 mm, along most of the car (4603 thin cross-section
+  # samples; 6 now). snappy smeared it into a spike under the chassis in every
+  # mesh. Measured in ~/runs/meshstudy-2026-10-04.
+  #
+  # Do not take min_edge to 0.1 mm: gmsh then fails on some Body NURBS edges
+  # and writes a Body.stl with 742 open edges, without an error. 0.2 mm is
+  # watertight on every part. Cost: Body 396k -> 1.8M triangles, Chassis
+  # 69k -> 414k, and about 5 minutes of prepare for the body on a cold cache.
   tessellation:
-    max_edge: 0.004
-    min_edge: 0.0004
-    curvature_segments: 24
+    max_edge: 0.001
+    min_edge: 0.0002
+    curvature_segments: 48
 
   # Where the tyres meet the road. The tyre is cut on a horizontal plane this
   # far above z = 0 and the cross-section is extruded straight down through

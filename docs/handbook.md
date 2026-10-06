@@ -889,6 +889,13 @@ place; too fine and the surface mesh outweighs the volume mesh built from it.
 this car — it decides whether a 6 mm suspension link is a hexagon or a cylinder,
 independently of the part's size.
 
+The default is 1 mm / 0.2 mm / 48. The earlier 4 mm / 0.4 mm / 24 let the
+chassis floor's triangles cross the real surface, leaving a 0.1 mm sheet over
+a slot under the car that snappy turned into a spike. Going finer has a floor
+too: at `min_edge` 0.1 mm gmsh fails on some body NURBS edges and writes an STL
+with holes, and says nothing about it. Check a new setting for watertightness
+before trusting it.
+
 Conversion is cached on the file's content hash plus the tessellation settings
 plus the scale. Deliberately **not** on the rotation or translation: those are
 rigid transforms applied to the triangles afterwards, so a ride-height change

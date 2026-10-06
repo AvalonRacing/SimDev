@@ -590,11 +590,18 @@ class TessellationConfig(BaseModel):
     curvature_segments is elements per full circle and is the control that
     matters most on this vehicle - it decides whether a 6 mm suspension link
     is a hexagon or a cylinder, independently of the part's size.
+
+    1 mm / 0.2 mm / 48 since 2026-10-04. The old 4 mm / 0.4 mm / 24 let the
+    chassis floor's triangles cross the true surface, leaving a 0.1 mm sheet
+    over a slot of up to 1.7 mm under the car that snappy smeared into a spike.
+    min_edge is the one not to push further: at 0.1 mm gmsh fails on some
+    of the body's NURBS edges ("Impossible to recover edge") and writes a
+    Body.stl with 742 open edges, silently.
     """
 
-    max_edge: float = Field(default=0.004, gt=0.0)
-    min_edge: float = Field(default=0.0004, gt=0.0)
-    curvature_segments: int = Field(default=24, ge=6)
+    max_edge: float = Field(default=0.001, gt=0.0)
+    min_edge: float = Field(default=0.0002, gt=0.0)
+    curvature_segments: int = Field(default=48, ge=6)
 
 
 class ContactPatchConfig(BaseModel):
